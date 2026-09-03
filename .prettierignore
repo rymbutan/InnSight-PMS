@@ -1,0 +1,12 @@
+**/node_modules/**
+**/dist/**
+**/.prisma/**
+**/migrations/**
+backups/**
+# Quarantined Vite build output that had been copied into src/ by mistake.
+# See .attic/README.md — this whole directory is safe to delete.
+.attic/**
+
+# Generated layout snapshots written by scripts/backup-layout.mjs — data, not
+# source, and rewritten verbatim from the baked layout on every run.
+web/src/sim/layout-backups/**

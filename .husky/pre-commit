@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Pre-commit guard — runs Prettier + ESLint on staged JS/JSX files only.
+# Activate with: npx husky install
+# Or run manually: bash .husky/pre-commit
+
+set -e
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(js|jsx)$' || true)
+# Dark mode was originally shipped with #e2e8f0 text on #ffffff menus (1.23:1).
+# Nothing catches that but a measurement, so measure it whenever the tokens move.
+# $STAGED is .js/.jsx only (it feeds eslint), so ask git directly for the CSS.
+if git diff --cached --name-only --diff-filter=ACM | grep -qE '^web/src/styles\.css$'; then
+  echo "→ Checking theme contrast (both themes)…"
+  node scripts/check-contrast.mjs || exit 1
+fi
+
+[ -z "$STAGED" ] && exit 0
+
+if command -v npx >/dev/null 2>&1; then
+  echo "→ Prettier format check on staged files…"
+  echo "$STAGED" | xargs npx prettier --check || {
+    echo "  ✗ Some files need formatting. Run: npx prettier --write <files>"; exit 1;
+  }
+  echo "→ ESLint on staged files…"
+  echo "$STAGED" | xargs npx eslint --max-warnings=0 || {
+    echo "  ✗ Lint errors. Fix and re-stage."; exit 1;
+  }
+fi
+
+# If a shared lib or any of its vendored copies changed, ensure they stay in sync.
+if echo "$STAGED" | grep -qE 'services/(_shared|[^/]+/src/lib)/'; then
+  echo "→ Checking shared lib sync…"
+  bash scripts/check-shared.sh || exit 1
+fi
+
+# The layout check now validates 3D geometry (rendered heights, wall clipping,
+# collision-vs-visual, wall flushness) as well as station reachability, so it must
+# also run when the SIZING tables change — a MODEL_CFG edit can push a fixture
+# through a wall or above the ceiling without roomLayouts.js changing at all.
+if echo "$STAGED" | grep -qE 'web/src/sim/(roomLayouts|modelSizes)\.js'; then
+  echo "→ Checking room layout geometry + activity alignment…"
+  node scripts/check-room-layouts.mjs || exit 1
+fi
+
+echo "✓ Pre-commit checks passed."

@@ -1,0 +1,71 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../src/styles.css">
+<style>
+  body{padding:0;margin:0}
+  .wrap{padding:16px;display:flex;flex-direction:column;gap:14px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+  h4{margin:2px 0;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  /* preview only: unpin the fixed/floating layers so they sit in flow */
+  .cb-drawer,.cb-popmenu,.cb-search-pop,.modal,.actions-pop{position:static!important;transform:none!important;inset:auto!important;width:250px!important;height:auto!important}
+  .cb-topbar{position:static!important}
+</style></head><body>
+<div class="cb-topbar">
+  <button class="cb-hamburger">☰</button>
+  <div class="cb-brand"><span class="cb-brand-name">InnSight PMS</span></div>
+  <div class="cb-search-wrap"><input class="cb-search" placeholder="Search guests, reservations…"></div>
+  <div class="cb-actions"><button class="cb-icon-btn cb-icon-create">+</button>
+  <span class="cb-user-avatar">A</span></div>
+</div>
+<div class="wrap">
+  <h4>Menus — the reported problem</h4>
+  <div class="row">
+    <aside class="cb-drawer">
+      <div class="cb-drawer-head"><span class="cb-brand-name">InnSight</span></div>
+      <a class="cb-drawer-link active">Front Desk</a>
+      <a class="cb-drawer-link">Reservations</a>
+      <a class="cb-drawer-link">Housekeeping</a>
+      <a class="cb-drawer-link">Reports</a>
+    </aside>
+    <div class="cb-popmenu">
+      <div class="cb-user-head"><div class="cb-user-name">Arym V.</div>
+      <div class="cb-user-role">ADMIN, FRONT_DESK</div></div>
+      <div class="cb-popmenu-divider"></div>
+      <button>Profile</button><button>Settings</button><button>Sign out</button>
+    </div>
+    <div class="cb-search-pop">
+      <div class="cb-search-section">Guests</div>
+      <div class="cb-search-item">Dela Cruz, Maria <span class="muted">G-10428</span></div>
+      <div class="cb-search-item">Reyes, Ana <span class="muted">G-10429</span></div>
+    </div>
+  </div>
+  <h4>Status badges</h4>
+  <div class="row">
+    <span class="badge clean">Clean</span><span class="badge dirty">Dirty</span>
+    <span class="badge occupied">Occupied</span><span class="badge out">Out of order</span>
+    <span class="badge confirmed">Confirmed</span><span class="badge pending">Pending</span>
+    <span class="badge cancelled">Cancelled</span><span class="badge in_house">In house</span>
+    <span class="badge pre_arrival">Pre-arrival</span><span class="badge departed">Departed</span>
+    <span class="badge no_show">No show</span><span class="badge locked">Locked</span>
+  </div>
+  <h4>Controls, surfaces &amp; assessment marks</h4>
+  <div class="row">
+    <button class="primary">Check in</button><button class="secondary">Cancel</button>
+    <button class="danger">Delete</button><kbd>⌘K</kbd>
+    <input placeholder="Guest name" style="width:150px">
+    <select style="width:110px"><option>Deluxe</option></select>
+    <span class="as-mark as-good">✓</span><span class="as-mark as-issues">!</span><span class="as-mark as-skipped">–</span>
+  </div>
+  <div class="row">
+    <div class="kpi-tile" style="width:190px"><span class="kpi-pct">+12%</span>
+      <div class="kpi-label">ADR</div><div class="kpi-value">₱4,820</div></div>
+    <table style="width:280px"><thead><tr><th>Room</th><th>Status</th></tr></thead>
+      <tbody><tr><td>204</td><td><span class="badge clean">Clean</span></td></tr>
+      <tr><td>205</td><td><span class="badge dirty">Dirty</span></td></tr></tbody></table>
+    <div class="modal"><div style="padding:14px"><b>Confirm check-in</b>
+      <p class="muted" style="margin:6px 0 0">Room 204 · Reyes, Ana</p></div>
+      <div class="modal-footer"><button class="secondary">Cancel</button><button class="primary">Confirm</button></div>
+    </div>
+  </div>
+</div>
+<script>document.documentElement.dataset.theme=new URLSearchParams(location.search).get('t')||'light'</script>
+</body></html>

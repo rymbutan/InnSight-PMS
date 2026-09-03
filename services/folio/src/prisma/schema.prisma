@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Folio {
+  id            String             @id @default(uuid())
+  folioNumber   String             @unique
+  stayId        String?
+  guestId       String?
+  type          FolioType          @default(GUEST)
+  status        FolioStatus        @default(OPEN)
+  currency      String             @default("PHP")
+  openedAt      DateTime           @default(now())
+  closedAt      DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  transactions  FolioTransaction[]
+  payments      Payment[]
+
+  // /api/folios filters on status and stayId; daily-totals filters on openedAt.
+  @@index([status, openedAt])
+  @@index([stayId])
+  @@index([guestId])
+}
+
+model FolioTransaction {
+  id                String           @id @default(uuid())
+  folioId           String
+  type              TransactionType
+  chargeCode        String?
+  description       String
+  amountCents       BigInt
+  taxAmountCents    BigInt           @default(0)
+  quantity          Int              @default(1)
+  note              String?
+  paymentMethod     String?
+  postedAt          DateTime         @default(now())
+  postedBy          String?
+  sourceSystem      String?
+  reversalOf        String?
+  refundOfId        String?          // links a refund/negative-payment to its original payment
+  refundReason      String?
+  reference         String?
+  folio             Folio            @relation(fields: [folioId], references: [id], onDelete: Cascade)
+
+  // folioId was unindexed despite being the join path for every statement,
+  // print and daily-total query — the hottest read path in the folio service.
+  @@index([folioId, postedAt])
+  // The night audit looks up its own AUDIT-<day>-<stayId> reference to avoid
+  // double-charging a guest on a re-run; without this that is a table scan.
+  @@index([reference])
+  @@index([chargeCode])
+}
+
+model ChargeCode {
+  code      String   @id
+  name      String
+  category  String
+  glAccount String?
+  taxable   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Payment {
+  id          String        @id @default(uuid())
+  folioId     String
+  method      String
+  amountCents BigInt
+  gatewayRef  String?
+  status      PaymentStatus @default(AUTHORIZED)
+  cardMasked  String?
+  createdAt   DateTime      @default(now())
+  folio       Folio         @relation(fields: [folioId], references: [id], onDelete: Cascade)
+
+  @@index([folioId, createdAt])
+  @@index([status])
+}
+
+enum FolioType {
+  GUEST
+  MASTER
+  GROUP
+  HOUSE
+  WALKIN
+}
+
+enum FolioStatus {
+  OPEN
+  LOCKED
+  CLOSED
+  VOIDED
+}
+
+enum TransactionType {
+  CHARGE
+  PAYMENT
+  ADJUSTMENT
+  TAX
+  REFUND
+  TRANSFER
+}
+
+enum PaymentStatus {
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+  VOIDED
+}

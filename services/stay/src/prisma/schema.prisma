@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Stay {
+  id                String      @id @default(uuid())
+  reservationId     String?
+  guestId           String?
+  assignedRoomId    String?
+  folioId           String?
+  actualCheckInAt   DateTime?
+  actualCheckOutAt  DateTime?
+  status            StayStatus  @default(PRE_ARRIVAL)
+  keyCardsIssued    Int         @default(0)
+  idVerification    Json?
+  depositAmount     Int         @default(0)
+  guestName         String?
+  expectedCheckIn   DateTime?
+  expectedCheckOut  DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  tasks             CheckInTask[]
+
+  // This table had ZERO indexes, yet /api/arrivals, /api/departures and
+  // /api/in-house all filter it and the night audit scans it per business day.
+  //
+  // NOTE: uniqueness of (assignedRoomId WHERE status = 'IN_HOUSE') is enforced by
+  // a PARTIAL unique index, which Prisma cannot express — see the raw SQL in
+  // migrations/. That constraint is the database-level backstop behind
+  // validateRoomAssignment(); do not drop it.
+  @@index([status, expectedCheckIn])
+  @@index([status, expectedCheckOut])
+  @@index([assignedRoomId, status])
+  @@index([reservationId])
+  @@index([folioId])
+  @@index([guestId])
+}
+
+model CheckInTask {
+  taskId       String  @id @default(uuid())
+  stayId       String
+  steps        Json
+  currentStep  String
+  stepStatus   String  @default("PENDING")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  stay         Stay    @relation(fields: [stayId], references: [id], onDelete: Cascade)
+
+  @@index([stayId])
+}
+
+enum StayStatus {
+  PRE_ARRIVAL
+  IN_HOUSE
+  DEPARTED
+  NO_SHOW
+}

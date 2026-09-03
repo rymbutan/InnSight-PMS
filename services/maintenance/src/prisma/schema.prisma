@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model WorkOrder {
+  id                String        @id @default(uuid())
+  workOrderNumber   String        @unique
+  type              WoType        @default(REACTIVE)
+  priority          WoPriority    @default(NORMAL)
+  status            WoStatus      @default(REPORTED)
+  category          String?
+  roomId            String?
+  assetId           String?
+  reportedBy        String?
+  description       String
+  assignedTo        String?
+  scheduledFor      DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  verifiedAt        DateTime?
+  estimatedMinutes  Int?
+  actualMinutes     Int?
+  roomOutOfService  Boolean       @default(false)
+  totalCostCents    BigInt        @default(0)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Asset {
+  id                 String       @id @default(uuid())
+  tag                String       @unique
+  name               String
+  category           String
+  location           String?
+  manufacturer       String?
+  model              String?
+  serialNumber       String?
+  purchaseDate       DateTime?
+  warrantyExpiresAt  DateTime?
+  status             AssetStatus  @default(OPERATIONAL)
+  lastServicedAt     DateTime?
+  nextServiceDueAt   DateTime?
+  createdAt          DateTime     @default(now())
+}
+
+model Part {
+  id             String   @id @default(uuid())
+  sku            String   @unique
+  name           String
+  onHand         Int      @default(0)
+  minStock       Int      @default(0)
+  unitCostCents  BigInt   @default(0)
+  createdAt      DateTime @default(now())
+}
+
+enum WoType {
+  REACTIVE
+  PREVENTIVE
+  INSPECTION
+}
+
+enum WoPriority {
+  EMERGENCY
+  URGENT
+  NORMAL
+  SCHEDULED
+}
+
+enum WoStatus {
+  REPORTED
+  TRIAGED
+  ASSIGNED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  VERIFIED
+  CANCELLED
+}
+
+enum AssetStatus {
+  OPERATIONAL
+  DEGRADED
+  OUT_OF_SERVICE
+  RETIRED
+}

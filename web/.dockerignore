@@ -1,0 +1,17 @@
+# Build context hygiene. Without this, `docker compose build` uploads the whole
+# node_modules tree and any local build output on every single build.
+node_modules
+dist
+.dockerignore
+Dockerfile
+npm-debug.log*
+.env
+.env.*
+!.env.example
+.DS_Store
+**/.DS_Store
+
+# NOTE: web/public/models is deliberately NOT ignored — those .glb files are the
+# 3D room's assets and must be present in the image for nginx to serve them.
+# They are ~1 GB, which is the dominant cost of this build context. Phase 3
+# step 21 (gltf-transform + meshopt) takes that to ~20 MB.

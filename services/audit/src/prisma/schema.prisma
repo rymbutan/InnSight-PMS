@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model BusinessDay {
+  id                String      @id @default(uuid())
+  businessDate      DateTime    @unique
+  status            DayStatus   @default(OPEN)
+  roomsOccupied     Int         @default(0)
+  roomsAvailable    Int         @default(0)
+  occupancyPct      Float       @default(0)
+  arrivals          Int         @default(0)
+  departures        Int         @default(0)
+  noShows           Int         @default(0)
+  roomRevenueCents  BigInt      @default(0)
+  otherRevenueCents BigInt      @default(0)
+  taxCents          BigInt      @default(0)
+  paymentsCents     BigInt      @default(0)
+  adr               Float       @default(0)
+  revPar            Float       @default(0)
+  notes             String?
+  openedAt          DateTime    @default(now())
+  closedAt          DateTime?
+  closedBy          String?
+  steps             AuditStep[]
+}
+
+model AuditStep {
+  id             String      @id @default(uuid())
+  businessDayId  String
+  stepName       String
+  status         String      @default("PENDING")
+  startedAt      DateTime?
+  completedAt    DateTime?
+  errorMessage   String?
+  payload        Json?
+  businessDay    BusinessDay @relation(fields: [businessDayId], references: [id])
+}
+
+enum DayStatus {
+  OPEN
+  CLOSING
+  CLOSED
+  FAILED
+}

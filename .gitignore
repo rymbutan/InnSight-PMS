@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.next/
+.env
+*.local
+.DS_Store
+
+# Quarantined build output pending deletion — see .attic/README.md.
+.attic/
+
+# Vite build output must never land back inside the source tree again. This is
+# what produced the 1 GB of hashed .glb duplicates and 34 minified chunks that
+# Phase 2 had to clean out of web/src/sim/models/.
+web/src/**/*-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-].glb
+web/src/**/assets/

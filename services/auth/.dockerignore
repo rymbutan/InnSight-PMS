@@ -1,0 +1,11 @@
+# Build context hygiene — node_modules is reinstalled inside the image, and a
+# host-built Prisma client is the wrong platform binary for node:20-alpine.
+node_modules
+src/prisma/generated
+.dockerignore
+Dockerfile
+npm-debug.log*
+.env
+.env.*
+.DS_Store
+**/.DS_Store

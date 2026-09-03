@@ -1,0 +1,243 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { API_BASE } from '../api';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-module live updates.
+//
+// The gateway exposes a single Server-Sent Events stream at /api/events that
+// forwards every business event from the Redis bus (reservations, check-ins,
+// room status, folio settlements, maintenance, night audit…). These hooks let
+// any screen react to those events in real time, so the dashboard and other
+// pages stay populated automatically when something changes in another module
+// — no manual refresh, no polling.
+//
+// SUBSCRIBE TO WHAT YOU RENDER, NOT TO EVERYTHING.
+// `useLiveRefresh(load)` used to default to all 30 channels, so a housekeeper
+// posting a minibar charge (`folio:charge_posted`) triggered a full 8-request
+// Dashboard reload and a 4-request Calendar reload in EVERY open tab — for an
+// event neither page displays. Against the gateway's request budget that put the
+// ceiling at about 6 concurrent dashboards before the 7th user's reload storm
+// started getting rejected, which in turn hit /api/events reconnects and dropped
+// everyone into 30s backoff followed by a synchronised re-storm.
+//
+// So pass a channel group: `useLiveRefresh(load, { channels: channels('reservations') })`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Keep in sync with LIVE_CHANNELS in services/inventory/src/index.js.
+export const LIVE_CHANNELS = [
+  'room:status_changed',
+  'room:maintenance',
+  'reservation:created',
+  'reservation:updated',
+  'reservation:confirmed',
+  'reservation:cancelled',
+  'room:checkin',
+  'room:checkout',
+  'stay:no_show',
+  'stay:extended',
+  'stay:room_changed',
+  'stay:early_departure',
+  'folio:opened',
+  'folio:charge_posted',
+  'folio:payment_received',
+  'folio:settled',
+  'folio:closed',
+  'folio:deposit_received',
+  'folio:refund_posted',
+  'folio:early_departure_adjusted',
+  'guest:profile_created',
+  'guest:profile_updated',
+  'guest:flagged',
+  'maintenance:work_order_created',
+  'maintenance:room_out_of_service',
+  'maintenance:room_restored',
+  'audit:day_opened',
+  'audit:day_closed',
+  'facility:changed',
+  'facility:booked',
+];
+
+// Named groups, so a page declares the DOMAIN it renders rather than pasting
+// channel strings. Adding a channel to a domain makes every page that renders
+// that domain live-aware of it, in one edit.
+export const CHANNEL_GROUPS = {
+  reservations: [
+    'reservation:created',
+    'reservation:updated',
+    'reservation:confirmed',
+    'reservation:cancelled',
+  ],
+  stays: [
+    'room:checkin',
+    'room:checkout',
+    'stay:no_show',
+    'stay:extended',
+    'stay:room_changed',
+    'stay:early_departure',
+  ],
+  rooms: ['room:status_changed', 'room:maintenance'],
+  folio: [
+    'folio:opened',
+    'folio:charge_posted',
+    'folio:payment_received',
+    'folio:settled',
+    'folio:closed',
+    'folio:deposit_received',
+    'folio:refund_posted',
+    'folio:early_departure_adjusted',
+  ],
+  guests: ['guest:profile_created', 'guest:profile_updated', 'guest:flagged'],
+  maintenance: [
+    'maintenance:work_order_created',
+    'maintenance:room_out_of_service',
+    'maintenance:room_restored',
+  ],
+  audit: ['audit:day_opened', 'audit:day_closed'],
+  facilities: ['facility:changed', 'facility:booked'],
+};
+
+// channels('reservations', 'stays') → the de-duplicated union of those groups.
+export function channels(...groups) {
+  const out = new Set();
+  for (const g of groups) {
+    const list = CHANNEL_GROUPS[g];
+    if (!list) {
+      console.error(`[live] unknown channel group "${g}" — see CHANNEL_GROUPS in lib/useLiveEvents.js`);
+      continue;
+    }
+    for (const c of list) out.add(c);
+  }
+  return [...out];
+}
+
+// A channel the server never forwards is a silently dead subscription. That is
+// not hypothetical: the Amenities page subscribed to ['facility:changed',
+// 'facility:booked'] for months while neither was in the server's LIVE_CHANNELS,
+// so amenity edits were permanently invisible to other clients and nothing
+// anywhere said so. Fail loudly in development instead.
+function warnUnforwarded(names) {
+  if (!import.meta.env.DEV) return;
+  const unknown = names.filter((n) => !LIVE_CHANNELS.includes(n));
+  if (unknown.length) {
+    console.error(
+      `[live] subscribing to ${unknown.join(', ')}, which the server does not forward. ` +
+        'Add them to LIVE_CHANNELS in BOTH services/inventory/src/index.js and ' +
+        'web/src/lib/useLiveEvents.js, or this subscription does nothing.'
+    );
+  }
+}
+
+// Low-level: invoke onEvent(channel, data) for each live event on `channels`
+// (defaults to all). Returns { connected } for a live indicator. EventSource
+// reconnects automatically on drops.
+export function useLiveEvents(onEvent, channelList = LIVE_CHANNELS) {
+  const [connected, setConnected] = useState(false);
+  const cbRef = useRef(onEvent);
+  cbRef.current = onEvent;
+  // Callers commonly pass a fresh array literal every render; key on the content
+  // so that does not tear down and rebuild the EventSource on each one.
+  const key = useMemo(() => channelList.join(','), [channelList.join(',')]);
+
+  useEffect(() => {
+    let es = null;
+    let retryTimer = null;
+    let attempts = 0;
+    let closed = false;
+    const names = key ? key.split(',') : LIVE_CHANNELS;
+    warnUnforwarded(names);
+    const handler = (e) => {
+      let data = null;
+      try {
+        data = e.data ? JSON.parse(e.data) : null;
+      } catch {
+        /* ignore */
+      }
+      cbRef.current?.(e.type, data);
+    };
+
+    async function connect() {
+      if (closed) return;
+      const token = localStorage.getItem('innsight_token');
+      if (!token) {
+        // Not logged in yet — check again shortly rather than giving up.
+        retryTimer = setTimeout(connect, 3000);
+        return;
+      }
+      // EventSource cannot send an Authorization header, so something has to go in
+      // the URL. It used to be this 12-hour session JWT — which nginx then logged.
+      // Instead, exchange the token for a SINGLE-USE 30-second ticket over a normal
+      // authenticated POST, and put only that in the query string.
+      let ticket;
+      try {
+        const r = await fetch(`${API_BASE}/api/events/ticket`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        if (!r.ok) throw new Error(`ticket ${r.status}`);
+        ({ ticket } = await r.json());
+      } catch {
+        // Could be a expired session or a service restart; back off and retry.
+        attempts += 1;
+        const delay = Math.min(30000, 1000 * 2 ** Math.min(attempts, 5));
+        retryTimer = setTimeout(connect, delay);
+        return;
+      }
+      if (closed) return;
+      // Native EventSource auto-retries, but always with the ORIGINAL url — and a
+      // ticket is single-use, so its built-in retry would 401-loop forever. We
+      // manage reconnection ourselves and mint a fresh ticket each attempt.
+      es = new EventSource(`${API_BASE}/api/events?ticket=${encodeURIComponent(ticket)}`);
+      // SSE events are NAMED (event: <channel>), so a plain onmessage won't see
+      // them — we must register a listener per channel.
+      names.forEach((n) => es.addEventListener(n, handler));
+      es.onopen = () => {
+        attempts = 0;
+        setConnected(true);
+      };
+      es.onerror = () => {
+        setConnected(false);
+        try {
+          es.close();
+        } catch {
+          /* ignore */
+        }
+        if (closed) return;
+        attempts += 1;
+        const delay = Math.min(30000, 1000 * 2 ** Math.min(attempts, 5));
+        retryTimer = setTimeout(connect, delay);
+      };
+    }
+    connect();
+
+    return () => {
+      closed = true;
+      clearTimeout(retryTimer);
+      if (es) {
+        names.forEach((n) => es.removeEventListener(n, handler));
+        es.close();
+      }
+    };
+  }, [key]);
+
+  return { connected };
+}
+
+// High-level: call `reload()` (debounced) whenever any of `channels` fires.
+// This is what list/summary screens want — one line to become live.
+//
+// `reload` is invoked as `reload({ live: true })`. A page whose load() shows a
+// skeleton should use that to refresh in place instead, so the screen does not
+// flash every time anyone anywhere touches anything.
+export function useLiveRefresh(reload, { channels: channelList = LIVE_CHANNELS, delay = 600 } = {}) {
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  const timer = useRef(null);
+
+  const { connected } = useLiveEvents(() => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => reloadRef.current?.({ live: true }), delay);
+  }, channelList);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return { connected };
+}

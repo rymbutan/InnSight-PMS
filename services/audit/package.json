@@ -1,0 +1,28 @@
+{
+  "name": "innsight-audit-service",
+  "version": "1.0.0",
+  "description": "InnSight Night Audit Service — day close, room posting, EOD reports",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test src/**/*.test.js",
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "db:generate": "npx prisma generate --schema=src/prisma/schema.prisma",
+    "db:migrate": "npx prisma migrate deploy --schema=src/prisma/schema.prisma",
+    "db:push": "npx prisma db push --schema=src/prisma/schema.prisma",
+    "db:seed": "node src/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "ioredis": "^5.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "pino": "^9.4.0",
+    "prom-client": "^15.1.0",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.0.0"
+  }
+}

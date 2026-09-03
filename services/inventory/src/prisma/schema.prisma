@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id             String     @id
+  number         String     @unique
+  typeCode       String
+  floor          Int
+  status         RoomStatus @default(CLEAN)
+  features       Json?
+  assignedTo     String?    // housekeeper userId this room is assigned to
+  assignedToName String?    // display name (denormalised for the queue view)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  roomType       RoomType   @relation(fields: [typeCode], references: [code])
+}
+
+// Discount codes applied at booking. percentOff is 0..100.
+model PromoCode {
+  code        String    @id
+  description String?
+  percentOff  Int
+  active      Boolean   @default(true)
+  validFrom   DateTime?
+  validTo     DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model RoomType {
+  code           String     @id
+  name           String
+  baseRate       Int
+  maxOccupancy   Int
+  totalInventory Int
+  createdAt      DateTime   @default(now())
+  rooms          Room[]
+  ratePlans      RatePlan[]
+}
+
+model RatePlan {
+  id           String   @id @default(uuid())
+  roomTypeCode String
+  name         String
+  baseRate     Int
+  validFrom    DateTime
+  validTo      DateTime
+  createdAt    DateTime @default(now())
+  roomType     RoomType @relation(fields: [roomTypeCode], references: [code])
+}
+
+// One row per room-type per NIGHT. A multi-night booking produces several rows
+// sharing a groupId, so the whole booking can be released or committed as a unit.
+//
+// `date` is always stored at UTC midnight (see services/_shared/date.js,
+// convention 2) so a night key is one exact instant regardless of the writing
+// container's timezone.
+//
+// `reservationId` is NULLABLE on purpose. Capacity is claimed BEFORE the
+// reservation row exists (two-phase: reserve → insert → attach), so a fresh hold
+// is unattached and carries a short TTL. If the reservation insert then fails,
+// the hold expires on its own and capacity returns automatically — the worst
+// case is a brief phantom hold, never an oversell.
+model InventoryHold {
+  id            String   @id @default(uuid())
+  groupId       String
+  roomTypeCode  String
+  date          DateTime
+  reservationId String?
+  expiresAt     DateTime
+  quantity      Int      @default(1)
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+
+  // Every availability query filters (roomTypeCode, date, status, expiresAt) —
+  // without this it was a sequential scan on the hottest path in the system.
+  @@index([roomTypeCode, date, status, expiresAt])
+  @@index([groupId])
+  @@index([reservationId])
+}
+
+enum RoomStatus {
+  CLEAN
+  CLEAN_INSPECTED
+  DIRTY
+  OCCUPIED
+  OUT_OF_ORDER
+  OUT_OF_SERVICE
+}
+
+// Non-room, pay-per-use amenities/facilities (gym, pool, restaurant, event hall,
+// spa, parking, laundry, meeting room…). Walk-in guests can use these without a
+// room booking. priceCents is charged per the pricingModel unit.
+model Facility {
+  id           String            @id @default(uuid())
+  code         String            @unique
+  name         String
+  category     String            // EVENT_HALL | GYM | POOL | RESTAURANT | SPA | PARKING | LAUNDRY | MEETING_ROOM | OTHER
+  pricingModel String            // PER_USE | PER_HOUR | PER_PERSON | PER_DAY
+  priceCents   Int
+  unit         String?           // display label, e.g. "day pass", "per hour", "per person"
+  capacity     Int?              // seats/pax (for halls & meeting rooms)
+  reservable   Boolean           @default(false) // true = supports time-slot booking
+  active       Boolean           @default(true)
+  description  String?
+  // A large space can be sold whole or divided into smaller ones (the grand
+  // function hall → meeting rooms). Children name their parent by code.
+  parentCode   String?
+  parent       Facility?         @relation("FacilityDivision", fields: [parentCode], references: [code])
+  children     Facility[]        @relation("FacilityDivision")
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  bookings     FacilityBooking[]
+}
+
+// A time-slot reservation for a reservable facility (event hall, meeting room).
+model FacilityBooking {
+  id         String   @id @default(uuid())
+  facilityId String
+  facility   Facility @relation(fields: [facilityId], references: [id])
+  guestName  String
+  guestPhone String?
+  startAt    DateTime
+  endAt      DateTime
+  persons    Int      @default(1)
+  status     String   @default("CONFIRMED") // CONFIRMED | CANCELLED
+  folioId    String?  // walk-in folio the charge was posted to
+  priceCents Int      @default(0) // total charged
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  slotLocks  FacilitySlotLock[]
+
+  @@index([facilityId, startAt, endAt])
+}
+
+// One row per (booking, leaf space, time range). A booking of a divisible
+// parent writes one lock per child; a booking of an undivided space writes a
+// single lock for itself. A Postgres exclusion constraint over
+// (facilityId, [startAt,endAt)) then makes overlapping claims on the same
+// physical space impossible — including hall-vs-section — while leaving
+// sibling sections free to be booked at the same time. See the migration.
+model FacilitySlotLock {
+  id         String          @id @default(uuid())
+  bookingId  String
+  facilityId String
+  startAt    DateTime
+  endAt      DateTime
+  booking    FacilityBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([facilityId, startAt, endAt])
+  @@index([bookingId])
+}

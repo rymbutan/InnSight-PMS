@@ -1,0 +1,727 @@
+const express = require('express');
+const crypto = require('crypto');
+const Redis = require('ioredis');
+const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
+const { cancellationFeeCents } = require('../lib/policies');
+const { computeAddOns } = require('../lib/addOns');
+const { makeInventoryClient, NoInventoryError } = require('../lib/inventoryClient');
+const { nightsBetween: nightsBetweenDates, utcDayKey } = require('../lib/date');
+const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
+const { pickAssignableRoom, normaliseRoomId, MAX_ASSIGN_ATTEMPTS } = require('../lib/roomAssignment');
+
+// Inventory owns capacity. Every write path in this file that creates or moves a
+// booking must claim capacity through this client before committing.
+const inventory = makeInventoryClient({ name: 'reservation', secret: JWT_SECRET });
+
+const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK'];
+
+// Upper bound on one page of the reservation list. A 14-night calendar window
+// for a large property, plus the night audit's no-show sweep, both fit inside
+// this comfortably; anything that reaches it is logged rather than quietly cut.
+const LIST_LIMIT = 500;
+
+const router = express.Router();
+const prisma = require('../lib/prisma');
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+redis.on('error', (e) => console.error('[Reservation] redis error:', e.message));
+
+// Non-sequential, non-enumerable identifiers (48 bits of entropy) so a
+// confirmation number can't be guessed to reach the public lookup endpoint.
+function nextConfirmationNumber() {
+  return `R-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+}
+function nextCancellationNumber() {
+  return `C-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+}
+
+/**
+ * Translate a database integrity violation into a meaningful HTTP response.
+ *
+ * The Reservation table carries an EXCLUDE USING gist constraint preventing two
+ * live reservations from holding the same physical room over overlapping dates
+ * (see migrations/20260729000100_no_double_booking). Postgres raises SQLSTATE
+ * 23P01 for that, which Prisma surfaces as a raw/unknown request error — so
+ * without this mapping a perfectly ordinary "that room is taken" collision was
+ * reported to the front desk as an opaque 500.
+ *
+ * @returns {{status:number, error:string}|null} null if it isn't a constraint error
+ */
+function mapDbConstraintError(err) {
+  const text = `${err?.message || ''} ${err?.meta?.message || ''} ${err?.meta?.code || ''}`;
+  if (
+    text.includes('23P01') ||
+    text.includes('Reservation_no_double_booking') ||
+    text.includes('exclusion constraint')
+  ) {
+    return {
+      status: 409,
+      error: 'That room is already booked for overlapping dates. Choose another room or adjust the dates.',
+    };
+  }
+  if (
+    text.includes('23514') ||
+    text.includes('check constraint') ||
+    text.includes('Reservation_sane_counts') ||
+    text.includes('Reservation_checkout_after_checkin')
+  ) {
+    return { status: 400, error: 'The booking details are not valid (check dates, occupancy and amounts).' };
+  }
+  if (err?.code === 'P2002') {
+    return { status: 409, error: 'That booking conflicts with an existing record.' };
+  }
+  return null;
+}
+
+// Did this error come from the physical-room exclusion constraint specifically?
+// Auto-assignment retries on that and only that: it means a concurrent booking
+// took the room we picked, which a different room solves.
+function isRoomClashError(err) {
+  const text = `${err?.message || ''} ${err?.meta?.message || ''} ${err?.meta?.code || ''}`;
+  return (
+    text.includes('23P01') ||
+    text.includes('Reservation_no_double_booking') ||
+    text.includes('exclusion constraint')
+  );
+}
+
+async function logActivity(reservationId, user, action, summary, payload) {
+  try {
+    await prisma.reservationActivity.create({
+      data: {
+        reservationId,
+        userId: user?.sub,
+        userName: user?.username || user?.displayName,
+        action,
+        summary,
+        payload: payload || undefined,
+      },
+    });
+  } catch (e) {
+    /* non-fatal */
+  }
+}
+
+// POST /api/reservations
+router.post('/reservations', requireRole(...STAFF), async (req, res) => {
+  try {
+    const {
+      guestId,
+      guestName,
+      guestEmail,
+      guestPhone,
+      roomTypeCode,
+      ratePlanId,
+      assignedRoomId,
+      checkIn,
+      checkOut,
+      adults,
+      children,
+      source,
+      totalEstimateCents,
+      depositCents,
+      specialRequests,
+      expectedArrivalTime,
+      paymentType,
+      ratePlan,
+      origin,
+      addOns: rawAddOns,
+    } = req.body;
+
+    if (!guestName || !roomTypeCode || !checkIn || !checkOut) {
+      return res.status(400).json({ error: 'guestName, roomTypeCode, checkIn, checkOut required.' });
+    }
+
+    const ci = new Date(checkIn);
+    const co = new Date(checkOut);
+    if (Number.isNaN(ci.getTime()) || Number.isNaN(co.getTime())) {
+      return res.status(400).json({ error: 'checkIn and checkOut must be valid dates.' });
+    }
+    if (co <= ci) {
+      return res.status(400).json({ error: 'checkOut must be after checkIn.' });
+    }
+    const nights = nightsBetweenDates(checkIn, checkOut);
+
+    // '' means "no room chosen", not "the room whose id is the empty string".
+    // See normaliseRoomId — storing '' defeated the double-booking constraint's
+    // IS NOT NULL guard and made unassigned bookings collide with each other.
+    const requestedRoomId = normaliseRoomId(assignedRoomId);
+
+    // Authoritative pricing — never trust a client-supplied fee/total. The fee
+    // percentage is read fresh here and frozen onto each add-on so a later
+    // change to it never rewrites an already-booked guest's total.
+    const feeSetting = await prisma.appSetting.findUnique({ where: { key: 'addon_fee_percent' } });
+    const enrichedAddOns = computeAddOns(rawAddOns, Number(feeSetting?.value ?? 10));
+
+    // ── PHASE 1: claim capacity ──────────────────────────────────────────────
+    // This route previously inserted the reservation with NO availability check
+    // of any kind, so two staff members could book the same room for the same
+    // nights with 100% success. Capacity is now claimed transactionally in the
+    // inventory service (SELECT ... FOR UPDATE on the room type) BEFORE anything
+    // is written here. A full room type fails the request at this line.
+    let hold;
+    try {
+      hold = await inventory.acquireHold({ roomTypeCode, checkIn, checkOut, quantity: 1 });
+    } catch (err) {
+      if (err instanceof NoInventoryError) {
+        return res.status(409).json({
+          error: 'No rooms of that type are available for the selected dates.',
+          ...err.detail,
+        });
+      }
+      if (err.statusCode === 400) return res.status(400).json({ error: err.message });
+      // Inventory unreachable — refuse the booking rather than create one whose
+      // capacity was never checked. Failing closed is the whole point.
+      console.error('[Reservation] Could not reach inventory to hold capacity:', err.message);
+      return res.status(502).json({ error: 'Could not verify room availability. Please try again.' });
+    }
+
+    // ── PHASE 2: choose a room, persist, then bind the hold to the new row ───
+    //
+    // The room is chosen INSIDE the retry loop rather than before it. A
+    // concurrent booking can take our pick between the overlap check and the
+    // insert, and the exclusion constraint is what tells us so — at which point
+    // the answer is a different room, not a failed booking. A room chosen
+    // EXPLICITLY by staff is never retried: "that room is taken" is the correct
+    // thing to tell them.
+    let reservation;
+    try {
+      const roomsTried = [];
+      for (let attempt = 0; ; attempt += 1) {
+        const roomId =
+          requestedRoomId ??
+          (await pickAssignableRoom({
+            inventory,
+            prisma,
+            roomTypeCode,
+            checkIn: ci,
+            checkOut: co,
+            excludeRoomIds: roomsTried,
+          }));
+        try {
+          reservation = await prisma.reservation.create({
+            data: {
+              confirmationNumber: nextConfirmationNumber(),
+              guestId,
+              guestName,
+              guestEmail,
+              guestPhone,
+              roomTypeCode,
+              ratePlanId,
+              assignedRoomId: roomId,
+              checkIn: ci,
+              checkOut: co,
+              nights,
+              adults: adults || 1,
+              children: children || 0,
+              source: source || 'DIRECT',
+              totalEstimateCents: BigInt(totalEstimateCents || 0),
+              depositCents: BigInt(depositCents || 0),
+              specialRequests,
+              addOns: enrichedAddOns,
+              expectedArrivalTime,
+              paymentType,
+              ratePlan,
+              origin,
+              createdBy: req.user?.sub,
+              inventoryHoldGroupId: hold.groupId,
+            },
+          });
+          break;
+        } catch (err) {
+          const canRetry =
+            !requestedRoomId && roomId && isRoomClashError(err) && attempt + 1 < MAX_ASSIGN_ATTEMPTS;
+          if (!canRetry) throw err;
+          console.warn(
+            `[Reservation] Room ${roomId} was taken between selection and insert; picking another.`
+          );
+          roomsTried.push(roomId);
+        }
+      }
+      // A booking with no room is invisible on the calendar, which is the exact
+      // failure this route was fixed for. It is still the right outcome when
+      // capacity says yes and no room is free — but it must never be silent.
+      if (!reservation.assignedRoomId) {
+        console.warn(
+          `[Reservation] ${reservation.confirmationNumber} was taken with NO room assigned ` +
+            `(type ${roomTypeCode}, ${utcDayKey(ci)} → ${utcDayKey(co)}). ` +
+            'The front desk must assign one before it appears on a room row.'
+        );
+      }
+      await inventory.attachHold(hold.groupId, reservation.id);
+    } catch (err) {
+      // Compensating action, in this order:
+      //   1. delete the reservation row if it was already committed. Without
+      //      this, a failed attach leaves a booking that NOTHING holds capacity
+      //      for — invisible to availability, and duplicated when the client
+      //      retries. The row was never returned to the caller, so deleting it
+      //      is safe.
+      //   2. hand the capacity back rather than waiting out the TTL.
+      if (reservation?.id) {
+        await prisma.reservation
+          .delete({ where: { id: reservation.id } })
+          .catch((e) =>
+            console.error(
+              `[Reservation] CRITICAL: could not roll back reservation ${reservation.id} after a failed hold attach: ${e.message}`
+            )
+          );
+      }
+      await inventory.releaseHold(hold.groupId);
+      // A room clash is a 409 with a sentence the front desk can act on. It was
+      // reported as 503 "please try again" because this catch returned before
+      // the outer handler's mapDbConstraintError could ever see the error —
+      // making the one message written for this case unreachable.
+      const mapped = mapDbConstraintError(err);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.error });
+      console.error('[Reservation] Could not complete booking insert:', err.message);
+      return res.status(503).json({ error: 'Could not complete the booking. Please try again.' });
+    }
+
+    await logActivity(
+      reservation.id,
+      req.user,
+      'create',
+      `Reservation created (${reservation.confirmationNumber})`
+    );
+
+    redis.publish(
+      'reservation:created',
+      JSON.stringify({
+        reservationId: reservation.id,
+        confirmationNumber: reservation.confirmationNumber,
+        guestId,
+        roomTypeCode,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        nights,
+        inventoryHoldGroupId: hold.groupId,
+      })
+    );
+
+    res.status(201).json(reservation);
+  } catch (err) {
+    const mapped = mapDbConstraintError(err);
+    if (mapped) return res.status(mapped.status).json({ error: mapped.error });
+    console.error('[Reservation] Create error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations
+//
+// `from`/`to` describe a window of NIGHTS and select every booking that
+// overlaps it — see lib/listQuery.js for why a checkIn-only range was the wrong
+// question and made long stays vanish from the calendar.
+router.get('/reservations', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    let where;
+    try {
+      where = reservationListWhere(req.query);
+    } catch (err) {
+      if (err instanceof BadWindowError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+    const list = await prisma.reservation.findMany({
+      where,
+      orderBy: { checkIn: 'asc' },
+      take: LIST_LIMIT,
+    });
+    // Silently returning a truncated page to a calendar is how a booking goes
+    // missing without anything reporting it. The cap is generous enough that
+    // hitting it means the caller needs paging, not a bigger number.
+    if (list.length === LIST_LIMIT) {
+      console.warn(
+        `[Reservation] List hit the ${LIST_LIMIT}-row cap for ${JSON.stringify(req.query)}; ` +
+          'results are truncated and some bookings will be missing from the caller.'
+      );
+    }
+    res.json(list);
+  } catch (err) {
+    console.error('[Reservation] List error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations/:id
+router.get('/reservations/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const r = await prisma.reservation.findUnique({
+      where: { id: req.params.id },
+      include: { notes: { orderBy: { createdAt: 'desc' } } },
+    });
+    if (!r) return res.status(404).json({ error: 'Not found.' });
+    res.json(r);
+  } catch (err) {
+    console.error('[Reservation] Get error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PATCH /api/reservations/:id
+router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
+  try {
+    const {
+      checkIn,
+      checkOut,
+      adults,
+      children,
+      specialRequests,
+      guestEmail,
+      guestPhone,
+      ratePlanId,
+      assignedRoomId,
+      expectedArrivalTime,
+      paymentType,
+      source,
+    } = req.body;
+    const before = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!before) return res.status(404).json({ error: 'Not found.' });
+
+    // Validate dates BEFORE anything else. An unparseable value used to sail
+    // past the comparison guards (every comparison with NaN is false) and then
+    // throw deep inside the handler, surfacing as a 500 instead of a 400.
+    if (checkIn !== undefined && Number.isNaN(new Date(checkIn).getTime())) {
+      return res.status(400).json({ error: 'checkIn is not a valid date.' });
+    }
+    if (checkOut !== undefined && Number.isNaN(new Date(checkOut).getTime())) {
+      return res.status(400).json({ error: 'checkOut is not a valid date.' });
+    }
+
+    const data = {};
+    if (checkIn) data.checkIn = new Date(checkIn);
+    if (checkOut) data.checkOut = new Date(checkOut);
+    if (checkIn && checkOut) data.nights = nightsBetweenDates(checkIn, checkOut);
+    if (adults !== undefined) data.adults = adults;
+    if (children !== undefined) data.children = children;
+    if (specialRequests !== undefined) data.specialRequests = specialRequests;
+    if (guestEmail !== undefined) data.guestEmail = guestEmail;
+    if (guestPhone !== undefined) data.guestPhone = guestPhone;
+    if (ratePlanId !== undefined) data.ratePlanId = ratePlanId;
+    // Same '' → null normalisation as the create path: an empty string is a
+    // phantom room that the double-booking constraint treats as real.
+    if (assignedRoomId !== undefined) data.assignedRoomId = normaliseRoomId(assignedRoomId);
+    if (expectedArrivalTime !== undefined) data.expectedArrivalTime = expectedArrivalTime;
+    if (paymentType !== undefined) data.paymentType = paymentType;
+    if (source !== undefined) data.source = source;
+
+    // ── Re-hold on a date change ─────────────────────────────────────────────
+    // Moving a booking's dates invalidates the inventory hold that was taken for
+    // the ORIGINAL range. Without re-holding, the old nights stay blocked and the
+    // new nights are never checked — so a date change was a second route to
+    // silent oversell. Claim the new range first, and only release the old hold
+    // once the update has committed.
+    const datesChanged =
+      (data.checkIn && data.checkIn.getTime() !== before.checkIn.getTime()) ||
+      (data.checkOut && data.checkOut.getTime() !== before.checkOut.getTime());
+
+    let newHold = null;
+    if (datesChanged) {
+      if (['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].includes(before.status)) {
+        return res.status(409).json({ error: `Cannot change the dates of a ${before.status} reservation.` });
+      }
+      const nextCheckIn = data.checkIn || before.checkIn;
+      const nextCheckOut = data.checkOut || before.checkOut;
+      if (nextCheckOut <= nextCheckIn) {
+        return res.status(400).json({ error: 'checkOut must be after checkIn.' });
+      }
+      data.nights = nightsBetweenDates(nextCheckIn, nextCheckOut);
+
+      try {
+        newHold = await inventory.acquireHold({
+          roomTypeCode: before.roomTypeCode,
+          checkIn: nextCheckIn,
+          checkOut: nextCheckOut,
+          quantity: 1,
+        });
+        data.inventoryHoldGroupId = newHold.groupId;
+      } catch (err) {
+        if (err instanceof NoInventoryError) {
+          return res.status(409).json({
+            error: 'No availability for the requested new dates. The booking was left unchanged.',
+            ...err.detail,
+          });
+        }
+        if (err.statusCode === 400) return res.status(400).json({ error: err.message });
+        console.error('[Reservation] Could not re-hold on date change:', err.message);
+        return res
+          .status(502)
+          .json({ error: 'Could not verify availability for the new dates. Please try again.' });
+      }
+    }
+
+    let r;
+    try {
+      r = await prisma.reservation.update({ where: { id: req.params.id }, data });
+      if (newHold) await inventory.attachHold(newHold.groupId, r.id);
+    } catch (err) {
+      if (newHold) {
+        // Put the booking back the way it was. Without restoring the dates, a
+        // failed attach would leave the row carrying its NEW dates while
+        // pointing at a hold group that is about to be released — capacity
+        // tracked for one range, guest expected in another.
+        await prisma.reservation
+          .update({
+            where: { id: req.params.id },
+            data: {
+              checkIn: before.checkIn,
+              checkOut: before.checkOut,
+              nights: before.nights,
+              inventoryHoldGroupId: before.inventoryHoldGroupId,
+            },
+          })
+          .catch((e) =>
+            console.error(
+              `[Reservation] CRITICAL: could not restore reservation ${req.params.id} after a failed re-hold: ${e.message}`
+            )
+          );
+        await inventory.releaseHold(newHold.groupId);
+      }
+      const mapped = mapDbConstraintError(err);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.error });
+      throw err;
+    }
+
+    // The move succeeded — hand the original nights back. Released AFTER the new
+    // hold is attached so capacity is never briefly unclaimed; the two groups
+    // legitimately share a reservationId on overlapping nights in between, which
+    // is why there is no unique index on (reservationId, date).
+    if (newHold && before.inventoryHoldGroupId) {
+      await inventory.releaseHold(before.inventoryHoldGroupId);
+    }
+
+    // Activity summary
+    const changes = [];
+    // Stored dates are UTC midnight (date-only), so utcDayKey is the matching
+    // formatter for comparison against a client-supplied YYYY-MM-DD.
+    if (checkIn && utcDayKey(before.checkIn) !== checkIn)
+      changes.push(`Check-in ${utcDayKey(before.checkIn)} → ${checkIn}`);
+    if (checkOut && utcDayKey(before.checkOut) !== checkOut)
+      changes.push(`Check-out ${utcDayKey(before.checkOut)} → ${checkOut}`);
+    if (assignedRoomId && before.assignedRoomId !== assignedRoomId)
+      changes.push(`Room ${before.assignedRoomId || 'unassigned'} → ${assignedRoomId}`);
+    if (changes.length) await logActivity(r.id, req.user, 'modify', changes.join(' · '));
+
+    redis.publish('reservation:updated', JSON.stringify({ reservationId: r.id }));
+    res.json(r);
+  } catch (err) {
+    console.error('[Reservation] Update error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/reservations/:id/confirm
+router.post('/reservations/:id/confirm', requireRole(...STAFF), async (req, res) => {
+  try {
+    const existing = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+    if (existing.status !== 'PENDING') {
+      return res
+        .status(409)
+        .json({ error: `Only a pending reservation can be confirmed (current: ${existing.status}).` });
+    }
+    const r = await prisma.reservation.update({
+      where: { id: req.params.id },
+      data: { status: 'CONFIRMED' },
+    });
+    await logActivity(r.id, req.user, 'confirm', 'Reservation confirmed');
+    redis.publish(
+      'reservation:confirmed',
+      JSON.stringify({
+        reservationId: r.id,
+        confirmationNumber: r.confirmationNumber,
+        guestId: r.guestId,
+        guestName: r.guestName,
+        roomTypeCode: r.roomTypeCode,
+        checkIn: r.checkIn,
+        checkOut: r.checkOut,
+      })
+    );
+    res.json(r);
+  } catch (err) {
+    console.error('[Reservation] Confirm error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/reservations/:id/cancel
+router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) => {
+  try {
+    const { reason, cancellationFeeCents: explicitFee, note, policy = 'STANDARD' } = req.body;
+    const cancellationNumber = nextCancellationNumber();
+    // Look up reservation first so we can compute the fee from policy if not supplied.
+    const existing = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+    if (existing.status === 'CANCELLED') {
+      return res.status(409).json({ error: 'Reservation is already cancelled.' });
+    }
+    if (
+      existing.status === 'CHECKED_IN' ||
+      existing.status === 'IN_HOUSE' ||
+      existing.status === 'CHECKED_OUT'
+    ) {
+      return res.status(409).json({ error: `Cannot cancel a ${existing.status} reservation.` });
+    }
+    let computedFeeCents;
+    if (explicitFee != null) {
+      const fee = Number(explicitFee);
+      if (!Number.isFinite(fee) || fee < 0) {
+        return res.status(400).json({ error: 'cancellationFeeCents must be a non-negative number.' });
+      }
+      computedFeeCents = Math.round(fee);
+    } else {
+      computedFeeCents = Math.round(
+        cancellationFeeCents({
+          totalEstimateCents: Number(existing.totalEstimateCents || 0),
+          checkIn: existing.checkIn,
+          nights: existing.nights || 1,
+          policy,
+        }) || 0
+      );
+    }
+    const r = await prisma.reservation.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'CANCELLED',
+        cancellationReason: reason,
+        cancellationNumber,
+        cancellationFeeCents: BigInt(computedFeeCents),
+        cancelledAt: new Date(),
+        cancelledBy: req.user?.sub,
+      },
+    });
+    if (note) {
+      await prisma.reservationNote.create({
+        data: { reservationId: r.id, author: req.user?.username || req.user?.sub, body: note },
+      });
+    }
+    await logActivity(
+      r.id,
+      req.user,
+      'cancel',
+      `Cancelled (${cancellationNumber}) — reason: ${reason || 'unspecified'}${computedFeeCents ? `, fee ₱${(computedFeeCents / 100).toFixed(2)} [${policy}]` : ''}`
+    );
+    // Return the capacity DIRECTLY rather than relying on the event below.
+    // Redis pub/sub has no persistence and no retry: if the inventory service
+    // happened to be restarting, the cancellation message was dropped and the
+    // hold kept blocking that room type until its expiry. releaseHold never
+    // throws, and the subscriber remains as a backstop for holds cancelled by
+    // other paths.
+    if (existing.inventoryHoldGroupId) {
+      await inventory.releaseHold(existing.inventoryHoldGroupId);
+    }
+
+    redis.publish(
+      'reservation:cancelled',
+      JSON.stringify({
+        reservationId: r.id,
+        cancellationNumber,
+        reason,
+        cancellationFeeCents: computedFeeCents,
+        // Inventory service should release any active holds tied to this reservation.
+        releaseHolds: true,
+        roomTypeCode: r.roomTypeCode,
+        checkIn: r.checkIn,
+        checkOut: r.checkOut,
+      })
+    );
+    res.json(r);
+  } catch (err) {
+    console.error('[Reservation] Cancel error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/reservations/:id/notes
+router.post('/reservations/:id/notes', requireRole(...STAFF), async (req, res) => {
+  try {
+    const { body } = req.body;
+    if (!body) return res.status(400).json({ error: 'body required.' });
+    const note = await prisma.reservationNote.create({
+      data: { reservationId: req.params.id, author: req.user?.username || req.user?.sub, body },
+    });
+    res.status(201).json(note);
+  } catch (err) {
+    console.error('[Reservation] Note error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations/:id/notes
+router.get('/reservations/:id/notes', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const notes = await prisma.reservationNote.findMany({
+      where: { reservationId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(notes);
+  } catch (err) {
+    console.error('[Reservation] List notes error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PATCH /api/reservations/:id/notes/:noteId  (archive/unarchive)
+router.patch('/reservations/:id/notes/:noteId', requireRole(...STAFF), async (req, res) => {
+  try {
+    const { archived } = req.body;
+    // Scope the update to the reservation in the path so a note id can't be
+    // archived through a different reservation's URL.
+    const result = await prisma.reservationNote.updateMany({
+      where: { id: req.params.noteId, reservationId: req.params.id },
+      data: { archivedAt: archived ? new Date() : null },
+    });
+    if (result.count === 0) return res.status(404).json({ error: 'Note not found for this reservation.' });
+    const n = await prisma.reservationNote.findUnique({ where: { id: req.params.noteId } });
+    res.json(n);
+  } catch (err) {
+    console.error('[Reservation] Note update error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations/:id/activity
+router.get('/reservations/:id/activity', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const list = await prisma.reservationActivity.findMany({
+      where: { reservationId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    res.json(list);
+  } catch (err) {
+    console.error('[Reservation] Activity error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/settings/addon-fee-percent — read the current add-on surcharge so
+// the reservation wizard can show it before checkout.
+router.get('/settings/addon-fee-percent', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'addon_fee_percent' } });
+    res.json({ feePercent: Number(row?.value ?? 10) });
+  } catch (err) {
+    console.error('[Reservation] Get setting error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/addon-fee-percent — admin/manager only.
+router.put('/settings/addon-fee-percent', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const feePercent = Number(req.body.feePercent);
+    if (!Number.isFinite(feePercent) || feePercent < 0 || feePercent > 100) {
+      return res.status(400).json({ error: 'feePercent must be a number between 0 and 100.' });
+    }
+    const row = await prisma.appSetting.upsert({
+      where: { key: 'addon_fee_percent' },
+      create: { key: 'addon_fee_percent', value: String(feePercent) },
+      update: { value: String(feePercent) },
+    });
+    res.json({ feePercent: Number(row.value) });
+  } catch (err) {
+    console.error('[Reservation] Set setting error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+module.exports = router;

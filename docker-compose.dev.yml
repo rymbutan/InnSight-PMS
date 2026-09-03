@@ -1,0 +1,42 @@
+# Development overlay — publishes each service's raw port to the host.
+#
+# WHY THIS IS AN OVERLAY AND NOT THE DEFAULT
+# ------------------------------------------
+# Every service used to publish 3005–3013 in the base file, which meant the gateway
+# could be bypassed completely: `curl localhost:3010/api/auth/login` skipped the
+# login rate limit, the CORS allowlist and every security header. The base compose
+# is now closed by default and you opt IN to direct access when you need it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Compose merges `ports` by APPENDING, so an overlay can add published ports but
+# cannot remove them — which is exactly why the safe configuration has to be the
+# base and this has to be the opt-in.
+#
+# Do not use this on anything reachable from outside your machine.
+
+services:
+  inventory-service:
+    ports: ["3005:3005"]
+  stay-service:
+    ports: ["3006:3006"]
+  folio-service:
+    ports: ["3007:3007"]
+  guest-service:
+    ports: ["3008:3008"]
+  maintenance-service:
+    ports: ["3009:3009"]
+  auth-service:
+    ports: ["3010:3010"]
+  reservation-service:
+    ports: ["3011:3011"]
+  audit-service:
+    ports: ["3012:3012"]
+  reports-service:
+    ports: ["3013:3013"]
+
+  # The built SPA, served directly without going through the gateway. Handy for
+  # isolating "is this the gateway or the frontend?" — but note the app calls
+  # relative /api paths, so it will NOT work as a usable app on this port.
+  web:
+    ports: ["5173:8080"]

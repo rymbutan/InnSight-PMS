@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  # ── Lint + format ──────────────────────────────────────────────────
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+      - name: Install root dev tools
+        # Pinned to ESLint 8: v9 ignores .eslintrc.* and requires a flat
+        # eslint.config.js, so an unpinned install made this step fail before it
+        # linted anything.
+        #
+        # The react plugins are REQUIRED, not optional: without them every JSX
+        # identifier reads as an unused variable and the job reported ~240 problems
+        # that were almost entirely noise.
+        run: npm i -D --no-save eslint@8 prettier@3 eslint-plugin-react@7 eslint-plugin-react-hooks@4
+      - name: Prettier check
+        run: npx prettier --check "web/src/**/*.{js,jsx,css}" "services/**/*.js"
+      - name: ESLint
+        run: npx eslint "web/src/**/*.{js,jsx}" "services/**/*.js" --max-warnings=0
+      - name: Shared lib sync
+        run: bash scripts/check-shared.sh
+      - name: Room layout geometry + activity alignment
+        # Validates station reachability AND 3D fit: rendered heights against the
+        # ceiling, fixtures clipping walls, collision boxes matching what renders,
+        # case goods actually flush to their wall, and duplicate placements.
+        run: node scripts/check-room-layouts.mjs
+
+  # ── Backend service tests (matrix across services) ────────────────
+  services-test:
+    name: ${{ matrix.service }} unit tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth, inventory, stay, folio, guest, maintenance, reservation, audit, reports]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install
+        working-directory: services/${{ matrix.service }}
+        # `npm ci` now that all 9 services have a committed package-lock.json —
+        # `npm install` re-resolved the transitive tree on every run, so CI could
+        # pass or fail on dependency drift rather than on this commit.
+        run: npm ci --no-audit --no-fund
+      - name: Test
+        working-directory: services/${{ matrix.service }}
+        # Every service now declares a "test" script, so --if-present no longer
+        # silently skips 8 of 9 services.
+        run: npm test
+
+  # ── Frontend build ────────────────────────────────────────────────
+  web-build:
+    name: Web (Vite) build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+      - name: Install
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        working-directory: web
+        run: npm run build
+      - name: Assert models are not bundled as hashed duplicates
+        # The 3D models live in web/public/ specifically so Vite copies them
+        # verbatim instead of emitting a content-hashed copy of each one into
+        # dist/assets. A .glb reappearing under assets/ means something moved them
+        # back under src/ — which is how 1 GB of duplicates got committed before.
+        working-directory: web
+        run: |
+          if ls dist/assets/*.glb >/dev/null 2>&1; then
+            echo "::error::.glb files were emitted into dist/assets — models must live in web/public/models/"
+            exit 1
+          fi
+          test -d dist/models || { echo "::error::dist/models missing — public/models was not copied"; exit 1; }
+          echo "OK: $(ls dist/models/*.glb | wc -l) models copied verbatim, none hashed into assets/"
+
+  # ── Docker compose smoke test ─────────────────────────────────────
+  compose-smoke:
+    name: docker compose up -d (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every secret in docker-compose.yml is now `${VAR:?…}` with no fallback, so
+      # compose refuses to interpolate — and therefore refuses to build — until a
+      # .env exists. Generating one is the supported path for a fresh environment.
+      - name: Generate secrets
+        run: bash scripts/gen-env.sh
+
+      - name: Build images
+        run: docker compose build --pull
+      - name: Start stack
+        run: docker compose up -d
+
+      - name: Wait for gateway healthy
+        run: |
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8080/health && break
+            sleep 2
+            if [ "$i" = 30 ]; then docker compose logs --tail=200; exit 1; fi
+          done
+
+      # Seeding is no longer part of any container's CMD, so roles, room types and
+      # the admin account have to be created explicitly before anything can log in.
+      - name: Seed reference data
+        run: bash scripts/db-seed.sh
+
+      # The SPA is served by the gateway at `/` now, not by a Vite dev server on a
+      # separate port. A 404 here means `location /` regressed.
+      - name: Assert the SPA is served through the gateway
+        run: |
+          curl -fsS http://localhost:8080/ | grep -q '<div id="root">' \
+            || { echo "gateway did not serve the SPA at /"; docker compose logs --tail=100 gateway web; exit 1; }
+          # Deep links must fall back to index.html, or a hard refresh 404s.
+          curl -fsS http://localhost:8080/reservations | grep -q '<div id="root">' \
+            || { echo "SPA history fallback is broken"; exit 1; }
+          # A model must actually be fetchable, since they moved to public/.
+          curl -fsS -o /dev/null -w '%{http_code}\n' \
+            "http://localhost:8080/models/King%20Platform%20Bed.glb" | grep -q 200 \
+            || { echo "3D models are not being served"; exit 1; }
+          echo "OK: SPA, history fallback and models all served via the gateway"
+
+      # A CSP that is "correct" by security-header standards can still silently
+      # break every 3D model. Serving the .glb (above) is NOT enough — the browser
+      # also has to be allowed to decode it. Two directives are load-bearing:
+      #   'wasm-unsafe-eval'  the meshopt decoder is a WASM module; without this
+      #                       WebAssembly.instantiate() is blocked and NO model decodes
+      #   connect-src blob:   GLTFLoader unpacks textures to Blobs and loads them via
+      #                       ImageBitmapLoader, which uses fetch() — so blob: has to
+      #                       be allowed as a *connect* source, not just an img source
+      # Both failed in exactly this way once. Assert the live header, not the file.
+      - name: Assert the CSP still permits 3D model decoding
+        run: |
+          csp=$(curl -fsSI http://localhost:8080/ | tr -d '\r' | grep -i '^content-security-policy:')
+          echo "$csp"
+          echo "$csp" | grep -q "wasm-unsafe-eval" \
+            || { echo "::error::CSP lost 'wasm-unsafe-eval' — meshopt cannot decode, every 3D model will fail"; exit 1; }
+          echo "$csp" | grep -qE "connect-src[^;]*blob:" \
+            || { echo "::error::CSP connect-src lost blob: — GLTFLoader textures will fail to load"; exit 1; }
+          echo "OK: CSP permits WASM instantiation and blob: fetches"
+
+      - name: Prove the double-booking race is closed
+        run: node scripts/prove-no-double-booking.mjs --attempts=20
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

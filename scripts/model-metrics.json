@@ -1,0 +1,325 @@
+{
+ "_comment": "Native (unscaled) bounding-box size [x,y,z] in metres per .glb, from scripts/measure-models.mjs --save. Used by check-room-layouts.mjs to derive rendered fixture sizes. Regenerate from .attic/models-uncompressed-originals — the shipped models are quantized.",
+ "models": {
+  "Bathroom Vanity Double": [
+   1.2634,
+   1.5,
+   0.4435
+  ],
+  "Bedroom Area Rug": [
+   0.6761,
+   0.9,
+   0.1069
+  ],
+  "Bedroom Bookshelf": [
+   1.7641,
+   2,
+   0.2852
+  ],
+  "Blue Mesh Office Chair": [
+   0.7976,
+   1.1,
+   0.7813
+  ],
+  "Ceiling Cove Lighting": [
+   0.53,
+   0.05,
+   0.53
+  ],
+  "Chrome Double Towel": [
+   0.4634,
+   0.06,
+   0.1355
+  ],
+  "Circular Side Table": [
+   0.5341,
+   0.5,
+   0.5341
+  ],
+  "City Skyline Backdrop": [
+   0.4638,
+   0.3,
+   0.0211
+  ],
+  "Custom Wooden Wardrobe": [
+   2.1358,
+   2,
+   0.3907
+  ],
+  "Cylindrical Wood Ring": [
+   0.1792,
+   0.2,
+   0.1787
+  ],
+  "Dark CircleWall Deco": [
+   0.1026,
+   0.03,
+   0.0023
+  ],
+  "Decorative Potted": [
+   0.1713,
+   0.24,
+   0.1714
+  ],
+  "Desk Slate Design": [
+   1.5484,
+   0.75,
+   0.5792
+  ],
+  "Entrance Foyer": [
+   2.8414,
+   0.6,
+   0.4497
+  ],
+  "Floor to Ceiling Wind": [
+   1.2302,
+   1.2,
+   0.5025
+  ],
+  "Folded White Towel": [
+   0.3507,
+   0.08,
+   0.2484
+  ],
+  "Framed Landscape Art": [
+   0.2894,
+   0.6,
+   0.0134
+  ],
+  "Glass Shower Enclosure": [
+   1.3558,
+   1.9,
+   0.7034
+  ],
+  "Gray Armchair": [
+   1.0613,
+   0.9,
+   0.8412
+  ],
+  "Grey Marble Bathtub": [
+   1.3403,
+   0.6,
+   0.5291
+  ],
+  "Hardwood Floor": [
+   0.0214,
+   0.02,
+   0.0102
+  ],
+  "Hotel Minibar Wet Bar": [
+   1.1339,
+   2.1,
+   0.6585
+  ],
+  "Hotel Wall Panel Grey": [
+   2.3832,
+   2,
+   0.1034
+  ],
+  "King Platform Bed": [
+   1.1881,
+   0.5,
+   1.1814
+  ],
+  "Light Wood Coffee Table": [
+   1.0278,
+   0.75,
+   0.4282
+  ],
+  "Living Room Area Rug": [
+   0.4491,
+   0.6,
+   0.0724
+  ],
+  "Meshy_AI_A_dirty_rat_that_woul_0829110139_texture": [
+   0.039,
+   0.05,
+   0.1494
+  ],
+  "Meshy_AI_Create_a_realistic_3D_0829105345_texture": [
+   0.0303,
+   0.12,
+   0.0303
+  ],
+  "Meshy_AI_Cylindrical_Wood_Ring_0628102149_image-to-3d-texture": [
+   1.4729,
+   0.75,
+   0.9778
+  ],
+  "Meshy_AI_Ultra_realistic_alumi_0829105331_texture": [
+   0.0635,
+   0.12,
+   0.0637
+  ],
+  "Meshy_AI_Ultra_realistic_alumi_0829105401_texture": [
+   0.0635,
+   0.12,
+   0.0637
+  ],
+  "Meshy_AI_Unmade_Sofa_Bed_0829110246_texture": [
+   1.6446,
+   0.8,
+   1.6418
+  ],
+  "Meshy_AI_Warm_Walnut_Kitchen_0829140615_texture": [
+   3.5654,
+   2.4,
+   3.5393
+  ],
+  "Meshy_AI_Wooden_Play_Kitchen_0829135913_texture": [
+   0.099,
+   0.12,
+   0.0373
+  ],
+  "Meshy_AI_the_object_is_a_pile__0829110202_texture": [
+   1.0206,
+   0.3,
+   1.0648
+  ],
+  "Mid Century Desk Lamp": [
+   0.2327,
+   0.6,
+   0.3142
+  ],
+  "Modern White Toilet": [
+   0.3463,
+   0.8,
+   0.6486
+  ],
+  "Potted White Orchid": [
+   0.2908,
+   0.5,
+   0.2373
+  ],
+  "Recessed Ceiling Spot": [
+   0.08,
+   0.08,
+   0.0388
+  ],
+  "Refrigerator_nofood": [
+   0.9029,
+   0.85,
+   0.6083
+  ],
+  "Sheer Hotel Curtain": [
+   1.7928,
+   2,
+   0.1397
+  ],
+  "Side Accent Chair Woven": [
+   0.8903,
+   0.7,
+   0.7171
+  ],
+  "Silver Pod Wall": [
+   65.4258,
+   6,
+   49.954
+  ],
+  "Stacked Folded Towel": [
+   0.5533,
+   0.44,
+   0.4101
+  ],
+  "Study Area Rug": [
+   0.3746,
+   0.6,
+   0.0727
+  ],
+  "Vertical Wood Slate Wall": [
+   0.9868,
+   1.2,
+   0.1053
+  ],
+  "Wall Mounted TV": [
+   0.4909,
+   0.3,
+   0.0103
+  ],
+  "White Three Seater": [
+   2.2583,
+   0.85,
+   0.9451
+  ],
+  "Wooden Bench Room Divider": [
+   1.1762,
+   0.45,
+   0.2595
+  ],
+  "Wooden room divider": [
+   0.8382,
+   1.5,
+   0.1718
+  ],
+  "bed": [
+   289.8457,
+   83.0356,
+   241.006
+  ],
+  "cleaning cart": [
+   1.266,
+   1.1,
+   0.5524
+  ],
+  "cleaning supply": [
+   0.5322,
+   0.35,
+   0.4862
+  ],
+  "dirtymatress": [
+   1.5095,
+   0.3,
+   1.0722
+  ],
+  "dirtysink": [
+   0.4839,
+   0.35,
+   0.3544
+  ],
+  "dirtytoilet": [
+   0.4863,
+   0.75,
+   0.7266
+  ],
+  "dishes": [
+   0.2706,
+   0.25,
+   0.2706
+  ],
+  "messy bed 1": [
+   249.8879,
+   89.8484,
+   215.7895
+  ],
+  "messy_bed": [
+   134.1604,
+   95,
+   217.9452
+  ],
+  "redbull ref": [
+   1.1146,
+   1.8,
+   1.1133
+  ],
+  "towelonthefloor": [
+   0.8322,
+   0.12,
+   0.8524
+  ],
+  "trash can": [
+   0.3148,
+   0.35,
+   0.3476
+  ],
+  "glass_window": [
+   0.1,
+   4.1,
+   2.89
+  ],
+  "sliding_door": [
+   1.954,
+   2.205,
+   0.155
+  ]
+ }
+}

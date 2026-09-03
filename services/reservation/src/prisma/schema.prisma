@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Reservation {
+  id                    String                 @id @default(uuid())
+  confirmationNumber    String                 @unique
+  guestId               String?
+  guestName             String
+  guestEmail            String?
+  guestPhone            String?
+  roomTypeCode          String
+  ratePlanId            String?
+  assignedRoomId        String?
+  checkIn               DateTime
+  checkOut              DateTime
+  nights                Int
+  adults                Int                    @default(1)
+  children              Int                    @default(0)
+  status                ReservationStatus      @default(PENDING)
+  source                String?                @default("DIRECT")
+  totalEstimateCents    BigInt                 @default(0)
+  depositCents          BigInt                 @default(0)
+  specialRequests       String?
+  addOns                Json?
+  expectedArrivalTime   String?
+  paymentType           String?
+  ratePlan              String?
+  origin                String?
+  cancellationNumber    String?
+  cancellationReason    String?
+  cancellationFeeCents  BigInt                 @default(0)
+  cancelledAt           DateTime?
+  cancelledBy           String?
+  createdBy             String?
+  // The inventory hold group that reserves this booking's capacity. Written at
+  // creation so a cancellation or date change can release exactly the right
+  // hold instead of guessing from (roomTypeCode, dates).
+  inventoryHoldGroupId  String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  notes                 ReservationNote[]
+  activity              ReservationActivity[]
+
+  // The calendar and arrivals views filter on checkIn + status and order by
+  // checkIn. With only confirmationNumber indexed, every one of those queries
+  // was a sequential scan on the busiest table in the system.
+  @@index([checkIn, status])
+  @@index([checkOut])
+  // The calendar's date window is an OVERLAP test — `checkIn < to AND
+  // checkOut > from` — and sends no status, so ([checkIn, status]) covered only
+  // half of it. See migrations/20260903000100_calendar_window_and_room_ids.
+  @@index([checkIn, checkOut])
+  @@index([status])
+  @@index([roomTypeCode, checkIn])
+  @@index([assignedRoomId])
+  @@index([guestId])
+  @@index([inventoryHoldGroupId])
+}
+
+model ReservationNote {
+  id            String      @id @default(uuid())
+  reservationId String
+  author        String?
+  body          String
+  archivedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId, createdAt])
+}
+
+model ReservationActivity {
+  id            String      @id @default(uuid())
+  reservationId String
+  userId        String?
+  userName      String?
+  action        String      // "create", "confirm", "cancel", "no_show", "modify_dates", "check_in", etc.
+  summary       String      // human-readable, e.g. "Status changed CONFIRMED → CANCELLED"
+  payload       Json?       // optional structured detail
+  createdAt     DateTime    @default(now())
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId, createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  IN_HOUSE
+  CHECKED_OUT
+  CANCELLED
+  NO_SHOW
+}

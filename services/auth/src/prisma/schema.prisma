@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String     @id @default(uuid())
+  username        String     @unique
+  email           String?    @unique
+  passwordHash    String
+  displayName     String
+  status          UserStatus @default(ACTIVE)
+  lastLoginAt     DateTime?
+  failedAttempts  Int        @default(0)
+  mustChangePwd   Boolean    @default(false)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  roles           UserRole[]
+}
+
+// Someone asked for an account from the sign-in screen. This is NOT a user:
+// creating one grants nothing at all. An admin turns an approved request into a
+// real User with real roles, which keeps the default-deny rule intact while
+// giving the "Sign Up" link something honest to do.
+// THE room layout for a tier — one truth for every browser.
+//
+// Layouts used to live in each browser's localStorage, so two people editing the
+// same tier saw different rooms and nobody could tell which was real. This table
+// replaces that. Append-only: a save inserts version N+1 and never overwrites,
+// so the current layout is simply the highest version and every earlier one
+// remains as a backup that can be restored.
+model RoomLayout {
+  id        String   @id @default(uuid())
+  roomTier  String // Standard | Deluxe | Suite | Presidential
+  version   Int // monotonic per tier; highest = live
+  room      Json // { w, l, h, floor, spawn }
+  furniture Json
+  walls     Json
+  stations  Json
+  updatedBy String?
+  createdAt DateTime @default(now())
+
+  @@unique([roomTier, version])
+  @@index([roomTier, version])
+}
+
+model AccessRequest {
+  id          String              @id @default(uuid())
+  email       String              @unique
+  fullName    String
+  note        String?
+  status      AccessRequestStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?
+  createdUser String?             // User.id once approved
+
+  @@index([status, createdAt])
+}
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Role {
+  code        String           @id
+  name        String
+  description String?
+  createdAt   DateTime         @default(now())
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  code        String           @id
+  description String?
+  roles       RolePermission[]
+}
+
+model UserRole {
+  userId   String
+  roleCode String
+  grantedAt DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id])
+  role     Role     @relation(fields: [roleCode], references: [code])
+
+  @@id([userId, roleCode])
+}
+
+// A completed run of the 3D housekeeping training sim, recorded per staff member.
+// Feeds the staff competency view (who is trained/certified on which tasks).
+model TrainingResult {
+  id             String   @id @default(uuid())
+  userId         String
+  userName       String?
+  // Which sim produced this run. TURNOVER results carry a real room tier in
+  // roomTier; the standalone activities carry their own label there. Without this
+  // the competency table could only ever reflect room turnovers, because Guest
+  // Services and Lost & Found were never persisted at all.
+  activity       String   @default("TURNOVER") // TURNOVER | GUEST_SERVICE | LOST_FOUND | INSPECTION
+  roomTier       String   // Standard | Deluxe | Suite | Presidential (or activity name)
+  scorePct       Int      // 0..100 (Did + Why combined)
+  tone           String   // great | ok | bad
+  tasksTotal     Int
+  tasksAttempted Int
+  knowledgeGaps  Int
+  detail         Json?    // per-task breakdown
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([activity, createdAt])
+}
+
+// An instructor-authored inspection case: a room deliberately set up wrong, and
+// which object is wrong in which way. The booking it is wrong FOR is the real
+// reservation on the room the student is inspecting — see the `booking` column.
+//
+// The furniture array is a full snapshot, not a delta against the tier layout in
+// roomLayouts.js. A delta would inherit later edits to the base room — and
+// silently change what a student is graded on. A scenario is a teaching artefact
+// and must render identically every time it is run.
+// A fault category a teacher typed, shared by EVERY scenario and every room.
+//
+// These used to live inside each scenario's `categories` JSON column, which meant
+// a category authored for room 201 simply did not exist for room 202 — there was
+// no way to reuse one. They are a library now: authored once, offered everywhere.
+// The six built-ins stay in code (web/src/sim/inspection/defects.js); this table
+// only holds the additions.
+model InspectionCategory {
+  // "custom_<slug>" — the same id the flag menu and grading use.
+  id        String   @id
+  label     String
+  // Mandatory. It is the reason printed on the student's assessment; a category
+  // without one marks them wrong with a blank explanation.
+  why       String
+  feedback  String?
+  active    Boolean  @default(true)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+model InspectionScenario {
+  id        String   @id @default(uuid())
+  name      String
+  roomTier  String // Standard | Deluxe | Suite | Presidential
+  active    Boolean  @default(true)
+  // Legacy. A scenario used to store the guest it was wrong FOR; the case file
+  // now comes from the real reservation on the room the student is standing in,
+  // so nothing reads this. Kept nullable so existing rows survive.
+  booking   Json?
+  // Legacy snapshot fields. A row with a NON-EMPTY furniture array predates
+  // live-layout tracking and is rendered exactly as authored; new rows send [].
+  furniture Json
+  anchors   Json
+  // The overlay: what is WRONG with the live tier layout, not a copy of it.
+  swaps     Json? // { "<ref>": "<modelKey>" | { model?, ry? } }
+  added     Json? // [{ id, model|prim, pos, ry, y, size }]
+  tags      Json? // [{ ref, defectId|null, label }]
+  // Fault categories this scenario adds to the six built-ins.
+  // [{ id: "custom_<slug>", label, why, feedback|null }]
+  // `why` is mandatory: it is the reason printed on the student's assessment,
+  // and a category without one marks them wrong with a blank explanation.
+  categories Json?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roomTier, active])
+}
+
+// Which authored scenario a specific room hands out.
+//
+// Rooms live in the inventory service, scenarios in this one, so the link is
+// kept here rather than as a column on Room: training owns the mapping and
+// inventory stays unaware of it. There is no cross-service foreign key, and
+// there deliberately is not one — a dangling scenarioId (someone deleted the
+// scenario) falls back to generation rather than failing a student's run.
+//
+// roomId is the primary key: one room hands out one scenario. A room with no row
+// here generates its faults, or draws from the tier's authored pool.
+model ScenarioAssignment {
+  roomId     String   @id
+  scenarioId String
+  assignedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([scenarioId])
+}
+
+model RolePermission {
+  roleCode       String
+  permissionCode String
+  role           Role       @relation(fields: [roleCode], references: [code])
+  permission     Permission @relation(fields: [permissionCode], references: [code])
+
+  @@id([roleCode, permissionCode])
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}

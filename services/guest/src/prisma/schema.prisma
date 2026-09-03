@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Guest {
+  id            String            @id @default(uuid())
+  profileNumber String            @unique
+  firstName     String
+  middleName    String?
+  lastName      String
+  displayName   String?
+  dateOfBirth   DateTime?
+  gender        String?
+  nationality   String?
+  vipLevel      VipLevel          @default(NONE)
+  status        GuestStatus       @default(ACTIVE)
+  mergedInto    String?
+  tags          Json?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  contacts      GuestContact[]
+  preferences   GuestPreference[]
+  consents      ConsentRecord[]
+  loyalty       LoyaltyAccount?
+}
+
+model GuestContact {
+  id                String   @id @default(uuid())
+  guestId           String
+  type              String
+  value             String
+  isPrimary         Boolean  @default(false)
+  optInMarketing    Boolean  @default(false)
+  guest             Guest    @relation(fields: [guestId], references: [id])
+}
+
+model GuestPreference {
+  id        String   @id @default(uuid())
+  guestId   String
+  category  String
+  key       String
+  value     Json
+  guest     Guest    @relation(fields: [guestId], references: [id])
+
+  @@unique([guestId, category, key])
+}
+
+model LoyaltyAccount {
+  guestId          String   @id
+  membershipNumber String   @unique
+  tier             String   @default("BRONZE")
+  pointsBalance    Int      @default(0)
+  lifetimePoints   Int      @default(0)
+  lifetimeNights   Int      @default(0)
+  lifetimeSpend    Int      @default(0)
+  enrolledAt       DateTime @default(now())
+  guest            Guest    @relation(fields: [guestId], references: [id])
+}
+
+model ConsentRecord {
+  id          String    @id @default(uuid())
+  guestId     String
+  purpose     String
+  granted     Boolean
+  grantedAt   DateTime?
+  revokedAt   DateTime?
+  legalBasis  String?
+  guest       Guest     @relation(fields: [guestId], references: [id])
+}
+
+enum VipLevel {
+  NONE
+  SILVER
+  GOLD
+  PLATINUM
+  BLACKLISTED
+}
+
+enum GuestStatus {
+  ACTIVE
+  MERGED
+  ANONYMIZED
+}

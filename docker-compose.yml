@@ -1,0 +1,360 @@
+# InnSight PMS — Phase 1 Microservices (standalone project)
+#
+# Self-contained stack: Postgres + Redis + MinIO + 5 new microservices.
+# This project is INDEPENDENT from the original InnSight project.
+#
+# Run:
+#   bash scripts/gen-env.sh      # once — writes .env with generated secrets
+#   docker compose up -d --build
+#   bash scripts/db-seed.sh      # once — creates roles, catalogues, admin user
+#
+# ── SECRETS ──────────────────────────────────────────────────────────────────
+# Every secret below uses `${VAR:?message}`, which makes compose REFUSE TO START
+# if the variable is unset. There are deliberately no fallback values any more.
+#
+# The previous defaults (`innsight_dev_2025`, `innsight_slsu_capstone_jwt_secret_2025`)
+# meant a deployment that never wrote a .env silently ran on credentials published
+# in this repository. The JWT default was also 41 characters long, so it passed the
+# `>= 32` strength check in each service's middleware/auth.js and the production
+# hard-fail could never fire. Anything committed here is public; treat it as such.
+
+services:
+  # ── Infrastructure ──
+  postgres:
+    image: postgres:16-alpine
+    # max_connections raised from the 100 default. Nine services each hold a
+    # Prisma pool (see `connection_limit` on every DATABASE_URL below); 100 left
+    # no headroom for the one-shot seed containers or a psql session, and the
+    # failure mode is `FATAL: sorry, too many clients already` across the whole
+    # stack at once rather than graceful degradation.
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+    environment:
+      POSTGRES_USER: innsight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — run scripts/gen-env.sh}
+    ports:
+      - "5433:5432"   # different host port to avoid conflict with original project
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U innsight"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Mailhog — dev SMTP server with a web UI at :8025. Captures every email
+  # sent via the `notifier` service so we can demo notifications without a
+  # real SMTP provider.
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI (visit http://localhost:8025)
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"   # different host port to avoid conflict
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NOTE: nothing in this codebase talks to MinIO — `minio` / `aws-sdk` /
+  # `S3Client` have zero hits across all 9 services. It is provisioned with a
+  # persistent volume and a root credential purely as unused infrastructure
+  # (finding M7). Its password is now required rather than defaulted; consider
+  # deleting the service outright.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-innsight}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env — run scripts/gen-env.sh}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Phase 1 microservices ──
+  #
+  # `connection_limit` on every DATABASE_URL. Without it Prisma sizes each pool at
+  # `cpus * 2 + 1`, and there used to be 19 clients across these 9 processes — about
+  # 171 potential connections against Postgres' 100 limit. Each service now opens
+  # exactly ONE pool (src/lib/prisma.js), and the sum of the limits below is 96.
+  # Inventory and reservation get more because their booking transactions queue on
+  # a `SELECT … FOR UPDATE` row lock and hold a pooled connection while waiting.
+  inventory-service:
+    build: ./services/inventory
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3005/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://inventory-service:3005. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3005"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_inventory?connection_limit=20&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — run scripts/gen-env.sh}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?set SERVICE_JWT_SECRET in .env — run scripts/gen-env.sh}
+      PORT: 3005
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  stay-service:
+    build: ./services/stay
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3006/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://stay-service:3006. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3006"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_stay?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3006
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      INVENTORY_URL: http://inventory-service:3005
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  folio-service:
+    build: ./services/folio
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3007/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://folio-service:3007. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3007"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_folio?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3007
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      GUEST_URL: http://guest-service:3008
+      STAY_URL: http://stay-service:3006
+      RESERVATION_URL: http://reservation-service:3011
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  guest-service:
+    build: ./services/guest
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3008/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://guest-service:3008. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3008"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_guest?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3008
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  maintenance-service:
+    build: ./services/maintenance
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3009/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://maintenance-service:3009. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3009"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_maintenance?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3009
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  auth-service:
+    build: ./services/auth
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3010/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://auth-service:3010. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3010"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_auth?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      JWT_TTL: 12h
+      PORT: 3010
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      # Used ONCE, by `bash scripts/db-seed.sh`, to create the admin account —
+      # which is flagged mustChangePwd, so the value is only valid for a single
+      # sign-in. It is never logged. The previous code hardcoded `admin12345` and
+      # printed it to stdout on every container start.
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      # University sign-in. An OAuth *client* id is not a secret — it is handed to
+      # every browser that loads the sign-in page. Leave it empty and Google
+      # sign-in stays off: the endpoint returns 503 and the button never renders.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-slsu.edu.ph}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  reservation-service:
+    build: ./services/reservation
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3011/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://reservation-service:3011. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3011"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_reservation?connection_limit=20&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3011
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      INVENTORY_URL: http://inventory-service:3005
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  audit-service:
+    build: ./services/audit
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3012/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://audit-service:3012. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3012"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_audit?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3012
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      STAY_URL: http://stay-service:3006
+      FOLIO_URL: http://folio-service:3007
+      INVENTORY_URL: http://inventory-service:3005
+      RESERVATION_URL: http://reservation-service:3011
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  reports-service:
+    build: ./services/reports
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3013/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://reports-service:3013. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3013"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_reports?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3013
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      STAY_URL: http://stay-service:3006
+      FOLIO_URL: http://folio-service:3007
+      INVENTORY_URL: http://inventory-service:3005
+      RESERVATION_URL: http://reservation-service:3011
+      AUDIT_URL: http://audit-service:3012
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # ── The browser's single entry point ──
+  #
+  # The gateway now serves the SPA at `/` (proxied from the `web` container) as
+  # well as `/api/*`. Previously the browser loaded the app from the Vite dev
+  # server on another port, and THAT proxied /api here — so every API request
+  # arrived from one source IP and the rate limiter was hotel-wide instead of
+  # per-user. One origin means $remote_addr is the real client.
+  gateway:
+    build: ./services/gateway
+    restart: unless-stopped
+    ports:
+      # 5180 is kept as an alias for the URL people already have bookmarked; it
+      # used to be the Vite dev server's port. Both land on the gateway now.
+      - "8080:8080"
+      - "5180:8080"
+    depends_on:
+      - web
+      - auth-service
+      - reservation-service
+      - stay-service
+      - folio-service
+      - guest-service
+      - maintenance-service
+      - inventory-service
+      - audit-service
+      - reports-service
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    # No published port: the browser must go through the gateway, or the rate
+    # limiting and (later) auth edge are bypassable. Reachable in-network as
+    # http://web:8080.
+    #
+    # No bind mounts either. This image contains the OUTPUT of `npm run build`
+    # served by nginx — there is no dev server to hot-reload, and mounting host
+    # source over /app would do nothing but shadow the built assets. For live
+    # editing, run `npm run dev` on the host instead (vite.config.js proxies /api
+    # to localhost:8080).
+    expose:
+      - "8080"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
