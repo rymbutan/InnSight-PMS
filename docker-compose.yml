@@ -8,6 +8,22 @@
 #   docker compose up -d --build
 #   bash scripts/db-seed.sh      # once — creates roles, catalogues, admin user
 #
+# ── RUNNING OFFLINE ──────────────────────────────────────────────────────────
+# The whole stack is local, and so is the browser app: the SPA fetches its .glb
+# models from this gateway (web/public/models), decodes them with the meshopt
+# decoder bundled inside `three`, and lights the room with <Lightformer> emitters
+# rather than a drei `<Environment preset>` — presets pull an HDR from a CDN.
+# drei's default DRACOLoader (a Google CDN) is switched off explicitly in
+# src/sim/task3d.jsx. The ONLY external request the app can make is Google
+# Sign-In, and it is skipped entirely unless GOOGLE_CLIENT_ID is set, so with the
+# containers up the app is fully usable with the wifi off.
+#
+#   START OFFLINE:   docker compose up -d          (no --build)
+#
+# NEVER pass --build with no network: the image builds run `npm ci` against the
+# npm registry and pull base images, so the build fails and takes the running
+# stack down with it. Rebuild while you still have wifi; offline, just `up -d`.
+#
 # ── SECRETS ──────────────────────────────────────────────────────────────────
 # Every secret below uses `${VAR:?message}`, which makes compose REFUSE TO START
 # if the variable is unset. There are deliberately no fallback values any more.
@@ -22,6 +38,21 @@ services:
   # ── Infrastructure ──
   postgres:
     image: postgres:16-alpine
+    # Same restart policy as every app service. Without it, a Mac reboot or a
+    # Docker Desktop restart brought the eleven `unless-stopped` services back
+    # while postgres/redis/minio/mailhog stayed DOWN: the SPA and the .glb models
+    # still served (they are static files on the gateway), but every API call
+    # failed, so login 500'd and nothing behind it — the 3D room above all, which
+    # needs /api/room-layouts and /api/training/scenarios before it can draw
+    # anything — would open. It reads as "the app does not work offline" because
+    # you only reboot when you go somewhere, but the network is not involved.
+    #
+    # `depends_on: service_healthy` does NOT help here: those conditions are a
+    # `docker compose up` ordering feature and are ignored when the daemon
+    # restarts containers on boot. The restart policy is what makes the stack
+    # converge on its own — a service that starts before postgres is healthy
+    # exits and is retried until it isn't.
+    restart: unless-stopped
     # max_connections raised from the 100 default. Nine services each hold a
     # Prisma pool (see `connection_limit` on every DATABASE_URL below); 100 left
     # no headroom for the one-shot seed containers or a psql session, and the
@@ -52,12 +83,14 @@ services:
   # real SMTP provider.
   mailhog:
     image: mailhog/mailhog:latest
+    restart: unless-stopped
     ports:
       - "1025:1025"  # SMTP
       - "8025:8025"  # Web UI (visit http://localhost:8025)
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6380:6379"   # different host port to avoid conflict
     volumes:
@@ -75,6 +108,7 @@ services:
   # deleting the service outright.
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-innsight}

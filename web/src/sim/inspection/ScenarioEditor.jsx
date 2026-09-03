@@ -488,7 +488,10 @@ export default function ScenarioEditor({ onClose }) {
   // anyone's competency record.
   function previewAsStudent() {
     const p = currentPayload();
-    if (!p.anchors.some((a) => a.defectId)) return toast.error('Tag a fault before previewing.');
+    // Counted through scenarioCounts, not p.anchors: currentPayload() ships
+    // anchors empty on purpose (see there) and puts the tagging in `tags`, so
+    // reading anchors here rejected every scenario however many faults it had.
+    if (!scenarioCounts(p).faults) return toast.error('Tag a fault before previewing.');
     setPreview({ ...p, id: editingId || 'preview', active: true });
   }
 
