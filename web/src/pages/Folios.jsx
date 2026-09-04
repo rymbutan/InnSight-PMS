@@ -159,6 +159,16 @@ export default function Folios() {
       toast.error(errMsg(e));
     }
   }
+  async function printReceipt(paymentId) {
+    try {
+      await downloadAuthed(`/api/folios/${folioId}/payments/${paymentId}/receipt`, {
+        filename: `receipt-${folio?.folioNumber || folioId}-${paymentId.slice(-6)}.pdf`,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   async function closeFolio() {
     if (!confirm('Close this folio? This cannot be undone.')) return;
     try {
@@ -288,6 +298,44 @@ export default function Folios() {
               </tbody>
             </table>
           </div>
+
+          {statement?.folio?.payments?.length > 0 && (
+            <div className="panel">
+              <h3>Payments received</h3>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Method</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {statement.folio.payments.map((p) => (
+                    <tr key={p.id}>
+                      <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                      <td>{p.method}</td>
+                      <td>
+                        <span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{formatPeso(p.amountCents)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {/* A voided or failed payment has no receipt — the service
+                            refuses it, so the button is not offered. */}
+                        {p.status !== 'VOIDED' && p.status !== 'FAILED' && (
+                          <button className="secondary small" onClick={() => printReceipt(p.id)}>
+                            Receipt
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="panel">
             <h3>Post charge</h3>
