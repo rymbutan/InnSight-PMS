@@ -21,6 +21,7 @@ import ReservationDetail from './pages/ReservationDetail';
 import NewReservation from './pages/NewReservation';
 import PublicBooking from './pages/PublicBooking';
 import GuestPortal from './pages/GuestPortal';
+import SimulatedPayment from './pages/SimulatedPayment';
 import Revenue from './pages/Revenue';
 import Amenities from './pages/Amenities';
 import Training from './pages/Training';
@@ -38,6 +39,9 @@ export default function App() {
       <Route path="/request-access" element={<RequestAccess />} />
       <Route path="/book" element={<PublicBooking />} />
       <Route path="/portal/:confirmationNumber" element={<GuestPortal />} />
+      {/* Public: opened by scanning a QR code at the front desk. The token in the
+          URL is the credential, so there is no login and no app shell. */}
+      <Route path="/pay/:token" element={<SimulatedPayment />} />
       <Route
         element={
           <ProtectedRoute>

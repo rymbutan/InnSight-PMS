@@ -95,6 +95,20 @@ ADMIN_INITIAL_PASSWORD=$(safe_pw)
 # Hotel-local timezone — drives business-date/day-boundary logic (night audit,
 # daily totals). The Philippines has no DST, so this is a fixed +08:00 offset.
 TZ=Asia/Manila
+
+# The address a GUEST can reach — what portal links and QR codes encode.
+#
+# localhost is correct for a laptop demo, including with the wifi off. It is NOT
+# scannable: a phone resolving "localhost" reaches itself, so the app shows an
+# on-screen confirmation instead of a scan prompt (see services/_shared/publicUrl.js).
+#
+# To make QR codes scannable in a lab, set this to the machine's LAN address and put
+# both devices on the same network:
+#     PUBLIC_BASE_URL=http://192.168.1.20:8080
+# Once deployed, set it to the public origin:
+#     PUBLIC_BASE_URL=https://innsight.example
+# Nothing needs rebuilding — the services read it at start.
+PUBLIC_BASE_URL=http://localhost:8080
 EOF
 
 chmod 600 .env

@@ -17,6 +17,13 @@ export default function Folios() {
   const [deposit, setDeposit] = useState({ method: 'CASH', amount: '' });
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(false);
+  // Bill splitting: the other open folios on the same stay, and which transaction
+  // the user is currently moving. A stay can carry several folios when different
+  // people are settling different parts of the bill.
+  const [siblings, setSiblings] = useState([]);
+  const [moving, setMoving] = useState(null);
+  // The QR payment code currently on screen, if any.
+  const [qr, setQr] = useState(null);
 
   useEffect(() => {
     api
@@ -54,6 +61,43 @@ export default function Folios() {
   // Live: a charge, payment, refund, deposit or settlement posted from another
   // screen (or by the night audit) refreshes the open folio automatically.
   //
+  // Whenever the open folio belongs to a stay, load that stay's other folios so a
+  // charge can be moved between them. A walk-in folio has no stay and no siblings.
+  useEffect(() => {
+    if (!folio?.stayId) return setSiblings([]);
+    let cancelled = false;
+    api
+      .get(`/api/folios?stayId=${encodeURIComponent(folio.stayId)}`)
+      .then((r) => !cancelled && setSiblings(r.data.filter((f) => f.id !== folio.id && f.status === 'OPEN')))
+      .catch(() => !cancelled && setSiblings([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [folio?.id, folio?.stayId]);
+
+  async function addFolio() {
+    if (!folio?.stayId) return;
+    try {
+      const { data } = await api.post('/api/folios', { stayId: folio.stayId, guestId: folio.guestId });
+      toast.success(`Folio ${data.folioNumber} opened for this stay.`);
+      setSiblings((prev) => [...prev, data]);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  async function moveTransaction(transactionId, toFolioId) {
+    setMoving(null);
+    if (!toFolioId) return;
+    try {
+      await api.post(`/api/folios/${folioId}/transfer`, { transactionId, toFolioId });
+      toast.success('Charge moved.');
+      load(folioId);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   // Live scope — folio transactions only. This screen shows one folio's ledger;
   // it does not care that a room was cleaned or a reservation was booked.
   useLiveRefresh(
@@ -117,6 +161,52 @@ export default function Folios() {
       toast.error(errMsg(e));
     }
   }
+  async function chargeByQr() {
+    const amount = Math.round(Number(payment.amount) * 100);
+    if (!amount || amount <= 0) return toast.error('Enter the amount to charge first.');
+    try {
+      const { data } = await api.post(`/api/folios/${folioId}/payment-intents`, { amountCents: amount });
+      setQr({ ...data, issuedAt: new Date().toISOString() });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  // When the guest confirms on their phone, the folio service publishes
+  // folio:payment_received and the live refresh below reloads this page. Clear the
+  // code once its amount has landed, so the desk is not left showing a spent code.
+  useEffect(() => {
+    if (!qr || !statement) return;
+    const paid = (statement.folio.payments || []).some(
+      (p) => String(p.amountCents) === String(qr.amountCents) && new Date(p.createdAt) > new Date(qr.issuedAt || 0)
+    );
+    if (paid) {
+      setQr(null);
+      toast.success('Payment received.');
+    }
+  }, [statement]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function printReceipt(paymentId) {
+    try {
+      await downloadAuthed(`/api/folios/${folioId}/payments/${paymentId}/receipt`, {
+        filename: `receipt-${folio?.folioNumber || folioId}-${paymentId.slice(-6)}.pdf`,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  async function emailReceipt(paymentId) {
+    try {
+      const { data } = await api.post(`/api/folios/${folioId}/payments/${paymentId}/receipt/email`);
+      // Says "captured", not "delivered": SMTP points at Mailhog in this
+      // deployment, which holds mail for inspection and never sends it on.
+      toast.success(`Receipt emailed to ${data.to}. View it in Mailhog at :8025.`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   async function closeFolio() {
     if (!confirm('Close this folio? This cannot be undone.')) return;
     try {
@@ -149,7 +239,19 @@ export default function Folios() {
               Close folio
             </button>
           )}
+          {folio && folio.stayId && folio.status === 'OPEN' && (
+            <button className="secondary" onClick={addFolio}>
+              Split bill — add folio
+            </button>
+          )}
         </div>
+        {folio && folio.stayId && siblings.length > 0 && (
+          <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+            This stay has {siblings.length + 1} open folios:{' '}
+            {[folio, ...siblings].map((f) => f.folioNumber).join(', ')}. Use <strong>Move</strong> on a
+            charge to put it on another folio. Every folio must be settled before the guest can check out.
+          </p>
+        )}
         <p className="muted" style={{ marginTop: 8 }}>
           Tip: open a folio from the Arrivals page's "Folio" button to skip typing the id.
         </p>
@@ -186,6 +288,7 @@ export default function Folios() {
                   <th>Code</th>
                   <th>Description</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
+                  {siblings.length > 0 && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -198,11 +301,84 @@ export default function Folios() {
                     <td>{t.chargeCode || '—'}</td>
                     <td>{t.description}</td>
                     <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                    {siblings.length > 0 && (
+                      <td style={{ textAlign: 'right' }}>
+                        {/* Payments stay where they were taken, and a transfer cannot
+                            itself be transferred — the service refuses both, so the
+                            control is not offered for them. */}
+                        {folio.status === 'OPEN' &&
+                          t.type !== 'PAYMENT' &&
+                          t.type !== 'REFUND' &&
+                          t.type !== 'TRANSFER' &&
+                          (moving === t.id ? (
+                            <select
+                              autoFocus
+                              defaultValue=""
+                              onBlur={() => setMoving(null)}
+                              onChange={(e) => moveTransaction(t.id, e.target.value)}
+                            >
+                              <option value="">Move to…</option>
+                              {siblings.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {f.folioNumber}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button className="secondary small" onClick={() => setMoving(t.id)}>
+                              Move
+                            </button>
+                          ))}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {statement?.folio?.payments?.length > 0 && (
+            <div className="panel">
+              <h3>Payments received</h3>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Method</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {statement.folio.payments.map((p) => (
+                    <tr key={p.id}>
+                      <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                      <td>{p.method}</td>
+                      <td>
+                        <span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{formatPeso(p.amountCents)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {/* A voided or failed payment has no receipt — the service
+                            refuses it, so the button is not offered. */}
+                        {p.status !== 'VOIDED' && p.status !== 'FAILED' && (
+                          <span style={{ display: 'inline-flex', gap: 6 }}>
+                            <button className="secondary small" onClick={() => printReceipt(p.id)}>
+                              Receipt
+                            </button>
+                            <button className="secondary small" onClick={() => emailReceipt(p.id)}>
+                              Email
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="panel">
             <h3>Post charge</h3>
@@ -273,8 +449,44 @@ export default function Folios() {
                   />
                 </div>
               </div>
-              <button>Post payment</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button>Post payment</button>
+                <button type="button" className="secondary" onClick={chargeByQr}>
+                  Charge by QR
+                </button>
+              </div>
             </form>
+
+            {qr && (
+              <div className="qr-charge">
+                <img src={qr.qrDataUrl} alt="Scan to pay" width="180" height="180" />
+                <div className="qr-charge-side">
+                  <div className="qr-charge-amount">{formatPeso(qr.amountCents)}</div>
+                  {qr.scannable ? (
+                    <p className="muted">Ask the guest to scan this with their phone camera.</p>
+                  ) : (
+                    <p className="muted">
+                      {/* Honest about the offline case: a phone resolving localhost
+                          reaches itself, so the code cannot be scanned from one. */}
+                      This code points at <code>localhost</code>, so it can only be opened on this
+                      machine. Open the link in another tab to demonstrate, or set{' '}
+                      <code>PUBLIC_BASE_URL</code> to this machine&rsquo;s network address to make it
+                      scannable.
+                    </p>
+                  )}
+                  <a href={qr.url} target="_blank" rel="noreferrer" className="qr-charge-link">
+                    {qr.url}
+                  </a>
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Expires {new Date(qr.expiresAt).toLocaleTimeString()}. The folio updates itself
+                    when the guest confirms.
+                  </p>
+                  <button className="secondary small" onClick={() => setQr(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="panel">
