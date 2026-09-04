@@ -169,6 +169,17 @@ export default function Folios() {
     }
   }
 
+  async function emailReceipt(paymentId) {
+    try {
+      const { data } = await api.post(`/api/folios/${folioId}/payments/${paymentId}/receipt/email`);
+      // Says "captured", not "delivered": SMTP points at Mailhog in this
+      // deployment, which holds mail for inspection and never sends it on.
+      toast.success(`Receipt emailed to ${data.to}. View it in Mailhog at :8025.`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   async function closeFolio() {
     if (!confirm('Close this folio? This cannot be undone.')) return;
     try {
@@ -325,9 +336,14 @@ export default function Folios() {
                         {/* A voided or failed payment has no receipt — the service
                             refuses it, so the button is not offered. */}
                         {p.status !== 'VOIDED' && p.status !== 'FAILED' && (
-                          <button className="secondary small" onClick={() => printReceipt(p.id)}>
-                            Receipt
-                          </button>
+                          <span style={{ display: 'inline-flex', gap: 6 }}>
+                            <button className="secondary small" onClick={() => printReceipt(p.id)}>
+                              Receipt
+                            </button>
+                            <button className="secondary small" onClick={() => emailReceipt(p.id)}>
+                              Email
+                            </button>
+                          </span>
                         )}
                       </td>
                     </tr>

@@ -7,6 +7,7 @@ const { classifyTransactions } = require('../lib/folioSummary');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
 const { receiptModel } = require('../lib/receipt');
+const { send: sendMail } = require('../lib/notifier');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -1143,6 +1144,66 @@ router.post('/folios/:id/early-departure-adjustment', requireRole(...FINANCE), a
   }
 });
 
+// The receipt PDF, as a PDFDocument the caller pipes or collects. Shared by the
+// download route and the email route so the printed copy and the emailed copy can
+// never drift apart.
+function renderReceiptPdf(model) {
+  const money = (cents) => `${model.currency} ${(Number(cents) / 100).toFixed(2)}`;
+  const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
+  const doc = new PDFDocument({ size: 'A4', margin: 48 });
+
+  doc.fontSize(20).text('InnSight PMS', { align: 'left' });
+  doc.fontSize(12).fillColor('#555').text('Payment Receipt', { align: 'left' });
+  // Says plainly what this document is. A training system that prints something
+  // indistinguishable from a BIR official receipt is teaching the wrong lesson.
+  doc.fontSize(8).fillColor('#888').text('Simulation — not a BIR-registered official receipt.');
+  doc.moveDown();
+  doc.fillColor('black').fontSize(10);
+
+  // Two real columns at fixed x positions, rather than one continued text flow.
+  // The `continued: true` idiom the other PDF routes use makes the label's width
+  // constrain the VALUE too, so a long value wraps mid-string: the receipt number
+  // broke across two lines and "2026-09-04 14:11" split after the date. Folio
+  // numbers here are timestamp-based and genuinely long, so this has to hold.
+  const LABEL_X = 48;
+  const VALUE_X = 168;
+  const row = (label, value) => {
+    const y = doc.y;
+    doc.font('Helvetica-Bold').text(label, LABEL_X, y, { width: 112 });
+    doc.font('Helvetica').text(String(value ?? '—'), VALUE_X, y, { width: 340 });
+  };
+
+  row('Receipt No.:', model.receiptNumber);
+  row('Folio No.:', model.folioNumber);
+  row('Received From:', model.guestName);
+  row('Date Received:', fmtDateTime(model.paidAt));
+  row('Payment Method:', model.method);
+  doc.moveDown(0.5);
+  doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`);
+  doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`);
+
+  if (model.refunded) {
+    doc.moveDown(0.5);
+    doc.fillColor('#b8382c').font('Helvetica-Bold').fontSize(11).text('THIS PAYMENT HAS BEEN REFUNDED');
+    doc.fillColor('black').font('Helvetica');
+  }
+
+  doc.moveDown(2);
+  doc.fontSize(9).fillColor('#555').text('Received by: ____________________________');
+  return doc;
+}
+
+// Collect a PDFDocument into a Buffer, for attaching to an email.
+function pdfToBuffer(doc) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.end();
+  });
+}
+
 // GET /api/folios/:id/payments/:paymentId/receipt — proof that ONE payment was
 // received, as a PDF the front desk can print or hand over.
 //
@@ -1178,56 +1239,83 @@ router.get('/folios/:id/payments/:paymentId/receipt', requireRole(...ROLE_GROUPS
       return res.status(409).json({ error: err.message });
     }
 
-    const money = (cents) => `${model.currency} ${(Number(cents) / 100).toFixed(2)}`;
-    const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
-
-    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    const doc = renderReceiptPdf(model);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="receipt-${model.receiptNumber}.pdf"`);
     doc.pipe(res);
-
-    doc.fontSize(20).text('InnSight PMS', { align: 'left' });
-    doc.fontSize(12).fillColor('#555').text('Payment Receipt', { align: 'left' });
-    // Says plainly what this document is. A training system that prints something
-    // indistinguishable from a BIR official receipt is teaching the wrong lesson.
-    doc.fontSize(8).fillColor('#888').text('Simulation — not a BIR-registered official receipt.');
-    doc.moveDown();
-    doc.fillColor('black').fontSize(10);
-
-    // Two real columns at fixed x positions, rather than one continued text flow.
-    // The `continued: true` idiom the other PDF routes use makes the label's width
-    // constrain the VALUE too, so a long value wraps mid-string: the receipt number
-    // broke across two lines and "2026-09-04 14:11" split after the date. Folio
-    // numbers here are timestamp-based and genuinely long, so this has to hold.
-    const LABEL_X = 48;
-    const VALUE_X = 168;
-    const row = (label, value) => {
-      const y = doc.y;
-      doc.font('Helvetica-Bold').text(label, LABEL_X, y, { width: 112 });
-      doc.font('Helvetica').text(String(value ?? '—'), VALUE_X, y, { width: 340 });
-    };
-
-    row('Receipt No.:', model.receiptNumber);
-    row('Folio No.:', model.folioNumber);
-    row('Received From:', model.guestName);
-    row('Date Received:', fmtDateTime(model.paidAt));
-    row('Payment Method:', model.method);
-    doc.moveDown(0.5);
-    doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`);
-    doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`);
-
-    if (model.refunded) {
-      doc.moveDown(0.5);
-      doc.fillColor('#b8382c').font('Helvetica-Bold').fontSize(11).text('THIS PAYMENT HAS BEEN REFUNDED');
-      doc.fillColor('black').font('Helvetica');
-    }
-
-    doc.moveDown(2);
-    doc.fontSize(9).fillColor('#555').text('Received by: ____________________________');
     doc.end();
+
   } catch (err) {
     console.error('[Folio] Receipt error:', err.message);
     if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/payments/:paymentId/receipt/email — send the receipt to the
+// guest as a PDF attachment. The client asked for receipts to be emailable.
+//
+// Honest about what this is: SMTP points at Mailhog, which CAPTURES mail and never
+// delivers it. That is right for a classroom — nobody wants a training exercise
+// mailing real guests — but it means "sent" here means "visible at :8025", and the
+// response says so rather than implying delivery.
+router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASHIER), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+    if (!payment || payment.folioId !== folio.id) {
+      return res.status(404).json({ error: 'Payment not found on this folio.' });
+    }
+
+    const stay = folio.stayId
+      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+      : null;
+    const guest = folio.guestId
+      ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
+      : null;
+
+    // An explicit `to` lets the desk send to a company payer who is not the guest —
+    // the split-bill case — but the guest's own address is the default.
+    const contacts = guest?.contacts || [];
+    const emails = contacts.filter((c) => String(c.type).toUpperCase() === 'EMAIL' && c.value);
+    const to = req.body?.to || emails.find((c) => c.isPrimary)?.value || emails[0]?.value;
+    if (!to) {
+      // 400, not 500, and it names the reason: the desk needs to know the guest has
+      // no address on file rather than watching a send silently do nothing.
+      return res.status(400).json({ error: 'No email address on file for this guest. Add one, or pass `to`.' });
+    }
+
+    let model;
+    try {
+      model = receiptModel(payment, folio, stay?.guestName || guest?.displayName || null);
+    } catch (err) {
+      return res.status(409).json({ error: err.message });
+    }
+
+    const pdf = await pdfToBuffer(renderReceiptPdf(model));
+    await sendMail({
+      to,
+      subject: `Receipt ${model.receiptNumber} — InnSight Hotel`,
+      body: [
+        `Dear ${model.guestName},`,
+        '',
+        `Thank you. We have received ${model.currency} ${(Number(model.paidCents) / 100).toFixed(2)} by ${model.method}.`,
+        `Your receipt (${model.receiptNumber}) is attached.`,
+        '',
+        'InnSight Hotel',
+      ].join('\r\n'),
+      attachment: {
+        filename: `receipt-${model.receiptNumber}.pdf`,
+        contentType: 'application/pdf',
+        content: pdf,
+      },
+    });
+
+    res.status(202).json({ sent: true, to, receiptNumber: model.receiptNumber });
+  } catch (err) {
+    console.error('[Folio] Receipt email error:', err.message);
+    res.status(502).json({ error: 'Could not send the receipt email.' });
   }
 });
 
