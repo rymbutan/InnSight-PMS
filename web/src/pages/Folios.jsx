@@ -17,6 +17,11 @@ export default function Folios() {
   const [deposit, setDeposit] = useState({ method: 'CASH', amount: '' });
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(false);
+  // Bill splitting: the other open folios on the same stay, and which transaction
+  // the user is currently moving. A stay can carry several folios when different
+  // people are settling different parts of the bill.
+  const [siblings, setSiblings] = useState([]);
+  const [moving, setMoving] = useState(null);
 
   useEffect(() => {
     api
@@ -54,6 +59,43 @@ export default function Folios() {
   // Live: a charge, payment, refund, deposit or settlement posted from another
   // screen (or by the night audit) refreshes the open folio automatically.
   //
+  // Whenever the open folio belongs to a stay, load that stay's other folios so a
+  // charge can be moved between them. A walk-in folio has no stay and no siblings.
+  useEffect(() => {
+    if (!folio?.stayId) return setSiblings([]);
+    let cancelled = false;
+    api
+      .get(`/api/folios?stayId=${encodeURIComponent(folio.stayId)}`)
+      .then((r) => !cancelled && setSiblings(r.data.filter((f) => f.id !== folio.id && f.status === 'OPEN')))
+      .catch(() => !cancelled && setSiblings([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [folio?.id, folio?.stayId]);
+
+  async function addFolio() {
+    if (!folio?.stayId) return;
+    try {
+      const { data } = await api.post('/api/folios', { stayId: folio.stayId, guestId: folio.guestId });
+      toast.success(`Folio ${data.folioNumber} opened for this stay.`);
+      setSiblings((prev) => [...prev, data]);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  async function moveTransaction(transactionId, toFolioId) {
+    setMoving(null);
+    if (!toFolioId) return;
+    try {
+      await api.post(`/api/folios/${folioId}/transfer`, { transactionId, toFolioId });
+      toast.success('Charge moved.');
+      load(folioId);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   // Live scope — folio transactions only. This screen shows one folio's ledger;
   // it does not care that a room was cleaned or a reservation was booked.
   useLiveRefresh(
@@ -149,7 +191,19 @@ export default function Folios() {
               Close folio
             </button>
           )}
+          {folio && folio.stayId && folio.status === 'OPEN' && (
+            <button className="secondary" onClick={addFolio}>
+              Split bill — add folio
+            </button>
+          )}
         </div>
+        {folio && folio.stayId && siblings.length > 0 && (
+          <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+            This stay has {siblings.length + 1} open folios:{' '}
+            {[folio, ...siblings].map((f) => f.folioNumber).join(', ')}. Use <strong>Move</strong> on a
+            charge to put it on another folio. Every folio must be settled before the guest can check out.
+          </p>
+        )}
         <p className="muted" style={{ marginTop: 8 }}>
           Tip: open a folio from the Arrivals page's "Folio" button to skip typing the id.
         </p>
@@ -186,6 +240,7 @@ export default function Folios() {
                   <th>Code</th>
                   <th>Description</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
+                  {siblings.length > 0 && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -198,6 +253,36 @@ export default function Folios() {
                     <td>{t.chargeCode || '—'}</td>
                     <td>{t.description}</td>
                     <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                    {siblings.length > 0 && (
+                      <td style={{ textAlign: 'right' }}>
+                        {/* Payments stay where they were taken, and a transfer cannot
+                            itself be transferred — the service refuses both, so the
+                            control is not offered for them. */}
+                        {folio.status === 'OPEN' &&
+                          t.type !== 'PAYMENT' &&
+                          t.type !== 'REFUND' &&
+                          t.type !== 'TRANSFER' &&
+                          (moving === t.id ? (
+                            <select
+                              autoFocus
+                              defaultValue=""
+                              onBlur={() => setMoving(null)}
+                              onChange={(e) => moveTransaction(t.id, e.target.value)}
+                            >
+                              <option value="">Move to…</option>
+                              {siblings.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {f.folioNumber}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button className="secondary small" onClick={() => setMoving(t.id)}>
+                              Move
+                            </button>
+                          ))}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

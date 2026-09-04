@@ -2,6 +2,7 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const Redis = require('ioredis');
 const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
+const { makeServiceCaller } = require('../lib/serviceCall');
 const { makeInventoryClient } = require('../lib/inventoryClient');
 const { localDayBounds, parseLocalDay } = require('../lib/date');
 
@@ -11,6 +12,14 @@ const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK']; // front-desk operations
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+const FOLIO_URL = process.env.FOLIO_URL || 'http://folio-service:3007';
+// Narrow on purpose: this caller only ever reads whether a stay's folios are clear.
+const folioCall = makeServiceCaller({
+  name: 'stay',
+  roles: ['FRONT_DESK'],
+  permissions: ['folio.read'],
+});
 // Without an 'error' listener, ioredis throws on a connection blip and takes
 // the whole process down — which for this service means the capacity gate
 // disappears. Other files in this repo already do this; these did not.
@@ -221,6 +230,29 @@ router.post('/check-out/:stayId', requireRole(...STAFF), async (req, res) => {
         .status(409)
         .json({ error: `Only an in-house stay can be checked out (current: ${existing.status}).` });
     }
+
+    // EVERY folio on the stay must be clear, not just the first one. Bill splitting
+    // means a stay can carry several folios, and releasing the room while one is
+    // unpaid strands that balance with no guest left to bill it to.
+    //
+    // A folio service that is down or slow must NOT silently let an unpaid guest
+    // walk: this fails closed and asks the desk to retry, which is the safe
+    // direction for money.
+    try {
+      const { unsettled } = await folioCall.call(
+        `${FOLIO_URL}/api/folios/outstanding?stayId=${encodeURIComponent(existing.id)}`
+      );
+      if (unsettled && unsettled.length) {
+        return res.status(409).json({
+          error: `Cannot check out: ${unsettled.length} folio(s) still carry a balance.`,
+          folios: unsettled.map((f) => f.folioNumber),
+        });
+      }
+    } catch (err) {
+      console.error('[Stay] Folio balance check failed:', err.message);
+      return res.status(503).json({ error: 'Could not confirm the guest has settled. Try again.' });
+    }
+
     const checkOutAt = new Date();
     const stay = await prisma.stay.update({
       where: { id: req.params.stayId },

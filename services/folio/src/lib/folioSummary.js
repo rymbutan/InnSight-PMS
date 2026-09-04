@@ -27,7 +27,14 @@ function classifyTransactions(transactions, codes) {
   for (const tx of transactions) {
     const amount = BigInt(tx.amountCents);
     const tax = BigInt(tx.taxAmountCents || 0);
-    if (tx.type === 'CHARGE') {
+    // TRANSFER is classified exactly like CHARGE, and must be: it is a charge-side
+    // movement between two folios of one stay (see lib/transfer.js). Ignoring it
+    // left the charge still owing on the folio it was moved off and invisible on
+    // the folio it landed on — a split bill that adds up to the wrong total on both
+    // halves. The pair nets to zero property-wide, so revenue reporting is
+    // unaffected; the charge code rides along so a transferred room charge is still
+    // room revenue rather than becoming miscellaneous income.
+    if (tx.type === 'CHARGE' || tx.type === 'TRANSFER') {
       if (roomCodes.has(tx.chargeCode)) roomChargeCents += amount;
       else if (facilityCodes.has(tx.chargeCode)) facilityChargeCents += amount;
       else extraChargeCents += amount;
