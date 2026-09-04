@@ -6,6 +6,7 @@ const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
+const { receiptModel } = require('../lib/receipt');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -1139,6 +1140,94 @@ router.post('/folios/:id/early-departure-adjustment', requireRole(...FINANCE), a
   } catch (err) {
     console.error('[Folio] Early departure adjustment error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/folios/:id/payments/:paymentId/receipt — proof that ONE payment was
+// received, as a PDF the front desk can print or hand over.
+//
+// Distinct from /folios/:id/print, which renders the whole folio: a guest paying a
+// deposit at reservation time has no folio worth printing yet, but does need
+// something showing what they handed over. The client asked for exactly this.
+router.get('/folios/:id/payments/:paymentId/receipt', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+    // The folioId check is not redundant: without it, any payment id could be
+    // receipted against any folio, putting one guest's payment on another's paper.
+    if (!payment || payment.folioId !== folio.id) {
+      return res.status(404).json({ error: 'Payment not found on this folio.' });
+    }
+
+    const stay = folio.stayId
+      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+      : null;
+    const guest = folio.guestId
+      ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
+      : null;
+    const guestName = stay?.guestName || guest?.displayName || null;
+
+    let model;
+    try {
+      model = receiptModel(payment, folio, guestName);
+    } catch (err) {
+      // A voided or failed payment is a 409, not a 500 — the request was
+      // well-formed, the payment is simply not receiptable.
+      return res.status(409).json({ error: err.message });
+    }
+
+    const money = (cents) => `${model.currency} ${(Number(cents) / 100).toFixed(2)}`;
+    const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
+
+    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="receipt-${model.receiptNumber}.pdf"`);
+    doc.pipe(res);
+
+    doc.fontSize(20).text('InnSight PMS', { align: 'left' });
+    doc.fontSize(12).fillColor('#555').text('Payment Receipt', { align: 'left' });
+    // Says plainly what this document is. A training system that prints something
+    // indistinguishable from a BIR official receipt is teaching the wrong lesson.
+    doc.fontSize(8).fillColor('#888').text('Simulation — not a BIR-registered official receipt.');
+    doc.moveDown();
+    doc.fillColor('black').fontSize(10);
+
+    // Two real columns at fixed x positions, rather than one continued text flow.
+    // The `continued: true` idiom the other PDF routes use makes the label's width
+    // constrain the VALUE too, so a long value wraps mid-string: the receipt number
+    // broke across two lines and "2026-09-04 14:11" split after the date. Folio
+    // numbers here are timestamp-based and genuinely long, so this has to hold.
+    const LABEL_X = 48;
+    const VALUE_X = 168;
+    const row = (label, value) => {
+      const y = doc.y;
+      doc.font('Helvetica-Bold').text(label, LABEL_X, y, { width: 112 });
+      doc.font('Helvetica').text(String(value ?? '—'), VALUE_X, y, { width: 340 });
+    };
+
+    row('Receipt No.:', model.receiptNumber);
+    row('Folio No.:', model.folioNumber);
+    row('Received From:', model.guestName);
+    row('Date Received:', fmtDateTime(model.paidAt));
+    row('Payment Method:', model.method);
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`);
+    doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`);
+
+    if (model.refunded) {
+      doc.moveDown(0.5);
+      doc.fillColor('#b8382c').font('Helvetica-Bold').fontSize(11).text('THIS PAYMENT HAS BEEN REFUNDED');
+      doc.fillColor('black').font('Helvetica');
+    }
+
+    doc.moveDown(2);
+    doc.fontSize(9).fillColor('#555').text('Received by: ____________________________');
+    doc.end();
+  } catch (err) {
+    console.error('[Folio] Receipt error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
