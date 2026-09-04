@@ -18,6 +18,11 @@ model BusinessDay {
   departures        Int         @default(0)
   noShows           Int         @default(0)
   roomRevenueCents  BigInt      @default(0)
+  // Walk-in facility sales, reported apart from otherRevenueCents at the client's
+  // request. Defaulted rather than backfilled: days closed before this existed had
+  // their facility income counted in otherRevenueCents, and rewriting a closed
+  // business day's figures would be falsifying an audit record.
+  facilityRevenueCents BigInt   @default(0)
   otherRevenueCents BigInt      @default(0)
   taxCents          BigInt      @default(0)
   paymentsCents     BigInt      @default(0)
