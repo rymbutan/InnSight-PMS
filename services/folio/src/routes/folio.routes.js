@@ -8,6 +8,8 @@ const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
 const { receiptModel } = require('../lib/receipt');
 const { send: sendMail } = require('../lib/notifier');
+const { qrPngBuffer } = require('../lib/qr');
+const { publicUrl } = require('../lib/publicUrl');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -1144,10 +1146,17 @@ router.post('/folios/:id/early-departure-adjustment', requireRole(...FINANCE), a
   }
 });
 
+// The guest-portal link for a stay, or null when there is nothing to link to. A QR
+// leading to "Not found" is worse than no QR, so this never guesses a URL.
+function portalLinkFor(stay) {
+  const ref = stay?.confirmationNumber || stay?.reservation?.confirmationNumber;
+  return ref ? publicUrl(`/portal/${encodeURIComponent(ref)}`) : null;
+}
+
 // The receipt PDF, as a PDFDocument the caller pipes or collects. Shared by the
 // download route and the email route so the printed copy and the emailed copy can
 // never drift apart.
-function renderReceiptPdf(model) {
+async function renderReceiptPdf(model, { portalLink } = {}) {
   const money = (cents) => `${model.currency} ${(Number(cents) / 100).toFixed(2)}`;
   const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
@@ -1178,18 +1187,38 @@ function renderReceiptPdf(model) {
   row('Received From:', model.guestName);
   row('Date Received:', fmtDateTime(model.paidAt));
   row('Payment Method:', model.method);
+  // Explicit x: the last row() left the cursor in the value column, so without it
+  // the whole amount block sits indented under that column.
   doc.moveDown(0.5);
-  doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`);
-  doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`);
+  doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`, LABEL_X, doc.y);
+  doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`, LABEL_X, doc.y);
 
   if (model.refunded) {
     doc.moveDown(0.5);
-    doc.fillColor('#b8382c').font('Helvetica-Bold').fontSize(11).text('THIS PAYMENT HAS BEEN REFUNDED');
+    doc
+      .fillColor('#b8382c')
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .text('THIS PAYMENT HAS BEEN REFUNDED', LABEL_X, doc.y);
     doc.fillColor('black').font('Helvetica');
   }
 
+  // The guest's digital copy, when this folio belongs to a booking worth linking
+  // to. Positioned absolutely because doc.image() does not advance the cursor
+  // predictably and the signature line below has to keep its place.
+  if (portalLink) {
+    try {
+      doc.image(await qrPngBuffer(portalLink), 400, 96, { width: 100 });
+      doc.fontSize(7).fillColor('#666').text('Scan for a digital copy', 400, 200, { width: 100, align: 'center' });
+      doc.fillColor('black');
+    } catch (err) {
+      // Never fail a guest's proof of payment over the convenience code on it.
+      console.error('[Folio] Receipt QR render failed:', err.message);
+    }
+  }
+
   doc.moveDown(2);
-  doc.fontSize(9).fillColor('#555').text('Received by: ____________________________');
+  doc.fontSize(9).fillColor('#555').text('Received by: ____________________________', LABEL_X, doc.y);
   return doc;
 }
 
@@ -1239,7 +1268,7 @@ router.get('/folios/:id/payments/:paymentId/receipt', requireRole(...ROLE_GROUPS
       return res.status(409).json({ error: err.message });
     }
 
-    const doc = renderReceiptPdf(model);
+    const doc = await renderReceiptPdf(model, { portalLink: portalLinkFor(stay) });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="receipt-${model.receiptNumber}.pdf"`);
     doc.pipe(res);
@@ -1293,7 +1322,7 @@ router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASH
       return res.status(409).json({ error: err.message });
     }
 
-    const pdf = await pdfToBuffer(renderReceiptPdf(model));
+    const pdf = await pdfToBuffer(await renderReceiptPdf(model, { portalLink: portalLinkFor(stay) }));
     await sendMail({
       to,
       subject: `Receipt ${model.receiptNumber} — InnSight Hotel`,
