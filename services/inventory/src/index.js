@@ -157,6 +157,8 @@ const LIVE_CHANNELS = [
   'folio:deposit_received',
   'folio:refund_posted',
   'folio:early_departure_adjusted',
+  // Bill splitting: a charge moved between two folios of one stay.
+  'folio:transferred',
   // Guests
   'guest:profile_created',
   'guest:profile_updated',
