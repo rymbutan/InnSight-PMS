@@ -1631,6 +1631,17 @@ tr.active td {
   background: var(--border);
   margin: 4px 0;
 }
+/* The leading glyph in a menu row. `.actions-item` is the flex container and
+   already supplies the 8px gap, so this only has to stop the icon being
+   squeezed by a long label and keep it optically centred on the text. */
+.actions-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+  line-height: 1;
+}
 
 /* ==========================================================================
    Login (kept hero split from previous batch)
@@ -2091,6 +2102,15 @@ tr.active td {
   font-size: 13px;
   margin-bottom: 12px;
 }
+/* The call-to-action under an empty state. `.empty-hint` already carries the
+   12 px above it, so this only needs to hold the gap when there is no hint and
+   to keep several buttons apart. */
+.empty-action {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
 
 /* Error helper */
 .error {
@@ -2163,6 +2183,14 @@ th.sortable.active .sort-arrow {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 4px;
+}
+/* The entry's text. Audit summaries can be long single-token strings (ids,
+   paths), so it wraps rather than stretching `.timeline-card` past the column. */
+.timeline-body {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 /* ==========================================================================

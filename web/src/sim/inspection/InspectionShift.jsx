@@ -289,16 +289,40 @@ export default function InspectionShift({
   const active = anchors.find((a) => a.id === openAnchor) || null;
   const nearby = anchors.find((a) => a.id === hover) || null;
 
+  // Structure matters here, and it is not cosmetic. The shift used to render
+  // `.fr-wrap > .fr-topbar + .fr-canvas` — four class names with NO rules in
+  // styles.css, because they were renamed without the stylesheet following. The
+  // consequences were all silent:
+  //
+  //  • `.fr-wrap` was an unstyled block in normal flow instead of a full-screen
+  //    overlay, so the inspection laid itself out BELOW the hotel map, off-screen.
+  //  • the R3F <Canvas> sizes itself to its parent; `.fr-canvas` had no height, so
+  //    the canvas resolved to 0 px and the room never drew.
+  //  • `.insp-clipboard`, `.fr-crosshair`, `.fr-prompt` and `.insp-flag-backdrop`
+  //    are all `position: absolute`. With no positioned ancestor they escaped to
+  //    the initial containing block and floated over the map — which is the only
+  //    part of the inspection anyone ever saw.
+  //
+  // `.cg-overlay > .cg-window.fr-window > .cg-titlebar + .fr-stage` is the house
+  // pattern for every full-screen sim (the loading branch above already used it),
+  // and it is what the existing `.fr-*` rules are written against: `.fr-window`
+  // is the `position: relative` the absolute children anchor to, and `.fr-stage`
+  // is the flex-grown box that gives the canvas a real height.
+  //
+  // `.cg-overlay` is also load-bearing for input: KeyboardShortcuts treats it as
+  // the immersive selector, so WASD reaches the player instead of firing the
+  // app's global shortcuts.
   return (
-    <div className="fr-wrap">
-      <div className="fr-topbar">
-        <div>
-          <strong>Room inspection</strong> · {tier} · {caseFile.confirmationNumber}
-        </div>
-        <div className="muted">
-          {reviewed}/{anchors.length} items reviewed
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+    <div className="cg-overlay" role="dialog" aria-label="Room inspection">
+      <div className="cg-window fr-window">
+        <div className="cg-titlebar">
+          <strong>Room inspection</strong>
+          <span className="muted">
+            {tier} · {caseFile.confirmationNumber}
+          </span>
+          <span className="cg-task-label">
+            {reviewed}/{anchors.length} items reviewed
+          </span>
           <button className="secondary" onClick={() => setClipboard((v) => !v)}>
             Booking (C)
           </button>
@@ -307,53 +331,56 @@ export default function InspectionShift({
           </button>
           <button onClick={() => setPhase('done')}>Finish inspection</button>
         </div>
-      </div>
 
-      <div className="fr-canvas">
-        <Canvas
-          shadows
-          dpr={[1, 2]}
-          camera={{ fov: 58, near: 0.1, far: 120 }}
-          gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-          onCreated={({ gl }) => gl.setClearColor('#d8cdb8')}
-        >
-          <RoomShell layout={shellLayout} />
-          {[...prims, ...stockProps].map((p, i) => (
-            <Prim key={`p${i}`} item={p} />
-          ))}
-          <Anchors
-            anchors={anchors}
-            resolved={resolved}
-            hover={hover}
-            onPick={setOpenAnchor}
-            dragRef={dragRef}
-          />
-          <Player
-            paused={paused}
-            onHover={setHover}
-            interactRef={interactRef}
-            viewRef={viewRef}
-            layout={playerLayout}
-            dragRef={dragRef}
-            onLockedChange={setLocked}
-          />
-        </Canvas>
-        <div className="fr-crosshair" />
+        <div className="fr-stage">
+          <Canvas
+            shadows
+            dpr={[1, 2]}
+            camera={{ fov: 58, near: 0.1, far: 120 }}
+            gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
+            onCreated={({ gl }) => gl.setClearColor('#d8cdb8')}
+          >
+            <RoomShell layout={shellLayout} />
+            {[...prims, ...stockProps].map((p, i) => (
+              <Prim key={`p${i}`} item={p} />
+            ))}
+            <Anchors
+              anchors={anchors}
+              resolved={resolved}
+              hover={hover}
+              onPick={setOpenAnchor}
+              dragRef={dragRef}
+            />
+            <Player
+              paused={paused}
+              onHover={setHover}
+              interactRef={interactRef}
+              viewRef={viewRef}
+              layout={playerLayout}
+              dragRef={dragRef}
+              onLockedChange={setLocked}
+            />
+          </Canvas>
+          <div className="fr-crosshair" />
 
-        {nearby && !resolved[nearby.id] && !openAnchor && (
-          <div className="fr-prompt">
-            <strong>{nearby.label}</strong> — click to inspect
+          {nearby && !resolved[nearby.id] && !openAnchor && (
+            <div className="fr-prompt">
+              <strong>{nearby.label}</strong> — click to inspect
+            </div>
+          )}
+
+          <div className="fr-hint">
+            WASD / arrows to move · drag to look · click an item to inspect it ·{' '}
+            {locked ? 'Esc to release' : 'L for mouse-look'}
           </div>
-        )}
-
-        <div className="fr-help">
-          WASD / arrows to move · drag to look · click an item to inspect it ·{' '}
-          {locked ? 'Esc to release' : 'L for mouse-look'}
         </div>
-      </div>
 
-      <Clipboard caseFile={caseFile} open={clipboard} onClose={() => setClipboard(false)} />
-      <FlagMenu anchor={active} onChoose={choose} onCancel={() => setOpenAnchor(null)} />
+        {/* Inside `.fr-window`, not beside it: both are positioned absolutely and
+            `.fr-window` is the only `position: relative` ancestor — the clipboard's
+            `top: 52px` means "under the titlebar", not "under the app header". */}
+        <Clipboard caseFile={caseFile} open={clipboard} onClose={() => setClipboard(false)} />
+        <FlagMenu anchor={active} onChoose={choose} onCancel={() => setOpenAnchor(null)} />
+      </div>
     </div>
   );
 }
