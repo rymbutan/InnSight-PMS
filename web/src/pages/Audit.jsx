@@ -87,13 +87,21 @@ export default function Audit() {
                 <div className="value">{formatPeso(current.roomRevenueCents ?? 0)}</div>
               </div>
               <div className="metric">
+                <div className="label">Facility revenue</div>
+                <div className="value">{formatPeso(current.facilityRevenueCents ?? 0)}</div>
+              </div>
+              <div className="metric">
                 <div className="label">Other revenue</div>
                 <div className="value">{formatPeso(current.otherRevenueCents ?? 0)}</div>
               </div>
               <div className="metric">
                 <div className="label">Total revenue</div>
                 <div className="value">
-                  {formatPeso(Number(current.roomRevenueCents ?? 0) + Number(current.otherRevenueCents ?? 0))}
+                  {formatPeso(
+                    Number(current.roomRevenueCents ?? 0) +
+                      Number(current.facilityRevenueCents ?? 0) +
+                      Number(current.otherRevenueCents ?? 0)
+                  )}
                 </div>
               </div>
             </div>
@@ -145,6 +153,7 @@ export default function Audit() {
                 <th>ADR</th>
                 <th>RevPAR</th>
                 <th>Room revenue</th>
+                <th>Facility revenue</th>
                 <th>Other revenue</th>
                 <th>Total revenue</th>
               </tr>
@@ -162,8 +171,15 @@ export default function Audit() {
                   <td>{formatPeso(d.adr ?? 0)}</td>
                   <td>{formatPeso(d.revPar ?? 0)}</td>
                   <td>{formatPeso(d.roomRevenueCents)}</td>
+                  <td>{formatPeso(d.facilityRevenueCents ?? 0)}</td>
                   <td>{formatPeso(d.otherRevenueCents ?? 0)}</td>
-                  <td>{formatPeso(Number(d.roomRevenueCents ?? 0) + Number(d.otherRevenueCents ?? 0))}</td>
+                  <td>
+                    {formatPeso(
+                      Number(d.roomRevenueCents ?? 0) +
+                        Number(d.facilityRevenueCents ?? 0) +
+                        Number(d.otherRevenueCents ?? 0)
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

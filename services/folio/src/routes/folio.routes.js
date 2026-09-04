@@ -415,22 +415,30 @@ router.get('/folios/daily-totals', requireRole(...ROLE_GROUPS.MGMT_AUDIT), async
       select: { type: true, amountCents: true, taxAmountCents: true, chargeCode: true },
     });
 
-    // Room revenue is classified by the charge code's category, not a hardcoded
-    // 'ROOM' string (the seeded room code is 'RM'). REFUND and ADJUSTMENT are
-    // included so the night-audit revenue/payment figures actually reconcile.
-    const roomCodes = new Set(
-      (await prisma.chargeCode.findMany({ where: { category: 'ROOM' }, select: { code: true } })).map(
-        (c) => c.code
-      )
-    );
+    // Revenue is classified by the charge code's category, not a hardcoded 'ROOM'
+    // string (the seeded room code is 'RM'). REFUND and ADJUSTMENT are included so
+    // the night-audit revenue/payment figures actually reconcile.
+    //
+    // FACILITY is pulled out as its own bucket: walk-in facility sales are a
+    // separate line of business from a resident guest's extras, and the night audit
+    // is required to report them separately. Both categories are fetched in one
+    // query rather than two round trips.
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const roomCodes = new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code));
+    const facilityCodes = new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code));
 
     let roomRevenueCents = 0n;
+    let facilityRevenueCents = 0n;
     let otherRevenueCents = 0n;
     let taxCents = 0n;
     let paymentsCents = 0n;
     for (const t of txs) {
       if (t.type === 'CHARGE') {
         if (roomCodes.has(t.chargeCode)) roomRevenueCents += t.amountCents;
+        else if (facilityCodes.has(t.chargeCode)) facilityRevenueCents += t.amountCents;
         else otherRevenueCents += t.amountCents;
         taxCents += t.taxAmountCents;
       } else if (t.type === 'ADJUSTMENT') {
@@ -445,6 +453,7 @@ router.get('/folios/daily-totals', requireRole(...ROLE_GROUPS.MGMT_AUDIT), async
     res.json({
       date: start,
       roomRevenueCents: roomRevenueCents.toString(),
+      facilityRevenueCents: facilityRevenueCents.toString(),
       otherRevenueCents: otherRevenueCents.toString(),
       taxCents: taxCents.toString(),
       paymentsCents: paymentsCents.toString(),
