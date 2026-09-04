@@ -20,6 +20,23 @@ model User {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   roles           UserRole[]
+
+  // Profile photo, stored inline rather than on a volume or in MinIO.
+  //
+  // WHY IN THE DATABASE
+  // -------------------
+  // Nothing in this stack talks to MinIO (it is provisioned but unused), and a
+  // container-local volume would not survive a second replica — each one would
+  // serve a different set of faces. At one small image per staff account this is
+  // kilobytes of a table that already gets backed up, so it needs no new
+  // infrastructure and no new failure mode.
+  //
+  // `avatarMime` is the VALIDATED type, set from the file's magic bytes rather
+  // than from the request's Content-Type, because the response echoes it back as
+  // the image's Content-Type and a caller must not be able to choose that.
+  avatarData      Bytes?
+  avatarMime      String?
+  avatarUpdatedAt DateTime?
 }
 
 // Someone asked for an account from the sign-in screen. This is NOT a user:
@@ -46,6 +63,28 @@ model RoomLayout {
 
   @@unique([roomTier, version])
   @@index([roomTier, version])
+}
+
+// A .glb uploaded from an admin's machine, usable as a fixture alongside the
+// .glb files that ship in web/public/models.
+//
+// The BYTES live here rather than in MinIO because nothing in this codebase
+// talks to MinIO — no SDK, no client, no bucket policy — and the user avatars
+// already set the precedent for binary in Postgres. One storage story is worth
+// more than the marginally better fit, and swapping the column for an object
+// key later touches this file and one route.
+//
+// `key` is the fixture key the layouts reference (`model: 'my_chair'`), so it
+// is the primary key: two assets cannot claim the same fixture name.
+model RoomAsset {
+  key        String   @id
+  filename   String
+  mime       String
+  sizeBytes  Int
+  data       Bytes
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model AccessRequest {

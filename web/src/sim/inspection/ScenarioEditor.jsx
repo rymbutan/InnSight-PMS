@@ -5,10 +5,14 @@ import * as THREE from 'three';
 
 import api from '../../api';
 import { useToast, errMsg } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
+import Icon from '../../components/Icon';
+import { useTheme } from '../../theme';
 import { RoomShell, FixtureBody, itemY } from '../RoomFreeRoam';
 import { refOf, scenarioCounts } from './scenario';
 import { variantsFor, labelFor } from './assetFamilies';
 import { getRoomPlan } from '../roomLayouts';
+import { stageColor } from '../stageColor';
 import { MODELS } from '../task3d';
 import { offerableCategories } from './categories';
 import { hydrateCategories } from './categorySync';
@@ -114,8 +118,101 @@ function EditorObject({ item, selected, onSelect, objectRef }) {
   );
 }
 
-export default function ScenarioEditor({ onClose }) {
+// The left panel's three tabs, ordered by how often you are in each.
+const SE_TABS = [
+  { id: 'build', label: 'Build', icon: 'armchair', title: 'Add objects and edit the selected one' },
+  { id: 'scenario', label: 'Scenario', icon: 'file-text', title: 'Tier and name' },
+  { id: 'faults', label: 'Faults', icon: 'alert-circle', title: 'The shared fault-category library' },
+];
+
+// Shortcuts and a short guide, in the same panel shape the layout editor uses.
+const SE_KEYS = [
+  ['⌘S / Ctrl+S', 'Save the scenario'],
+  ['M', 'Move gizmo'],
+  ['R', 'Rotate gizmo (yaw only)'],
+  ['⌘Z / Ctrl+Z', 'Undo'],
+  ['⇧⌘Z / Ctrl+Y', 'Redo'],
+];
+
+function ScenarioHelp({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="ed-help-backdrop" onClick={onClose}>
+      <div className="ed-help" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Editor help">
+        <div className="ed-help-head">
+          <strong>Scenario editor — guide</strong>
+          <button className="tool-btn" onClick={onClose} aria-label="Close help" title="Close (Esc)">
+            <Icon name="x" size={16} strokeWidth={2} />
+          </button>
+        </div>
+        <div className="ed-help-body">
+          <h4>What you are authoring</h4>
+          <p className="ed-help-note">
+            The room as it should <em>not</em> be. Break it the way a rushed turnover would, then tag each
+            wrong object with the kind of fault it is. What you see here is what the student walks into.
+          </p>
+          <h4>Steps</h4>
+          <ol className="ed-help-steps">
+            <li>
+              Pick a <strong>tier</strong> and name the scenario.
+            </li>
+            <li>
+              <strong>Add objects</strong> from the picker, or select ones already in the room.
+            </li>
+            <li>
+              <strong>Place them</strong> with the gizmo — Move and Rotate on the toolbar.
+            </li>
+            <li>
+              <strong>Tag the faults.</strong> An untagged object is a decoy, and decoys are what stop
+              students flagging everything that highlights.
+            </li>
+            <li>
+              <strong>Preview</strong> runs the real inspection with recording off, then{' '}
+              <strong>Save</strong>.
+            </li>
+          </ol>
+          <h4>Shortcuts</h4>
+          <table className="ed-help-keys">
+            <tbody>
+              {SE_KEYS.map(([k, what]) => (
+                <tr key={k}>
+                  <td>
+                    <kbd>{k}</kbd>
+                  </td>
+                  <td>{what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <h4>The booking on the clipboard</h4>
+          <p className="ed-help-note">
+            Not authored here. The student inspects against the{' '}
+            <strong>real reservation on the room</strong> — guest, party size and special requests all come
+            from the PMS, so one scenario works on any room of its tier. A fault that booking cannot support
+            (twin beds tagged for a couple, on a solo stay) is shown as a clean decoy rather than graded.
+            Previewing as a student uses a practice booking, marked as such.
+          </p>
+          <h4>Careful with</h4>
+          <p className="ed-help-note">
+            Nothing here autosaves — unlike the room layout editor, this one saves only when you press
+            Save.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ScenarioEditor({ onClose, initialScenarioId = null, onScenarioChange }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tier, setTier] = useState('Standard');
   const [scenarios, setScenarios] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -132,6 +229,13 @@ export default function ScenarioEditor({ onClose }) {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]);
+  // The redo branch, plus the chrome state the toolbar drives.
+  const [future, setFuture] = useState([]);
+  const [listLoaded, setListLoaded] = useState(false);
+  const [sideOpen, setSideOpen] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState('build');
+  const { theme, toggle: toggleTheme } = useTheme();
 
   const orbit = useRef();
   const selObjRef = useRef();
@@ -149,6 +253,74 @@ export default function ScenarioEditor({ onClose }) {
   useEffect(() => {
     reloadCategories();
   }, []);
+
+  // The id to restore, captured ONCE at mount. It cannot read the prop later:
+  // the mirror effect below rewrites the URL, which changes the prop, so the
+  // thing we are trying to restore would be erased by the act of syncing.
+  const wanted = useRef(initialScenarioId);
+  const restored = useRef(false);
+
+  // Mirror the open scenario into the URL. Driven off `editingId` rather than
+  // called from each of the three places that set it — save, open and new — so
+  // a fourth caller added later cannot forget to keep the address bar honest.
+  //
+  // HELD until the restore has run. On mount `editingId` is null, so without
+  // this guard the very first pass wrote "no scenario open" to the URL and
+  // deleted the `?scenario=` it was about to be restored from — the reload
+  // feature undoing itself one render before it worked.
+  useEffect(() => {
+    if (wanted.current && !restored.current) return;
+    onScenarioChange?.(editingId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+
+  // Clicking an object in the 3D view jumps to the tab that can edit it.
+  // Without this, selecting something while on Scenario or Faults appeared to
+  // do nothing — the inspector was rendered, just on a tab you were not
+  // looking at.
+  useEffect(() => {
+    if (selId) setPanelTab('build');
+  }, [selId]);
+
+  // Editor shortcuts. Only M and R — this editor persists position and yaw, so
+  // there is no scale gizmo for T to switch to. Guarded on the modifier keys so
+  // ⌘R still reloads, and skipped entirely while a field has focus, since every
+  // one of these is a bare letter and the panel is full of text inputs.
+  useEffect(() => {
+    const onKey = (e) => {
+      // ⌘S / Ctrl+S is checked BEFORE the focus guard below, deliberately.
+      // Naming a scenario and pressing save without leaving the field is the
+      // normal way to use it, so a shortcut that stops working the moment the
+      // cursor is in an input is a shortcut nobody can rely on. preventDefault
+      // is what stops the browser opening its own "Save page as" dialog.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (!busy) save();
+        return;
+      }
+      const t = e.target.tagName;
+      // Everything below is a bare letter or a text-editing chord, so it stays
+      // out of the way while a field has focus — ⌘Z in a text box has to mean
+      // "undo my typing", not "undo the scene".
+      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redoAction();
+        else undo();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redoAction();
+      } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setMode('translate');
+      } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        setMode('rotate');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   // Saving a category writes to the SHARED library, so it immediately becomes
   // available on every other scenario and room — not just this one.
@@ -176,7 +348,13 @@ export default function ScenarioEditor({ onClose }) {
   }
 
   async function retireCategory(cat) {
-    if (!window.confirm(`Retire "${cat.label}"? Scenarios already using it keep working.`)) return;
+    const ok = await confirm({
+      title: 'Retire category',
+      message: `Retire “${cat.label}”?`,
+      detail: 'Scenarios already using it keep working.',
+      confirmLabel: 'Retire',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/api/training/categories/${encodeURIComponent(cat.id)}`);
       await reloadCategories();
@@ -211,11 +389,41 @@ export default function ScenarioEditor({ onClose }) {
       setScenarios(data || []);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      // In `finally`, so a failed fetch still releases the restore gate below.
+      // Keyed off "the list has been fetched", not "the list has rows": with an
+      // empty library, or an offline server, `scenarios.length` stays 0 forever
+      // and the gate would never open — leaving the URL frozen for the rest of
+      // the session.
+      setListLoaded(true);
     }
   }
   useEffect(() => {
     load(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reopen the scenario named in the URL, once, after the list arrives.
+  // `restored` is a ref rather than state so it cannot re-trigger: without the
+  // guard, `scenarios` changing after any save would reopen the stored copy and
+  // throw away whatever was on screen.
+  useEffect(() => {
+    if (restored.current || !listLoaded) return;
+    if (!wanted.current) {
+      // Nothing to restore — open the gate so the mirror effect can run.
+      restored.current = true;
+      return;
+    }
+    const found = scenarios.find((s) => s.id === wanted.current);
+    // Set BEFORE dispatching either branch, so the mirror effect above is
+    // released in the same pass rather than staying blocked if openScenario
+    // throws.
+    restored.current = true;
+    // A missing id means the scenario was deleted, or the link is stale. Drop
+    // it from the URL rather than leaving an address that describes nothing.
+    if (found) openScenario(found);
+    else onScenarioChange?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarios, listLoaded]);
 
   // Start a fresh scenario from the tier's correct room.
   useEffect(() => {
@@ -226,15 +434,72 @@ export default function ScenarioEditor({ onClose }) {
 
   const sel = objects.find((o) => o.id === selId) || null;
 
+  // Loading a DIFFERENT scenario has to drop both stacks. They hold object
+  // arrays from whatever was open before, and nothing in them is tagged with
+  // which scenario it came from — so one press of Undo after opening scenario B
+  // restored scenario A's objects into B, and Save would then persist the mix.
+  // Called from every path that replaces `objects` wholesale.
+  function resetHistory() {
+    setHistory([]);
+    setFuture([]);
+  }
+
   function snapshot() {
     setHistory((h) => [...h.slice(-19), objects]);
+    // A new edit invalidates the redo branch: the future it led to no longer
+    // follows from the present, so replaying it would paste a state that was
+    // never reachable from what is on screen.
+    setFuture([]);
   }
+  // FLAT, not nested. These used to call setObjects/setFuture from INSIDE a
+  // setHistory updater. A state updater must be a pure function of its previous
+  // value — React is free to call it more than once for a single update, and in
+  // StrictMode it deliberately does. Every extra call replayed the side effects,
+  // pushing the same state onto the redo stack twice, so undo/redo drifted out
+  // of step after a few presses.
+  //
+  // Both run from event handlers, so `objects`, `history` and `future` from the
+  // render closure are the current values — no updater callback is needed to
+  // read them correctly.
   function undo() {
-    setHistory((h) => {
-      if (!h.length) return h;
-      setObjects(h[h.length - 1]);
-      return h.slice(0, -1);
-    });
+    if (!history.length) return;
+    const prev = history[history.length - 1];
+    setHistory(history.slice(0, -1));
+    setFuture((f) => [...f.slice(-19), objects]);
+    setObjects(prev);
+    // The object you were editing may not exist in the state being restored.
+    setSelId((id) => (prev.some((o) => o.id === id) ? id : null));
+  }
+  function redoAction() {
+    if (!future.length) return;
+    const next = future[future.length - 1];
+    setFuture(future.slice(0, -1));
+    setHistory((h) => [...h.slice(-19), objects]);
+    setObjects(next);
+    setSelId((id) => (next.some((o) => o.id === id) ? id : null));
+  }
+
+  // Camera presets, same two the layout editor has. The offset on the bird's-eye
+  // position is deliberate: OrbitControls has no azimuth at the pole, so a
+  // perfectly vertical camera leaves the first drag snapping wildly.
+  function birdsEye() {
+    const c = orbit.current;
+    if (!c) return;
+    const h = Math.max(base.w, base.l) * 1.3 + 4;
+    c.object.position.set(0, h, 0.001);
+    c.target.set(0, 0, 0);
+    c.object.up.set(0, 1, 0);
+    c.object.lookAt(0, 0, 0);
+    c.update();
+  }
+  function defaultView() {
+    const c = orbit.current;
+    if (!c) return;
+    c.object.position.set(7, 6, 7);
+    c.target.set(0, 0, 0);
+    c.object.up.set(0, 1, 0);
+    c.object.lookAt(0, 0, 0);
+    c.update();
   }
 
   function patchSel(patch) {
@@ -425,6 +690,7 @@ export default function ScenarioEditor({ onClose }) {
         })
       );
       setSelId(null);
+      resetHistory();
       return;
     }
     // Otherwise rebuild from the CURRENT tier layout and lay the overlay on top,
@@ -454,6 +720,7 @@ export default function ScenarioEditor({ onClose }) {
     }
     setObjects(objs);
     setSelId(null);
+    resetHistory();
   }
 
   function newScenario() {
@@ -461,6 +728,7 @@ export default function ScenarioEditor({ onClose }) {
     setName('');
     setObjects(seedFromTier(tier));
     setSelId(null);
+    resetHistory();
   }
 
   async function toggleActive(s) {
@@ -473,6 +741,15 @@ export default function ScenarioEditor({ onClose }) {
   }
 
   async function remove(s) {
+    // Previously deleted on the first click with no guard at all — an authored
+    // scenario is what students are graded against, so losing one to a misclick
+    // is not recoverable from the UI.
+    const ok = await confirm({
+      title: 'Delete scenario',
+      message: `Are you sure you want to delete “${s.name}”?`,
+      detail: 'Rooms assigned to it will fall back to generating their own faults.',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/api/training/scenarios/${s.id}`);
       if (editingId === s.id) newScenario();
@@ -510,39 +787,195 @@ export default function ScenarioEditor({ onClose }) {
   const decoyCount = objects.filter((o) => o.defectId === null).length;
 
   return (
-    <div className="se-wrap">
-      <div className="se-side">
-        <div className="se-head">
-          <strong>Inspection Scenarios</strong>
-          <button className="secondary small" onClick={onClose}>
-            Close
+    <div
+      className="se-wrap"
+      // Claims the keyboard from the app's global shortcuts. Without it, bare
+      // `d`, `r`, `g`, `n` and `c` navigate away from a scenario you have not
+      // saved yet — and `t` toggled the theme mid-edit. The room layout editor
+      // has always had this; this editor was the one full-screen surface that
+      // did not, so authoring here could be thrown away by a stray keystroke.
+      // See components/KeyboardShortcuts.jsx.
+      data-keyboard-capture=""
+    >
+      {/* ── Toolbar strip, full width ──
+          Same shape and same `.tool-*` classes as the room layout editor, so
+          Move means the same tile in both. Full width rather than inside the
+          stage column, so the centre group does not shift when the panel
+          collapses. */}
+      <div className="tool-bar tool-bar--strip">
+        <div className="tool-group">
+          <button
+            onClick={undo}
+            disabled={!history.length}
+            className="tool-btn"
+            title="Undo (⌘Z)"
+            aria-label="Undo"
+          >
+            <Icon name="undo" size={18} strokeWidth={1.9} />
+          </button>
+          <button
+            onClick={redoAction}
+            disabled={!future.length}
+            className="tool-btn"
+            title="Redo (⇧⌘Z)"
+            aria-label="Redo"
+          >
+            <Icon name="redo" size={18} strokeWidth={1.9} />
+          </button>
+          <span className="tool-sep" />
+          <button
+            onClick={birdsEye}
+            className="tool-btn"
+            title="Bird's-eye view"
+            aria-label="Bird's-eye view"
+          >
+            <Icon name="bird-eye" size={18} strokeWidth={1.9} />
+          </button>
+          <button
+            onClick={defaultView}
+            className="tool-btn"
+            title="Default view"
+            aria-label="Default view"
+          >
+            <Icon name="home" size={18} strokeWidth={1.9} />
           </button>
         </div>
 
-        <label>Room tier</label>
-        <select value={tier} onChange={(e) => setTier(e.target.value)} disabled={!!editingId}>
-          {TIERS.map((t) => (
-            <option key={t}>{t}</option>
+        {/* Two modes, not three: this editor persists position and yaw only, so
+            a scale gizmo would move things on screen and discard it on save. */}
+        <div className="tool-group tool-group--mid">
+          <button
+            className={`tool-btn${mode === 'translate' ? ' is-on' : ''}`}
+            onClick={() => setMode('translate')}
+            title="Move — M"
+            aria-label="Move"
+            aria-pressed={mode === 'translate'}
+          >
+            <Icon name="move" size={18} strokeWidth={1.9} />
+          </button>
+          <button
+            className={`tool-btn${mode === 'rotate' ? ' is-on' : ''}`}
+            onClick={() => setMode('rotate')}
+            title="Rotate — R"
+            aria-label="Rotate"
+            aria-pressed={mode === 'rotate'}
+          >
+            <Icon name="rotate-cw" size={18} strokeWidth={1.9} />
+          </button>
+        </div>
+
+        <div className="tool-group tool-group--end">
+          <span className="tool-note">
+            {faultCount} fault{faultCount === 1 ? '' : 's'} · {decoyCount} decoy
+            {decoyCount === 1 ? '' : 's'}
+          </span>
+          <button
+            onClick={toggleTheme}
+            className="tool-btn"
+            title={theme === 'dark' ? 'Day mode' : 'Night mode'}
+            aria-label={theme === 'dark' ? 'Switch to day mode' : 'Switch to night mode'}
+            aria-pressed={theme === 'dark'}
+          >
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} strokeWidth={1.9} />
+          </button>
+          <button
+            onClick={() => setHelpOpen(true)}
+            className={`tool-btn${helpOpen ? ' is-on' : ''}`}
+            title="Shortcuts and a short guide"
+            aria-label="Help"
+          >
+            <Icon name="help-circle" size={18} strokeWidth={1.9} />
+          </button>
+        </div>
+      </div>
+      {helpOpen && <ScenarioHelp onClose={() => setHelpOpen(false)} />}
+
+      <div className="se-body">
+        {!sideOpen && (
+          <div className="ed-rail">
+            <button
+              className="tool-btn"
+              onClick={() => setSideOpen(true)}
+              title="Show the scenario panel"
+              aria-label="Show the scenario panel"
+            >
+              <Icon name="chevron-right" size={17} strokeWidth={2} />
+            </button>
+          </div>
+        )}
+        <div className="se-side" style={{ display: sideOpen ? 'block' : 'none' }}>
+        <div className="se-head">
+          <strong>Inspection Scenarios</strong>
+          <span style={{ display: 'flex', gap: 2, marginLeft: 'auto' }}>
+            <button
+              className="tool-btn"
+              onClick={() => setSideOpen(false)}
+              title="Hide this panel"
+              aria-label="Hide the scenario panel"
+            >
+              <Icon name="chevron-left" size={16} strokeWidth={2} />
+            </button>
+            <button className="tool-btn" onClick={onClose} title="Close the editor" aria-label="Close">
+              <Icon name="x" size={16} strokeWidth={2} />
+            </button>
+          </span>
+        </div>
+
+        {/* Three tabs instead of one nine-section scroll. The panel was every
+            control the editor has, stacked: tier, name, a paragraph about the
+            booking, the category library, its add-form, the object picker, a
+            four-group inspector, the actions and the saved list — so the thing
+            you wanted was almost always below the fold, and finding it meant
+            reading past six things you were not doing.
+
+            The split is by WHEN you use them: Build is the loop you are in
+            almost all the time, Scenario is opening/naming/saving, Faults is
+            the category library you touch rarely. Nothing is removed and no
+            handler changes — this only decides what is on screen at once. */}
+        <div className="pal-tabs" role="tablist">
+          {SE_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={panelTab === t.id}
+              className={`pal-tab${panelTab === t.id ? ' is-on' : ''}`}
+              title={t.title}
+              onClick={() => setPanelTab(t.id)}
+            >
+              <Icon name={t.icon} size={16} strokeWidth={1.9} />
+              <span className="se-tab-label">{t.label}</span>
+            </button>
           ))}
-        </select>
-        {editingId && <p className="muted se-note">Tier is fixed once a scenario exists.</p>}
+        </div>
 
-        <label>Scenario name</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Couple in a twin room"
-        />
+        {panelTab === 'scenario' && (
+          <>
+            <label>Room tier</label>
+            <select value={tier} onChange={(e) => setTier(e.target.value)} disabled={!!editingId}>
+              {TIERS.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+            {editingId && <p className="muted se-note">Tier is fixed once a scenario exists.</p>}
 
-        <div className="se-section">Booking on the clipboard</div>
-        <p className="se-hint">
-          Not authored here. The student inspects against the{' '}
-          <strong>real reservation on the room</strong> — guest, party size and special requests all
-          come from the PMS, so this scenario works on any {tier} room. A fault that booking cannot
-          support (twin beds tagged for a couple, on a solo stay) is shown as a clean decoy rather
-          than graded. Previewing as a student uses a practice booking, marked as such.
-        </p>
+            <label>Scenario name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Couple in a twin room"
+            />
+            {/* The booking explanation was a six-line paragraph holding
+                permanent space for something you read once. It is in the help
+                panel now, one click away and out of the way. */}
+            <p className="muted se-note">
+              The booking is not authored here — see Help for why.
+            </p>
+          </>
+        )}
 
+        {panelTab === 'faults' && (
+          <>
         <div className="se-section">Fault categories</div>
         <p className="se-hint">
           The six built-in categories cover most faults. Anything you add here is saved to the shared library
@@ -582,7 +1015,11 @@ export default function ScenarioEditor({ onClose }) {
           />
           <button disabled={catBusy}>{catBusy ? 'Saving…' : 'Add category'}</button>
         </form>
+          </>
+        )}
 
+        {panelTab === 'build' && (
+          <>
         <div className="se-section">Add an object</div>
         <select value={addKey} onChange={(e) => setAddKey(e.target.value)}>
           <optgroup label="Props (no 3D model)">
@@ -600,7 +1037,13 @@ export default function ScenarioEditor({ onClose }) {
             ))}
           </optgroup>
         </select>
-        <button onClick={addObject} style={{ width: '100%', marginTop: 6 }}>
+        <button
+          onClick={addObject}
+          className="tool-btn has-label is-on"
+          style={{ width: '100%', marginTop: 6 }}
+          title="Place the selected asset in the room"
+        >
+          <Icon name="armchair" size={15} strokeWidth={1.9} />
           Add to room
         </button>
 
@@ -643,15 +1086,28 @@ export default function ScenarioEditor({ onClose }) {
             {/* ── PLACEMENT ──────────────────────────────────────────── */}
             <div className="se-group">
               <div className="se-group-h">Placement</div>
-              <div className="row" style={{ gap: 4 }}>
+              {/* Same handlers and the same two mode values as before — the
+                  buttons are the shared `.tool-btn` tiles the room layout
+                  editor uses, so Move and Rotate are one shape across both
+                  editors instead of two differently-styled text buttons. */}
+              <div className="tool-bar">
                 <button
-                  className={mode === 'translate' ? '' : 'secondary'}
+                  className={`tool-btn${mode === 'translate' ? ' is-on' : ''}`}
                   onClick={() => setMode('translate')}
+                  title="Move"
+                  aria-label="Move"
+                  aria-pressed={mode === 'translate'}
                 >
-                  Move
+                  <Icon name="move" size={17} strokeWidth={1.9} />
                 </button>
-                <button className={mode === 'rotate' ? '' : 'secondary'} onClick={() => setMode('rotate')}>
-                  Rotate
+                <button
+                  className={`tool-btn${mode === 'rotate' ? ' is-on' : ''}`}
+                  onClick={() => setMode('rotate')}
+                  title="Rotate"
+                  aria-label="Rotate"
+                  aria-pressed={mode === 'rotate'}
+                >
+                  <Icon name="rotate-cw" size={17} strokeWidth={1.9} />
                 </button>
               </div>
               <label>Horizontal rotation</label>
@@ -833,31 +1289,43 @@ export default function ScenarioEditor({ onClose }) {
             </div>
 
             {/* ── ACTIONS ────────────────────────────────────────────── */}
-            <div className="row" style={{ gap: 4, marginTop: 6 }}>
-              <button className="secondary" onClick={duplicateSel}>
+            <div className="tool-bar" style={{ marginTop: 6 }}>
+              <button className="tool-btn has-label" onClick={duplicateSel} title="Duplicate this object">
+                <Icon name="copy" size={15} strokeWidth={1.9} />
                 Duplicate
               </button>
-              <button className="danger" onClick={removeSel}>
+              <button
+                className="tool-btn has-label is-danger"
+                onClick={removeSel}
+                title="Delete this object"
+                style={{ background: 'var(--danger-soft)', borderColor: 'var(--danger)', color: 'var(--on-danger-soft)' }}
+              >
+                <Icon name="trash" size={15} strokeWidth={1.9} />
                 Delete
               </button>
             </div>
           </>
         )}
 
-        <div className="se-section">
-          {faultCount} fault{faultCount === 1 ? '' : 's'} · {decoyCount} decoy{decoyCount === 1 ? '' : 's'}
-        </div>
+          </>
+        )}
+
+        {/* Save / Preview / New and the saved list stay OUTSIDE the tabs. They
+            are the way out of whatever you are doing, and hiding Save behind a
+            tab in an editor that does not autosave is how work gets lost. The
+            fault/decoy count moved to the toolbar; Undo moved there beside
+            Redo. */}
+        <div className="se-section">Scenario</div>
         <div className="row" style={{ gap: 4 }}>
-          <button onClick={save} disabled={busy}>
+          {/* The shortcut is in the tooltip rather than on the button face: the
+              label already switches between two words depending on whether this
+              creates or updates, and a chord appended to both makes the button
+              the widest thing in a 320px panel. */}
+          <button onClick={save} disabled={busy} title="Save the scenario (⌘S / Ctrl+S)">
             {editingId ? 'Save changes' : 'Create scenario'}
           </button>
           <button className="secondary" onClick={previewAsStudent}>
             Preview
-          </button>
-        </div>
-        <div className="row" style={{ gap: 4, marginTop: 4 }}>
-          <button className="secondary" onClick={undo} disabled={!history.length}>
-            Undo
           </button>
           <button className="secondary" onClick={newScenario}>
             New
@@ -875,8 +1343,15 @@ export default function ScenarioEditor({ onClose }) {
             <button className="secondary small" onClick={() => toggleActive(s)} title="Show to students">
               {s.active ? 'On' : 'Off'}
             </button>
-            <button className="danger small" onClick={() => remove(s)}>
-              ✕
+            {/* A trash icon, not a "✕" glyph: ✕ reads as "close/dismiss" and
+                this permanently deletes an authored scenario. */}
+            <button
+              className="danger small"
+              onClick={() => remove(s)}
+              title={`Delete "${s.name}"`}
+              aria-label={`Delete ${s.name}`}
+            >
+              <Icon name="trash" size={13} strokeWidth={1.9} />
             </button>
           </div>
         ))}
@@ -888,7 +1363,7 @@ export default function ScenarioEditor({ onClose }) {
           dpr={[1, 2]}
           camera={{ position: [7, 6, 7], fov: 50 }}
           gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-          onCreated={({ gl }) => gl.setClearColor('#d8cdb8')}
+          onCreated={({ gl }) => gl.setClearColor(stageColor())}
           onPointerMissed={() => setSelId(null)}
         >
           <Bounds fit clip observe margin={1.1}>
@@ -940,8 +1415,13 @@ export default function ScenarioEditor({ onClose }) {
           )}
           <OrbitControls ref={orbit} makeDefault />
         </Canvas>
+        {/* The emoji is gone; the swatch is the same red the halo is drawn in,
+            so the key matches what is on screen instead of approximating it
+            with whatever red the reader's emoji font happens to use. */}
         <div className="se-legend">
-          🔴 tagged fault · click any object to select · the halo is editor-only, students never see it
+          <span className="se-legend-dot" /> tagged fault · click any object to select · the halo is
+          editor-only, students never see it
+        </div>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { pesosToCents, centsToPesos, formatPeso } from '../lib/money';
 import EmptyState from '../components/EmptyState';
+import { useConfirm } from '../components/ConfirmDialog';
 
 const CATEGORIES = [
   'EVENT_HALL',
@@ -57,7 +58,10 @@ export default function Amenities() {
   const isAdmin = hasRole('ADMIN');
   const canSell = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   const toast = useToast();
+  const confirm = useConfirm();
   const [facilities, setFacilities] = useState([]);
+  const [catFilter, setCatFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
   const [form, setForm] = useState(blank);
   const [edit, setEdit] = useState({}); // { [code]: pesos }
   const [sel, setSel] = useState(null); // selected facility code for POS
@@ -109,6 +113,14 @@ export default function Amenities() {
   );
 
   async function cancelBooking(id) {
+    const ok = await confirm({
+      title: 'Cancel booking',
+      message: 'Are you sure you want to cancel this booking?',
+      detail: 'The slot is released for others. A cancelled booking cannot be un-cancelled.',
+      confirmLabel: 'Cancel booking',
+      cancelLabel: 'Keep booking',
+    });
+    if (!ok) return;
     try {
       await api.patch(`/api/facility-bookings/${id}`, { status: 'CANCELLED' });
       toast.success('Booking cancelled.');
@@ -134,6 +146,24 @@ export default function Amenities() {
     const seen = new Set(ordered.map((f) => f.code));
     return [...ordered, ...facilities.filter((f) => !seen.has(f.code))];
   }, [facilities]);
+
+  // Derived from the data, not a hardcoded list, so a category added on the
+  // server appears here without a frontend change.
+  const catalogCategories = useMemo(
+    () => [...new Set(facilities.map((f) => f.category).filter(Boolean))].sort(),
+    [facilities]
+  );
+
+  const visibleFacilities = useMemo(
+    () =>
+      orderedFacilities.filter((f) => {
+        if (catFilter && f.category !== catFilter) return false;
+        if (activeFilter === 'active' && !f.active) return false;
+        if (activeFilter === 'inactive' && f.active) return false;
+        return true;
+      }),
+    [orderedFacilities, catFilter, activeFilter]
+  );
 
   const laundryItems = useMemo(
     () => facilities.filter((f) => f.category === 'LAUNDRY' && f.active),
@@ -191,6 +221,21 @@ export default function Amenities() {
     } catch (e) {
       toast.error(errMsg(e));
     }
+  }
+  // Deactivating asks; activating does not. Turning an amenity off pulls it out
+  // of the booking screens for everyone, which is the half worth pausing on.
+  async function toggleFacility(f) {
+    if (f.active) {
+      const ok = await confirm({
+        title: 'Deactivate amenity',
+        message: `Are you sure you want to deactivate ${f.name || f.code}?`,
+        detail:
+          'It disappears from the sales and booking screens. Existing bookings are unaffected, and you can reactivate it later.',
+        confirmLabel: 'Deactivate',
+      });
+      if (!ok) return;
+    }
+    saveField(f.code, { active: !f.active }, f.active ? 'deactivated' : 'activated');
   }
   async function savePrice(code) {
     const pesos = edit[code];
@@ -370,9 +415,9 @@ export default function Amenities() {
             <thead>
               <tr>
                 <th>Garment</th>
-                <th>Price / piece</th>
-                <th>Pieces</th>
-                <th>Line total</th>
+                <th className="t-n">Price / piece</th>
+                <th className="t-c">Pieces</th>
+                <th className="t-n">Line total</th>
               </tr>
             </thead>
             <tbody>
@@ -381,8 +426,8 @@ export default function Amenities() {
                 return (
                   <tr key={f.code}>
                     <td>{f.name.replace(/^Laundry\s*—\s*/, '')}</td>
-                    <td>{formatPeso(f.priceCents)}</td>
-                    <td>
+                    <td className="t-n">{formatPeso(f.priceCents)}</td>
+                    <td className="t-c">
                       <input
                         type="number"
                         min="0"
@@ -392,7 +437,9 @@ export default function Amenities() {
                         onChange={(e) => setLaundryQty((p) => ({ ...p, [f.code]: e.target.value }))}
                       />
                     </td>
-                    <td>{qty > 0 ? formatPeso(f.priceCents * qty) : <span className="muted">—</span>}</td>
+                    <td className="t-n">
+                      {qty > 0 ? formatPeso(f.priceCents * qty) : <span className="muted">—</span>}
+                    </td>
                   </tr>
                 );
               })}
@@ -443,10 +490,10 @@ export default function Amenities() {
                   <th>Facility</th>
                   <th>Time</th>
                   <th>Guest</th>
-                  <th>Persons</th>
-                  <th>Charge</th>
-                  <th>Status</th>
-                  <th />
+                  <th className="t-c">Persons</th>
+                  <th className="t-n">Charge</th>
+                  <th className="t-c">Status</th>
+                  <th className="t-c">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -458,19 +505,19 @@ export default function Amenities() {
                       {new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td>{b.guestName}</td>
-                    <td>{b.persons}</td>
-                    <td>
+                    <td className="t-c">{b.persons}</td>
+                    <td className="t-n">
                       {formatPeso(b.priceCents)}
                       {b.folioId ? ' · paid' : ''}
                     </td>
-                    <td>
+                    <td className="t-c">
                       <span className={`badge ${b.status === 'CANCELLED' ? 'out' : 'clean'}`}>
                         {b.status}
                       </span>
                     </td>
-                    <td>
+                    <td className="t-actions">
                       {b.status === 'CONFIRMED' && (
-                        <button className="secondary" onClick={() => cancelBooking(b.id)}>
+                        <button className="small secondary" onClick={() => cancelBooking(b.id)}>
                           Cancel
                         </button>
                       )}
@@ -485,9 +532,41 @@ export default function Amenities() {
 
       {/* Catalog */}
       <div className="panel">
-        <h3>Amenity catalog</h3>
+        <div className="panel-head">
+          <h3>Amenity catalog</h3>
+          <div className="filter-bar">
+            <label className="filter-inline">
+              <span>Category</span>
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+                <option value="">All categories</option>
+                {catalogCategories.map((c) => (
+                  <option key={c} value={c}>
+                    {c.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-inline">
+              <span>Show</span>
+              <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
+                <option value="">All</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
+            </label>
+            <span className="filter-count">
+              {visibleFacilities.length} of {orderedFacilities.length}
+            </span>
+          </div>
+        </div>
         {facilities.length === 0 ? (
           <EmptyState kind="inbox" title="No amenities yet" />
+        ) : visibleFacilities.length === 0 ? (
+          <EmptyState
+            kind="search"
+            title="No amenities match those filters"
+            hint="Clear the category or status filter to see more."
+          />
         ) : (
           <table>
             <thead>
@@ -496,14 +575,14 @@ export default function Amenities() {
                 <th>Name</th>
                 <th>Category</th>
                 <th>Pricing</th>
-                <th>Price</th>
-                <th>Bookable</th>
-                <th>Active</th>
-                {isAdmin && <th>Admin</th>}
+                <th className="t-n">Price</th>
+                <th className="t-c">Bookable</th>
+                <th className="t-c">Active</th>
+                {isAdmin && <th className="t-c">Admin</th>}
               </tr>
             </thead>
             <tbody>
-              {orderedFacilities.map((f) => (
+              {visibleFacilities.map((f) => (
                 <tr key={f.code} style={{ opacity: f.active ? 1 : 0.5 }}>
                   <td>{f.code}</td>
                   <td style={{ paddingLeft: f.parentCode ? 28 : undefined }}>
@@ -512,37 +591,44 @@ export default function Amenities() {
                   </td>
                   <td>{f.category.replace('_', ' ')}</td>
                   <td>{f.pricingModel.replace('PER_', 'per ').toLowerCase()}</td>
-                  <td>
+                  <td className="t-n">
                     {formatPeso(f.priceCents)} {f.unit || ''}
                   </td>
-                  <td>{f.reservable ? '✓' : '—'}</td>
-                  <td>{f.active ? '✓' : '✗'}</td>
+                  <td className="t-c">{f.reservable ? '✓' : '—'}</td>
+                  <td className="t-c">{f.active ? '✓' : '✗'}</td>
                   {isAdmin && (
-                    <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        style={{ width: 100 }}
-                        placeholder={centsToPesos(f.priceCents).toFixed(2)}
-                        value={edit[f.code] ?? ''}
-                        onChange={(e) => setEdit((p) => ({ ...p, [f.code]: e.target.value }))}
-                      />
-                      <button
-                        className="secondary"
-                        disabled={edit[f.code] === undefined || edit[f.code] === ''}
-                        onClick={() => savePrice(f.code)}
-                      >
-                        Save price
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          saveField(f.code, { active: !f.active }, f.active ? 'deactivated' : 'activated')
-                        }
-                      >
-                        {f.active ? 'Deactivate' : 'Activate'}
-                      </button>
+                    // The group is an inline-flex span INSIDE the cell, not a
+                    // flex `td`: `display:flex` on a table cell drops it out of
+                    // the table's own layout, so that column no longer shared
+                    // the row height or the column width with anything else.
+                    <td className="t-c">
+                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          style={{ width: 100 }}
+                          placeholder={centsToPesos(f.priceCents).toFixed(2)}
+                          value={edit[f.code] ?? ''}
+                          onChange={(e) => setEdit((p) => ({ ...p, [f.code]: e.target.value }))}
+                        />
+                        {/* `small secondary`, matching every other in-table action
+                            in the app (Users, Rooms). Full-size buttons stood a
+                            third taller than the rows they sat in. */}
+                        <button
+                          className="small secondary"
+                          disabled={edit[f.code] === undefined || edit[f.code] === ''}
+                          onClick={() => savePrice(f.code)}
+                        >
+                          Save Price
+                        </button>
+                        <button
+                          className={`small ${f.active ? 'danger' : 'secondary'}`}
+                          onClick={() => toggleFacility(f)}
+                        >
+                          {f.active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </span>
                     </td>
                   )}
                 </tr>
@@ -624,19 +710,25 @@ export default function Amenities() {
                   onChange={(e) => setForm({ ...form, capacity: e.target.value })}
                 />
               </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* `ed-check` gives this the same small box and inline label as
+                  the editor's toggles, instead of a 36px square from the global
+                  input rule with its caption wrapping beside it. */}
+              <div className="row-action">
+                <label className="ed-check">
                   <input
                     type="checkbox"
                     checked={form.reservable}
                     onChange={(e) => setForm({ ...form, reservable: e.target.checked })}
-                    style={{ width: 'auto' }}
-                  />{' '}
-                  Reservable (time-slot)
+                  />
+                  <span>Reservable (time-slot)</span>
                 </label>
               </div>
+              {/* The action is the last cell of the field row, level with the
+                  inputs rather than a block underneath them. */}
+              <div className="row-action">
+                <button>Create amenity</button>
+              </div>
             </div>
-            <button>Create amenity</button>
           </form>
         </div>
       )}

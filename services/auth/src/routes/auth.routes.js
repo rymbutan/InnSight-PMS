@@ -74,6 +74,12 @@ router.post('/login', async (req, res) => {
         // Unique per session so logout can revoke THIS token specifically rather
         // than every session the user has open.
         jti: crypto.randomUUID(),
+        // Issued-at in MILLISECONDS, alongside the standard whole-second `iat`.
+        // The per-user revocation epoch is compared against this; at second
+        // precision a token minted in the same second as a role or password
+        // change tied with the epoch and was rejected on arrival. See the note
+        // in _shared/tokenRevocation.js.
+        iatMs: Date.now(),
       },
       JWT_SECRET,
       // Pinned so verification can reject an algorithm/issuer/audience mismatch —
@@ -96,6 +102,11 @@ router.post('/login', async (req, res) => {
         displayName: user.displayName,
         email: user.email,
         mustChangePwd: user.mustChangePwd,
+        // A timestamp, not the image: it tells the client an avatar EXISTS and
+        // doubles as the cache-busting token for GET /api/auth/avatar/:id, so
+        // a new photo appears immediately instead of after the 5-minute
+        // private cache expires. Null means "no photo — draw the monogram".
+        avatarUpdatedAt: user.avatarUpdatedAt,
         roles: ctx.roles,
         permissions: ctx.permissions,
       },
@@ -118,6 +129,8 @@ async function issueSession(user, res) {
       roles: ctx.roles,
       permissions: ctx.permissions,
       jti: crypto.randomUUID(),
+      // See the note on the password-login sign above.
+      iatMs: Date.now(),
     },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL, algorithm: ALG, issuer: ISS_HUMAN, audience: AUD }
@@ -138,6 +151,7 @@ async function issueSession(user, res) {
       displayName: user.displayName,
       email: user.email,
       mustChangePwd: user.mustChangePwd,
+      avatarUpdatedAt: user.avatarUpdatedAt,
       roles: ctx.roles,
       permissions: ctx.permissions,
     },
@@ -273,6 +287,7 @@ router.get('/me', verifyToken, async (req, res) => {
       status: user.status,
       mustChangePwd: user.mustChangePwd,
       lastLoginAt: user.lastLoginAt,
+      avatarUpdatedAt: user.avatarUpdatedAt,
       roles: ctx.roles,
       permissions: ctx.permissions,
     });
@@ -307,6 +322,215 @@ router.post('/change-password', verifyToken, async (req, res) => {
     res.json({ success: true, otherSessionsRevoked: true });
   } catch (err) {
     console.error('[Auth] Change password error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Self-service account identity ───────────────────────────────────────────
+// Username and email could previously only be changed through
+// PATCH /api/users/:id, which is requireRole('ADMIN','MANAGER') — so a front
+// desk agent could not correct their own misspelled name without an admin.
+//
+// Both require the CURRENT PASSWORD. These fields are login identifiers: a
+// stolen 12-hour token should not be enough to move an account onto an
+// attacker's email address, which is the first step of a takeover.
+const USERNAME_RE = /^[a-zA-Z0-9._-]{3,32}$/;
+// Deliberately conservative rather than RFC-complete: one @, no whitespace, a
+// dot in the domain. The aim is to reject typos, not to be a parser.
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+\.[^\s@]{2,}$/;
+
+async function reauthenticate(userId, currentPassword) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return { error: 404 };
+  const ok = await bcrypt.compare(currentPassword || '', user.passwordHash);
+  if (!ok) return { error: 401 };
+  return { user };
+}
+
+// POST /api/auth/change-username
+router.post('/change-username', verifyToken, async (req, res) => {
+  try {
+    const { newUsername, currentPassword } = req.body || {};
+    const next = String(newUsername || '').trim();
+    if (!USERNAME_RE.test(next)) {
+      return res.status(400).json({
+        error: '3–32 characters, using letters, numbers, dot, underscore or hyphen only.',
+      });
+    }
+    const { user, error } = await reauthenticate(req.user.sub, currentPassword);
+    if (error === 404) return res.status(404).json({ error: 'User not found.' });
+    if (error === 401) return res.status(401).json({ error: 'Current password incorrect.' });
+    if (next === user.username) {
+      return res.status(400).json({ error: 'That is already your username.' });
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { username: next } });
+    // The username is a JWT claim, so every existing token still carries the old
+    // one. Revoking forces a fresh sign-in and keeps token contents truthful.
+    await revocation.revokeAllForUser(user.id);
+    redis.publish(
+      'auth:username_changed',
+      JSON.stringify({ userId: user.id, username: next })
+    );
+    res.json({ success: true, username: next, reauthRequired: true });
+  } catch (err) {
+    // Unique violation — someone else holds it. Checked by catching rather than
+    // by a prior SELECT, because between that SELECT and the UPDATE the name
+    // could be taken by a concurrent request.
+    if (err.code === 'P2002') {
+      return res.status(409).json({ error: 'That username is already taken.' });
+    }
+    console.error('[Auth] Change username error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/auth/change-email
+router.post('/change-email', verifyToken, async (req, res) => {
+  try {
+    const { newEmail, currentPassword } = req.body || {};
+    // Lowercased so the unique index cannot hold Admin@x and admin@x at once.
+    const next = String(newEmail || '')
+      .trim()
+      .toLowerCase();
+    if (!EMAIL_RE.test(next) || next.length > 254) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+    const { user, error } = await reauthenticate(req.user.sub, currentPassword);
+    if (error === 404) return res.status(404).json({ error: 'User not found.' });
+    if (error === 401) return res.status(401).json({ error: 'Current password incorrect.' });
+    if (next === (user.email || '').toLowerCase()) {
+      return res.status(400).json({ error: 'That is already your email address.' });
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { email: next } });
+    redis.publish('auth:email_changed', JSON.stringify({ userId: user.id }));
+    // NOT revoked: unlike the username, the email is not a token claim, so
+    // existing sessions stay accurate and there is nothing to force.
+    res.json({ success: true, email: next });
+  } catch (err) {
+    if (err.code === 'P2002') {
+      return res.status(409).json({ error: 'That email address is already in use.' });
+    }
+    console.error('[Auth] Change email error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Profile photo ───────────────────────────────────────────────────────────
+const AVATAR_MAX_BYTES = 4 * 1024 * 1024;
+
+// Type is decided by the FILE, never by the request. A caller controls its own
+// Content-Type header, and whatever we store here is echoed back as the
+// Content-Type of the image response — so trusting the header would let someone
+// upload one thing and have the browser render it as another.
+function sniffImageMime(buf) {
+  if (!buf || buf.length < 12) return null;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  // WEBP: "RIFF" .... "WEBP"
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
+// POST /api/auth/avatar — raw image bytes, not multipart.
+//
+// express.raw parses this route only; multipart would need a new dependency
+// (multer/busboy) to carry a single file, and base64 in JSON would inflate a 4MB
+// image to ~5.5MB of request body for no benefit.
+router.post(
+  '/avatar',
+  verifyToken,
+  express.raw({ type: ['image/png', 'image/jpeg', 'image/webp'], limit: AVATAR_MAX_BYTES }),
+  async (req, res) => {
+    try {
+      // An unsupported Content-Type leaves express.raw's matcher unmatched, so
+      // the body arrives as {} rather than a Buffer.
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'Send raw PNG, JPEG or WEBP image bytes.' });
+      }
+      if (req.body.length > AVATAR_MAX_BYTES) {
+        return res.status(413).json({ error: 'Image must be 4MB or smaller.' });
+      }
+      const mime = sniffImageMime(req.body);
+      if (!mime) {
+        return res
+          .status(400)
+          .json({ error: 'That file is not a valid PNG, JPEG or WEBP image.' });
+      }
+      await prisma.user.update({
+        where: { id: req.user.sub },
+        data: { avatarData: req.body, avatarMime: mime, avatarUpdatedAt: new Date() },
+      });
+      redis.publish('auth:avatar_changed', JSON.stringify({ userId: req.user.sub }));
+      res.json({ success: true, mime, bytes: req.body.length });
+    } catch (err) {
+      console.error('[Auth] Avatar upload error:', err.message);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
+
+// DELETE /api/auth/avatar — back to the letter monogram.
+router.delete('/avatar', verifyToken, async (req, res) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.user.sub },
+      data: { avatarData: null, avatarMime: null, avatarUpdatedAt: null },
+    });
+    redis.publish('auth:avatar_changed', JSON.stringify({ userId: req.user.sub }));
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Auth] Avatar delete error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/auth/avatar/:userId — any signed-in user may see a colleague's photo
+// (they appear beside names throughout the app); anonymous callers may not.
+router.get('/avatar/:userId', verifyToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: { avatarData: true, avatarMime: true, avatarUpdatedAt: true },
+    });
+    if (!user?.avatarData || !user.avatarMime) {
+      return res.status(404).json({ error: 'No avatar set.' });
+    }
+    // Prisma hands `Bytes` back as a Uint8Array, NOT a Buffer. res.send() treats
+    // a Uint8Array as a plain object and JSON-stringifies it, so this route
+    // served `{"0":137,"1":80,...}` — labelled image/png — instead of the image.
+    // res.end() also leaves the Content-Type exactly as set, where res.send()
+    // appends "; charset=utf-8" to it.
+    const bytes = Buffer.from(user.avatarData);
+    res.setHeader('Content-Type', user.avatarMime);
+    res.setHeader('Content-Length', bytes.length);
+    // The stored mime came from magic bytes, but tell the browser not to
+    // second-guess it either way.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // Belt and braces: even if something non-image were ever served from here,
+    // this origin would not execute it.
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Content-Disposition', 'inline');
+    // Private: this is behind auth, so a shared cache must not keep it. The
+    // client busts it with the avatarUpdatedAt version after an upload.
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.end(bytes);
+  } catch (err) {
+    console.error('[Auth] Avatar fetch error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

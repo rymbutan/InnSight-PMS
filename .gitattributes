@@ -1,0 +1,7 @@
+# Shell scripts run under /bin/sh inside the Linux service images — every
+# service Dockerfile COPYs its db-init.sh in and the CMD runs it. A CRLF
+# checkout (git's core.autocrlf=true is the Windows default) makes the shell
+# read `set -e` with a trailing carriage return, which fails as
+# "set: illegal option -" and crash-loops all nine containers on boot.
+# These must stay LF no matter how the developer's git is configured.
+*.sh text eol=lf

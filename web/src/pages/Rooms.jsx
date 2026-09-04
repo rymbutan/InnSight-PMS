@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
+import { STATUS_ORDER as ROOM_STATUSES } from '../sim/statusMeta';
+import { labelize } from '../lib/labels';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { pesosToCents, centsToPesos, formatPeso } from '../lib/money';
 import EmptyState from '../components/EmptyState';
+import { useConfirm } from '../components/ConfirmDialog';
 
 const STATUSES = ['CLEAN', 'CLEAN_INSPECTED', 'DIRTY', 'OCCUPIED', 'OUT_OF_ORDER', 'OUT_OF_SERVICE'];
 
@@ -21,10 +24,23 @@ export default function Rooms() {
     maxOccupancy: 2,
     totalInventory: 0,
   });
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  // An empty filter means "all", so each clause short-circuits rather than
+  // needing a sentinel value in the option list.
+  const visibleRooms = useMemo(
+    () =>
+      rooms.filter(
+        (r) =>
+          (!typeFilter || r.typeCode === typeFilter) && (!statusFilter || r.status === statusFilter)
+      ),
+    [rooms, typeFilter, statusFilter]
+  );
   const [priceEdit, setPriceEdit] = useState({}); // { [code]: pesosString }
   const [promos, setPromos] = useState([]);
   const [newPromo, setNewPromo] = useState({ code: '', percentOff: '', description: '' });
   const toast = useToast();
+  const confirm = useConfirm();
 
   async function load() {
     try {
@@ -56,6 +72,17 @@ export default function Rooms() {
     }
   }
   async function togglePromo(code, active) {
+    // Only deactivation asks. Turning a promo back on is harmless; turning it
+    // off stops it working for every guest mid-booking.
+    if (!active) {
+      const ok = await confirm({
+        title: 'Deactivate promo code',
+        message: `Are you sure you want to deactivate ${code}?`,
+        detail: 'Guests will no longer be able to apply this code. You can reactivate it later.',
+        confirmLabel: 'Deactivate',
+      });
+      if (!ok) return;
+    }
     try {
       await api.patch(`/api/promo-codes/${code}`, { active });
       load();
@@ -139,10 +166,10 @@ export default function Rooms() {
               <tr>
                 <th>Code</th>
                 <th>Name</th>
-                <th>Max occ.</th>
-                <th>Inventory</th>
-                <th>Rate / night</th>
-                {isAdmin && <th>Edit price</th>}
+                <th className="t-c">Max occ.</th>
+                <th className="t-c">Inventory</th>
+                <th className="t-n">Rate / night</th>
+                {isAdmin && <th className="t-c">Edit price</th>}
               </tr>
             </thead>
             <tbody>
@@ -150,27 +177,34 @@ export default function Rooms() {
                 <tr key={t.code}>
                   <td>{t.code}</td>
                   <td>{t.name}</td>
-                  <td>{t.maxOccupancy}</td>
-                  <td>{t.totalInventory}</td>
-                  <td>{formatPeso(t.baseRate)}</td>
+                  <td className="t-c">{t.maxOccupancy}</td>
+                  <td className="t-c">{t.totalInventory}</td>
+                  <td className="t-n">{formatPeso(t.baseRate)}</td>
                   {isAdmin && (
-                    <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        style={{ width: 110 }}
-                        placeholder={centsToPesos(t.baseRate).toFixed(2)}
-                        value={priceEdit[t.code] ?? ''}
-                        onChange={(e) => setPriceEdit((p) => ({ ...p, [t.code]: e.target.value }))}
-                      />
-                      <button
-                        className="secondary"
-                        disabled={priceEdit[t.code] === undefined || priceEdit[t.code] === ''}
-                        onClick={() => savePrice(t.code)}
-                      >
-                        Save
-                      </button>
+                    // `display: flex` on a `td` takes the cell out of the table
+                    // layout, so this one cell stopped sharing the row's height
+                    // and its column's width. An inline-flex wrapper inside the
+                    // cell groups the input and button the same way without
+                    // overriding what the cell is.
+                    <td className="t-c">
+                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          style={{ width: 110 }}
+                          placeholder={centsToPesos(t.baseRate).toFixed(2)}
+                          value={priceEdit[t.code] ?? ''}
+                          onChange={(e) => setPriceEdit((p) => ({ ...p, [t.code]: e.target.value }))}
+                        />
+                        <button
+                          className="small secondary"
+                          disabled={priceEdit[t.code] === undefined || priceEdit[t.code] === ''}
+                          onClick={() => savePrice(t.code)}
+                        >
+                          Save
+                        </button>
+                      </span>
                     </td>
                   )}
                 </tr>
@@ -228,8 +262,10 @@ export default function Rooms() {
                     onChange={(e) => setNewType({ ...newType, totalInventory: Number(e.target.value) })}
                   />
                 </div>
+                <div className="row-action">
+                  <button>Create type</button>
+                </div>
               </div>
-              <button>Create type</button>
             </form>
           </div>
 
@@ -268,8 +304,10 @@ export default function Rooms() {
                     onChange={(e) => setNewRoom({ ...newRoom, floor: Number(e.target.value) })}
                   />
                 </div>
+                <div className="row-action">
+                  <button>Add</button>
+                </div>
               </div>
-              <button>Add</button>
             </form>
           </div>
 
@@ -303,29 +341,34 @@ export default function Rooms() {
                     onChange={(e) => setNewPromo({ ...newPromo, description: e.target.value })}
                   />
                 </div>
+                <div className="row-action">
+                  <button>Add promo</button>
+                </div>
               </div>
-              <button>Add promo</button>
             </form>
             {promos.length > 0 && (
               <table style={{ marginTop: 10 }}>
                 <thead>
                   <tr>
                     <th>Code</th>
-                    <th>% off</th>
+                    <th className="t-c">% off</th>
                     <th>Description</th>
-                    <th>Active</th>
-                    <th />
+                    <th className="t-c">Active</th>
+                    <th className="t-c">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {promos.map((p) => (
                     <tr key={p.code} style={{ opacity: p.active ? 1 : 0.5 }}>
                       <td>{p.code}</td>
-                      <td>{p.percentOff}%</td>
+                      <td className="t-c">{p.percentOff}%</td>
                       <td>{p.description || '—'}</td>
-                      <td>{p.active ? '✓' : '✗'}</td>
-                      <td>
-                        <button className="secondary" onClick={() => togglePromo(p.code, !p.active)}>
+                      <td className="t-c">{p.active ? '✓' : '✗'}</td>
+                      <td className="t-actions">
+                        <button
+                          className="small secondary"
+                          onClick={() => togglePromo(p.code, !p.active)}
+                        >
                           {p.active ? 'Deactivate' : 'Activate'}
                         </button>
                       </td>
@@ -339,12 +382,50 @@ export default function Rooms() {
       )}
 
       <div className="panel">
-        <h3>Rooms</h3>
+        {/* Filters sit on the panel head, aligned right against the title —
+            a full property runs to hundreds of rooms and the unfiltered list is
+            unusable at that size. */}
+        <div className="panel-head">
+          <h3>Rooms</h3>
+          <div className="filter-bar">
+            <label className="filter-inline">
+              <span>Type</span>
+              <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                <option value="">All types</option>
+                {types.map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.code}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-inline">
+              <span>Status</span>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="">All statuses</option>
+                {ROOM_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="filter-count">
+              {visibleRooms.length} of {rooms.length}
+            </span>
+          </div>
+        </div>
         {rooms.length === 0 ? (
           <EmptyState
             kind="inbox"
             title="No rooms yet"
             hint={isAdmin ? 'Add a room type above, then add rooms to it.' : 'No rooms configured.'}
+          />
+        ) : visibleRooms.length === 0 ? (
+          <EmptyState
+            kind="search"
+            title="No rooms match those filters"
+            hint="Clear the type or status filter to see more."
           />
         ) : (
           <table>
@@ -352,13 +433,13 @@ export default function Rooms() {
               <tr>
                 <th>Room</th>
                 <th>Type</th>
-                <th>Floor</th>
-                <th>Status</th>
-                <th>Change</th>
+                <th className="t-c">Floor</th>
+                <th className="t-c">Status</th>
+                <th className="t-c">Change</th>
               </tr>
             </thead>
             <tbody>
-              {rooms.map((r) => {
+              {visibleRooms.map((r) => {
                 const dotCls = r.status === 'OUT_OF_ORDER' ? 'out' : r.status.toLowerCase();
                 return (
                   <tr key={r.id}>
@@ -367,14 +448,24 @@ export default function Rooms() {
                       {r.number}
                     </td>
                     <td>{r.typeCode}</td>
-                    <td>{r.floor}</td>
-                    <td>
+                    <td className="t-c">{r.floor}</td>
+                    <td className="t-c">
                       <span className={`badge ${dotCls}`}>{r.status}</span>
                     </td>
-                    <td>
-                      <select value={r.status} onChange={(e) => setStatus(r.id, e.target.value)}>
+                    <td className="t-c">
+                      {/* `value` is set explicitly now: the option previously
+                          had none, so its value was its TEXT — labelling the
+                          options would have started submitting "Clean inspected"
+                          instead of CLEAN_INSPECTED. */}
+                      <select
+                        className="table-select"
+                        value={r.status}
+                        onChange={(e) => setStatus(r.id, e.target.value)}
+                      >
                         {STATUSES.map((s) => (
-                          <option key={s}>{s}</option>
+                          <option key={s} value={s}>
+                            {labelize(s)}
+                          </option>
                         ))}
                       </select>
                     </td>

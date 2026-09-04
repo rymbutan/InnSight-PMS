@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { offerableCategories } from './categories';
+import Icon from '../../components/Icon';
 
 // The judgment step. Clicking an object is only half the answer — the student
 // must also say WHAT KIND of fault it is, because "left behind by the
@@ -28,7 +29,8 @@ export default function FlagMenu({ anchor, onChoose, onCancel }) {
         </p>
 
         <button className="insp-flag-ok" onClick={() => onChoose('ok')}>
-          ✓ This is correct — no issue
+          <Icon name="check" size={14} strokeWidth={2.4} />
+          This is correct — no issue
         </button>
 
         <div className="insp-flag-list">
