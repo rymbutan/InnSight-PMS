@@ -178,6 +178,8 @@ services:
       # Check-out asks the folio service whether every folio on the stay is clear.
       # With bill splitting a stay can carry more than one.
       FOLIO_URL: http://folio-service:3007
+      # Resolves a stay's confirmation number for the registration-card QR.
+      RESERVATION_URL: http://reservation-service:3011
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
