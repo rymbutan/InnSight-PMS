@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents, formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
@@ -9,6 +10,7 @@ import { downloadAuthed } from '../lib/download';
 export default function Folios() {
   const [searchParams] = useSearchParams();
   const toast = useToast();
+  const confirm = useConfirm();
   const [folioId, setFolioId] = useState(searchParams.get('id') || '');
   const [folio, setFolio] = useState(null);
   const [statement, setStatement] = useState(null);
@@ -118,7 +120,13 @@ export default function Folios() {
     }
   }
   async function closeFolio() {
-    if (!confirm('Close this folio? This cannot be undone.')) return;
+    const ok = await confirm({
+      title: 'Close folio',
+      message: 'Close this folio?',
+      detail: 'This cannot be undone — no further charges or payments can be posted to it.',
+      confirmLabel: 'Close folio',
+    });
+    if (!ok) return;
     try {
       await api.post(`/api/folios/${folioId}/close`);
       toast.success('Folio closed.');
@@ -182,22 +190,22 @@ export default function Folios() {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Type</th>
+                  <th className="t-c">Type</th>
                   <th>Code</th>
                   <th>Description</th>
-                  <th style={{ textAlign: 'right' }}>Amount</th>
+                  <th className="t-n">Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {folio.transactions.map((t) => (
                   <tr key={t.id}>
                     <td>{new Date(t.postedAt).toLocaleDateString()}</td>
-                    <td>
+                    <td className="t-c">
                       <span className={`badge ${t.type.toLowerCase()}`}>{t.type}</span>
                     </td>
                     <td>{t.chargeCode || '—'}</td>
                     <td>{t.description}</td>
-                    <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                    <td className="t-n">{formatPeso(t.amountCents)}</td>
                   </tr>
                 ))}
               </tbody>

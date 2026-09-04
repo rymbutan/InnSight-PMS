@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
+import Icon from '../components/Icon';
+import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso } from '../lib/money';
 import { statusMeta, STATUS_ORDER } from '../sim/statusMeta';
 import { useRoomEvents } from '../sim/useRoomEvents';
@@ -79,8 +81,11 @@ function RoomShape({ slot, selected, flashing, onSelect, onHover }) {
 function GameLockNotice() {
   return (
     <p className="hk-game-lock">
-      🔒 Room inspection is assigned work. Ask your instructor to give you the
-      <strong> Housekeeping</strong> role to run it.
+      <Icon name="ban" size={14} strokeWidth={1.9} />
+      <span>
+        Room inspection is assigned work. Ask your instructor to give you the
+        <strong> Housekeeping</strong> role to run it.
+      </span>
     </p>
   );
 }
@@ -113,13 +118,15 @@ function panelActions(room, act, launchGame, canPlay) {
         <>
           {canPlay ? (
             <button className="btn-primary hk-action" onClick={() => launchGame('INSPECTION', room)}>
-              🔍 Inspect Room Against Booking
+              <Icon name="search" size={14} strokeWidth={2} />
+              Inspect Room Against Booking
             </button>
           ) : (
             <GameLockNotice />
           )}
           <button onClick={() => act('CLEAN_INSPECTED', 'Inspection passed — room is guest-ready.')}>
-            ✅ Pass Inspection (manual)
+            <Icon name="check" size={14} strokeWidth={2.4} />
+            Pass Inspection (manual)
           </button>
           <button className="secondary" onClick={() => act('DIRTY', 'Room degraded to Vacant Dirty.')}>
             Report Inadequate Cleaning
@@ -150,7 +157,8 @@ function panelActions(room, act, launchGame, canPlay) {
           className="btn-primary hk-action"
           onClick={() => act('DIRTY', 'Maintenance done — room needs cleaning.')}
         >
-          🔧 Restore Room
+          <Icon name="settings" size={14} strokeWidth={1.9} />
+          Restore Room
         </button>
       );
     case 'OUT_OF_SERVICE':
@@ -159,7 +167,8 @@ function panelActions(room, act, launchGame, canPlay) {
           className="btn-primary hk-action"
           onClick={() => act('DIRTY', 'Servicing done — room needs cleaning.')}
         >
-          🔧 Return to Service
+          <Icon name="settings" size={14} strokeWidth={1.9} />
+          Return to Service
         </button>
       );
     default:
@@ -175,6 +184,7 @@ export default function Housekeeping() {
   const [flash, setFlash] = useState(() => new Set());
   const flashTimers = useRef({});
   const toast = useToast();
+  const confirm = useConfirm();
   const { hasRole } = useAuth();
   // The inspection is training assigned to the housekeeping role; instructors
   // (ADMIN/MANAGER) can preview it.
@@ -320,7 +330,34 @@ export default function Housekeeping() {
     flashRoom(roomId);
   });
 
+  // The two statuses that take a room OUT of sellable inventory. Guarded inside
+  // `act` rather than on the buttons, so every call site — including any added
+  // later — is covered by construction and cannot forget the prompt.
+  const NEEDS_CONFIRM = {
+    OUT_OF_SERVICE: {
+      what: 'out of service',
+      detail:
+        'The room leaves sellable inventory until someone puts it back. Front desk will not be able to assign it.',
+    },
+    OUT_OF_ORDER: {
+      what: 'out of order',
+      detail:
+        'The room leaves sellable inventory and is flagged as faulty. Front desk will not be able to assign it.',
+    },
+  };
+
   async function act(roomId, status, msg) {
+    const guard = NEEDS_CONFIRM[status];
+    if (guard) {
+      const room = rooms.find((r) => r.id === roomId);
+      const ok = await confirm({
+        title: `Mark ${guard.what}`,
+        message: `Are you sure you want to mark room ${room?.number ?? ''} ${guard.what}?`,
+        detail: guard.detail,
+        confirmLabel: `Mark ${guard.what}`,
+      });
+      if (!ok) return;
+    }
     try {
       await api.patch(`/api/rooms/${roomId}/status`, { status });
       setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, status } : r)));
@@ -345,10 +382,7 @@ export default function Housekeeping() {
   return (
     <div>
       <div className="hk-header">
-        <h2 style={{ margin: 0 }}>Housekeeping — Hotel Map</h2>
-        <span className={`hk-live ${connected ? 'on' : 'off'}`}>
-          <span className="hk-live-dot" /> {connected ? 'Live' : 'Offline'}
-        </span>
+        <h2 style={{ margin: 0 }}>Hotel Map</h2>
         <span className="hk-occupancy">
           Occupancy: <strong>{occupancy}%</strong>
         </span>
@@ -443,7 +477,7 @@ export default function Housekeeping() {
             <div className="hk-detail-head">
               <h3 style={{ margin: 0 }}>Room {selected.number}</h3>
               <button className="icon" aria-label="Close" onClick={() => setSelectedId(null)}>
-                ✕
+                <Icon name="x" size={16} />
               </button>
             </div>
             <div

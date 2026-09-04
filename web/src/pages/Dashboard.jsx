@@ -396,9 +396,9 @@ export default function Dashboard() {
               <tr>
                 <th>Guest</th>
                 <th>Conf #</th>
-                <th>Room</th>
-                <th>Status</th>
-                <th></th>
+                <th className="t-c">Room</th>
+                <th className="t-c">Status</th>
+                <th className="t-c"></th>
               </tr>
             </thead>
             <tbody>
@@ -418,11 +418,11 @@ export default function Dashboard() {
                   >
                     <td className="table-link">{r.guestName || '—'}</td>
                     <td>{r.confirmationNumber || r.id?.slice(0, 8)}</td>
-                    <td>{r.assignedRoomId || r.roomTypeCode || '—'}</td>
-                    <td>
+                    <td className="t-c">{r.assignedRoomId || r.roomTypeCode || '—'}</td>
+                    <td className="t-c">
                       <StatusPill status={r.status || 'IN_HOUSE'} size="sm" />
                     </td>
-                    <td>
+                    <td className="t-actions">
                       <button
                         className="icon"
                         onClick={(e) => {

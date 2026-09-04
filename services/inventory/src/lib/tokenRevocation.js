@@ -38,6 +38,52 @@ const Redis = require('ioredis');
 const JTI_PREFIX = 'revoked:jti:';
 const EPOCH_PREFIX = 'authz:epoch:';
 
+// ── Why the epoch is MILLISECONDS ───────────────────────────────────────────
+// This comparison used to be `claims.iat <= epoch` with both in whole seconds,
+// and the tie was resolved as "revoked" because that is the safe direction. But
+// a tie is not rare in the one case that matters: an admin saves a role change
+// and the affected person signs in again immediately. Both land in the same
+// second, so the brand-new token — minted AFTER the revocation, by a successful
+// password check — was dead on arrival. Every request then 401'd and the client
+// bounced back to the sign-in page, which reads as "I just logged in and the
+// system says I'm not logged in".
+//
+// Resolving the tie the other way would be worse: it would let a token minted in
+// the same second as a disable survive, which is exactly what revocation exists
+// to prevent. The fix is to stop having ties at all — record the epoch in
+// milliseconds, and carry a millisecond `iatMs` claim on the token.
+//
+// BOTH LEGACY FORMS MUST KEEP WORKING while old tokens sit in browsers and old
+// epoch keys sit in Redis (those live for two days). Each is widened in the
+// SAFE direction — towards "revoked" — so the migration window cannot let a
+// token through that the old code would have rejected:
+//
+//   • a legacy epoch in seconds means "revoked at SOME point during second S",
+//     and which millisecond is unknowable, so it counts as the END of that
+//     second (+999). Scaling to the start instead would quietly un-revoke a
+//     token minted mid-second, which is precisely the check's whole purpose.
+//   • a legacy token with no `iatMs` counts as the START of its second, the
+//     earliest it could have been issued.
+//
+// A seconds timestamp is ~1.8e9 and a milliseconds one ~1.8e12, so the 1e11
+// threshold separates them unambiguously until the year 5138.
+const MS_THRESHOLD = 1e11;
+
+// For a token's issue time: legacy seconds → start of the second.
+function issuedAtMs(claims) {
+  if (Number.isFinite(claims.iatMs) && claims.iatMs > 0) return claims.iatMs;
+  const n = Number(claims.iat);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < MS_THRESHOLD ? n * 1000 : n;
+}
+
+// For a revocation epoch: legacy seconds → END of the second.
+function epochToMs(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < MS_THRESHOLD ? n * 1000 + 999 : n;
+}
+
 // The epoch is read on every authenticated request, so cache it briefly in-process.
 // A 5s window means a revocation takes at most 5s to propagate to every replica —
 // far better than 12 hours, and it keeps Redis off the hot path for bursts.
@@ -76,11 +122,9 @@ function createRevocation({
         const hit = await r.exists(JTI_PREFIX + claims.jti);
         if (hit) return true;
       }
-      if (claims.sub && claims.iat) {
+      if (claims.sub && (claims.iat || claims.iatMs)) {
         const epoch = await userEpoch(claims.sub);
-        // `iat` is whole seconds. A token minted in the same second as the bump is
-        // treated as revoked (<=), which is the safe direction.
-        if (epoch && claims.iat <= epoch) return true;
+        if (epoch && issuedAtMs(claims) <= epochToMs(epoch)) return true;
       }
     } catch (e) {
       if (!warned) {
@@ -120,7 +164,9 @@ function createRevocation({
   async function revokeAllForUser(userId) {
     const r = client();
     if (!r || !userId) return false;
-    const now = Math.floor(Date.now() / 1000);
+    // Milliseconds — see the note on MS_THRESHOLD above. Readers scale a legacy
+    // seconds value up, so this can change without a coordinated deploy.
+    const now = Date.now();
     try {
       // Expire the marker a little beyond the longest possible token life so it is
       // not garbage forever, but long enough that no live token predates it.

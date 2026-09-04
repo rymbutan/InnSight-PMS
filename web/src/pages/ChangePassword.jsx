@@ -8,7 +8,12 @@ export default function ChangePassword() {
   const navigate = useNavigate();
   const toast = useToast();
   const { user, setUser } = useAuth();
-  const [form, setForm] = useState({ oldPassword: '', newPassword: '', confirm: '' });
+  // Named to match the field POST /api/auth/change-password actually destructures.
+  // It read `currentPassword` while this form sent `oldPassword`, so the server
+  // compared against undefined, every attempt 401'd as "Current password
+  // incorrect", and a new account — forced here by mustChangePwd — could never
+  // finish its first sign-in.
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [busy, setBusy] = useState(false);
 
   async function submit(e) {
@@ -24,7 +29,7 @@ export default function ChangePassword() {
     setBusy(true);
     try {
       await api.post('/api/auth/change-password', {
-        oldPassword: form.oldPassword,
+        currentPassword: form.currentPassword,
         newPassword: form.newPassword,
       });
       toast.success('Password changed.');
@@ -62,8 +67,8 @@ export default function ChangePassword() {
           <input
             type="password"
             required
-            value={form.oldPassword}
-            onChange={(e) => setForm({ ...form, oldPassword: e.target.value })}
+            value={form.currentPassword}
+            onChange={(e) => setForm({ ...form, currentPassword: e.target.value })}
           />
           <label style={{ marginTop: 12 }}>New password (min 8 chars)</label>
           <input

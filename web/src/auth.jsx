@@ -71,10 +71,27 @@ export function AuthProvider({ children }) {
     }
   }
 
-  function logout() {
+  async function logout() {
+    // REVOKE the token server-side first. Dropping it from localStorage only
+    // makes this browser forget it — the JWT itself stayed valid for the rest of
+    // its 12-hour TTL, so anyone who had captured it (or any other tab that had
+    // copied it) still held a working credential after "Sign out". The auth
+    // service has had POST /api/auth/logout for exactly this since revocation
+    // was added; nothing on the client ever called it.
+    //
+    // Best-effort: if the request fails the user must still be signed out
+    // locally, so a network error can never trap someone in a session.
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      /* offline, or the token had already expired — either way, continue */
+    }
     localStorage.removeItem('innsight_token');
     localStorage.removeItem('innsight_user');
     setUser(null);
+    // A full document load, not a client-side navigate: it discards every
+    // in-memory store, cached page state and open SSE stream in one step, so no
+    // fragment of the previous session can survive into the next sign-in.
     window.location.href = '/login';
   }
 

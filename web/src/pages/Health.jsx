@@ -37,25 +37,29 @@ export default function Health() {
               </span>
             </div>
           </div>
-          <div>
-            <button onClick={load} disabled={loading}>
-              {loading ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
+          {/* Refresh moved AFTER the timestamp, so the action sits at the far
+              right of the strip. It was between the two readouts, which put a
+              button in the middle of a line of status text — the one place
+              nothing is clickable. */}
           {data?.checkedAt && (
             <div className="muted" style={{ alignSelf: 'flex-end' }}>
               Checked: {new Date(data.checkedAt).toLocaleTimeString()}
             </div>
           )}
+          <div className="row-action">
+            <button onClick={load} disabled={loading}>
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
         </div>
         {data?.services ? (
           <table>
             <thead>
               <tr>
                 <th>Service</th>
-                <th>Status</th>
-                <th>HTTP</th>
-                <th>Latency</th>
+                <th className="t-c">Status</th>
+                <th className="t-c">HTTP</th>
+                <th className="t-n">Latency</th>
                 <th>Notes</th>
               </tr>
             </thead>
@@ -63,11 +67,11 @@ export default function Health() {
               {data.services.map((s) => (
                 <tr key={s.service}>
                   <td>{s.service}</td>
-                  <td>
+                  <td className="t-c">
                     <span className={`badge ${s.status === 'up' ? 'clean' : 'dirty'}`}>{s.status}</span>
                   </td>
-                  <td>{s.httpCode ?? '—'}</td>
-                  <td>{s.latencyMs} ms</td>
+                  <td className="t-c">{s.httpCode ?? '—'}</td>
+                  <td className="t-n">{s.latencyMs} ms</td>
                   <td className="muted">{s.error || ''}</td>
                 </tr>
               ))}

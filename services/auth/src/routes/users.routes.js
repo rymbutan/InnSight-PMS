@@ -114,6 +114,42 @@ router.post('/users/:id/reset-password', verifyToken, requireRole(...ADMIN_ROLES
 // POST /api/users/:id/disable
 router.post('/users/:id/disable', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
   try {
+    // The lockout guard. Disabling the last working ADMIN locks EVERYONE out of
+    // user management permanently — including the person doing it — and the
+    // only way back is a hand-written UPDATE against the database. A dialog in
+    // the browser does not prevent this; it only asks. This does.
+    //
+    // Mirrors the same guard on PUT /users/:id/roles, which stops the other
+    // route to the same dead end: stripping the last ADMIN role.
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { roles: true },
+    });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+
+    if (target.roles.some((r) => r.roleCode === 'ADMIN')) {
+      if (req.params.id === req.user?.sub) {
+        return res
+          .status(400)
+          .json({ error: 'You cannot disable your own account. Ask another admin to do it.' });
+      }
+      // ACTIVE only: another ADMIN who is themselves disabled is not a way back
+      // in, so counting them would let the last usable admin be switched off.
+      const otherActiveAdmins = await prisma.user.count({
+        where: {
+          id: { not: req.params.id },
+          status: 'ACTIVE',
+          roles: { some: { roleCode: 'ADMIN' } },
+        },
+      });
+      if (otherActiveAdmins === 0) {
+        return res.status(400).json({
+          error:
+            'This is the only active account with the ADMIN role. Disabling it would lock everyone out of user management. Create or enable another admin first.',
+        });
+      }
+    }
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: { status: 'DISABLED' },
@@ -149,19 +185,58 @@ router.put('/users/:id/roles', verifyToken, requireRole(...ADMIN_ROLES), async (
     if (!Array.isArray(roles)) {
       return res.status(400).json({ error: 'roles must be an array of role codes.' });
     }
+    const current = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { roles: true },
+    });
+    if (!current) return res.status(404).json({ error: 'User not found.' });
+    const wasAdmin = current.roles.some((r) => r.roleCode === 'ADMIN');
+    const staysAdmin = roles.includes('ADMIN');
+
     // Privilege-escalation guard: a MANAGER may manage staff roles but must not
     // be able to grant the ADMIN role or take over an existing admin account.
     // Only an ADMIN can do either.
     const requesterIsAdmin = (req.user?.roles || []).includes('ADMIN');
     if (!requesterIsAdmin) {
-      if (roles.includes('ADMIN')) {
+      if (staysAdmin) {
         return res.status(403).json({ error: 'Only an ADMIN can grant the ADMIN role.' });
       }
-      const target = await prisma.user.findUnique({ where: { id: req.params.id }, include: { roles: true } });
-      if (target?.roles?.some((r) => r.roleCode === 'ADMIN')) {
+      if (wasAdmin) {
         return res.status(403).json({ error: 'Only an ADMIN can modify an admin account.' });
       }
     }
+
+    // ── Do not let the ADMIN role leave the system ──────────────────────────
+    // This is a REPLACE, so a save that simply omits 'ADMIN' strips it. Nothing
+    // stopped the only administrator from doing exactly that to their own
+    // account — and once no ADMIN exists the guard above makes it permanent,
+    // because granting ADMIN requires an ADMIN. There is then no way back in
+    // through the app at all, only a hand-written INSERT against the database.
+    // This is not hypothetical; it is how the check came to be written.
+    //
+    // Tested against the CURRENT rows rather than the requester's token: token
+    // roles can be up to 5 seconds stale (the epoch cache in
+    // _shared/tokenRevocation.js), and this decision must not be.
+    if (wasAdmin && !staysAdmin) {
+      if (req.params.id === req.user?.sub) {
+        return res.status(400).json({
+          error:
+            'You cannot remove your own ADMIN role. Ask another administrator, ' +
+            'or grant ADMIN to a second account first.',
+        });
+      }
+      const otherAdmins = await prisma.userRole.count({
+        where: { roleCode: 'ADMIN', userId: { not: req.params.id } },
+      });
+      if (otherAdmins === 0) {
+        return res.status(400).json({
+          error:
+            'This is the only account with the ADMIN role. Grant ADMIN to another ' +
+            'account before removing it from this one.',
+        });
+      }
+    }
+
     await prisma.userRole.deleteMany({ where: { userId: req.params.id } });
     if (roles.length) {
       await prisma.userRole.createMany({

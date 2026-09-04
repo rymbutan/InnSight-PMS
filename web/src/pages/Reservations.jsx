@@ -5,9 +5,11 @@ import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import StatusPill from '../components/StatusPill';
-import FilterPanel, { FilterField } from '../components/FilterPanel';
+import FilterPanel, { FilterField, FilterPill } from '../components/FilterPanel';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
+import Autocomplete from '../components/Autocomplete';
+import { labelize } from '../lib/labels';
 
 const STATUS_OPTIONS = ['CONFIRMED', 'PENDING', 'CANCELLED', 'IN_HOUSE', 'CHECKED_OUT', 'NO_SHOW'];
 
@@ -31,6 +33,11 @@ export default function Reservations() {
   });
   const [statusOpen, setStatusOpen] = useState(false);
   const [typesOpen, setTypesOpen] = useState(false);
+  // The panel starts closed now that its trigger is a capsule in the header.
+  // Open by default made sense when the toggle row WAS the panel's only
+  // presence on the page; with a labelled control beside the title, seven
+  // filter fields no longer need to sit between the title and the table.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortBy, setSortBy] = useState({ key: 'dateBooked', dir: 'desc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -108,6 +115,7 @@ export default function Reservations() {
 
   function applyFilters() {
     setPage(1);
+    setFiltersOpen(false);
   }
   function clearFilters() {
     setFilters({
@@ -128,14 +136,26 @@ export default function Reservations() {
   return (
     <div>
       <div className="page-head">
-        <h1>Reservations</h1>
+        {/* The trigger sits with the title, in the same wrapper Reports uses
+            for its Reports ⇄ Revenue switcher, so the two pages put their
+            header control in the same place. */}
+        <div className="page-head-title">
+          <h1>Reservations</h1>
+          <FilterPill open={filtersOpen} onClick={() => setFiltersOpen((o) => !o)} />
+        </div>
         <button className="btn-cta" onClick={() => navigate('/reservations/new')}>
           <Icon name="plus" size={14} style={{ marginRight: 6 }} />
           Create new reservation
         </button>
       </div>
 
-      <FilterPanel onApply={applyFilters} onClear={clearFilters}>
+      <FilterPanel
+        hideHeader
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        onApply={applyFilters}
+        onClear={clearFilters}
+      >
         <FilterField label="Check-in From">
           <input
             type="date"
@@ -224,15 +244,26 @@ export default function Reservations() {
         </div>
 
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-          <input
-            placeholder="Search by name or confirmation #"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            style={{ maxWidth: 320 }}
-          />
+          {/* Suggestions jump straight to a reservation; the text also keeps
+              filtering the table beneath, so typing without picking still
+              narrows the list the way it always did. */}
+          <div style={{ maxWidth: 320, flex: '0 1 320px' }}>
+            <Autocomplete
+              value={search}
+              onChange={(v) => {
+                setSearch(v);
+                setPage(1);
+              }}
+              placeholder="Search by name or confirmation #"
+              endpoint={(term) => `/api/reservations?q=${encodeURIComponent(term)}`}
+              mapItem={(r) => ({
+                id: r.id,
+                title: r.guestName || r.confirmationNumber || r.id.slice(0, 8),
+                meta: r.confirmationNumber,
+              })}
+              onPick={(r) => navigate(`/reservations/${r.id}`)}
+            />
+          </div>
           <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>
             Showing {paged.length === 0 ? 0 : (page - 1) * pageSize + 1} to{' '}
             {(page - 1) * pageSize + paged.length} of {filtered.length} | View
@@ -281,9 +312,6 @@ export default function Reservations() {
             <table className="table-clickable">
               <thead>
                 <tr>
-                  <th style={{ width: 30 }}>
-                    <input type="checkbox" />
-                  </th>
                   <SortableTh
                     field="confirmationNumber"
                     label="Reservation"
@@ -292,41 +320,51 @@ export default function Reservations() {
                   />
                   <SortableTh field="guestName" label="Guest" sortBy={sortBy} onClick={toggleSort} />
                   <SortableTh field="createdAt" label="Date Booked" sortBy={sortBy} onClick={toggleSort} />
-                  <th>Room(s)</th>
+                  <th className="t-c">Room(s)</th>
                   <SortableTh field="checkIn" label="Check-In" sortBy={sortBy} onClick={toggleSort} />
                   <SortableTh field="checkOut" label="Check-Out" sortBy={sortBy} onClick={toggleSort} />
-                  <SortableTh field="nights" label="Nights" sortBy={sortBy} onClick={toggleSort} />
+                  <SortableTh
+                    field="nights"
+                    label="Nights"
+                    sortBy={sortBy}
+                    onClick={toggleSort}
+                    align="t-c"
+                  />
                   <SortableTh
                     field="totalEstimateCents"
                     label="Total Price"
                     sortBy={sortBy}
                     onClick={toggleSort}
+                    align="t-n"
                   />
-                  <SortableTh field="status" label="Status" sortBy={sortBy} onClick={toggleSort} />
+                  <SortableTh
+                    field="status"
+                    label="Status"
+                    sortBy={sortBy}
+                    onClick={toggleSort}
+                    align="t-c"
+                  />
                   <th>Source</th>
                 </tr>
               </thead>
               <tbody>
                 {paged.map((r) => (
                   <tr key={r.id} onClick={() => navigate(`/reservations/${r.id}`)}>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" />
-                    </td>
                     <td className="table-link">{r.confirmationNumber || r.id?.slice(0, 8)}</td>
                     <td>{r.guestName || '—'}</td>
                     <td>{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—'}</td>
-                    <td>{r.assignedRoomId || r.roomTypeCode || 'N/A'}</td>
+                    <td className="t-c">{r.assignedRoomId || r.roomTypeCode || 'N/A'}</td>
                     <td>{new Date(r.checkIn).toLocaleDateString()}</td>
                     <td>{new Date(r.checkOut).toLocaleDateString()}</td>
-                    <td>
+                    <td className="t-c">
                       {r.nights ||
                         Math.max(1, Math.round((new Date(r.checkOut) - new Date(r.checkIn)) / 86400000))}
                     </td>
-                    <td>{formatPeso(r.totalEstimateCents)}</td>
-                    <td>
+                    <td className="t-n">{formatPeso(r.totalEstimateCents)}</td>
+                    <td className="t-c">
                       <StatusPill status={r.status} size="sm" />
                     </td>
-                    <td className="muted">{r.source || 'Direct'}</td>
+                    <td className="muted">{labelize(r.source) || 'Direct'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -338,10 +376,17 @@ export default function Reservations() {
   );
 }
 
-function SortableTh({ field, label, sortBy, onClick }) {
+// `align` carries the column's alignment class onto the header, so a sortable
+// header lines up with its data the same way a plain `<th className="t-c">`
+// does. Without it the sortable columns were the only ones whose label stayed
+// pinned left over centred cells.
+function SortableTh({ field, label, sortBy, onClick, align = '' }) {
   const active = sortBy.key === field;
   return (
-    <th className={`sortable ${active ? 'active' : ''}`} onClick={() => onClick(field)}>
+    <th
+      className={`sortable ${active ? 'active' : ''} ${align}`.trim()}
+      onClick={() => onClick(field)}
+    >
       {label}{' '}
       <span className="sort-arrow">
         <Icon
