@@ -8,7 +8,8 @@ const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
 const { receiptModel } = require('../lib/receipt');
 const { send: sendMail } = require('../lib/notifier');
-const { qrPngBuffer } = require('../lib/qr');
+const { qrPngBuffer, qrDataUrl } = require('../lib/qr');
+const { newToken, intentState, INTENT_TTL_MS } = require('../lib/paymentIntent');
 const { publicUrl } = require('../lib/publicUrl');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
@@ -901,6 +902,54 @@ router.post('/folios/:id/transfer', requireRole(...CASHIER), async (req, res) =>
     res.status(201).json({ transactions: created });
   } catch (err) {
     console.error('[Folio] Transfer error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/payment-intents — generate a QR code for a simulated
+// wallet payment. The client asked whether payment could be simulated this way.
+//
+// Nothing here touches real payment rails: a simulated e-wallet is exactly as valid
+// as the simulated card payments this system already takes. The teaching value is
+// in what happens next — confirming publishes to Redis, so the front-desk screen
+// updates the moment the payment lands, which is the part students need to see.
+router.post('/folios/:id/payment-intents', requireRole(...CASHIER), async (req, res) => {
+  try {
+    let amountCents;
+    try {
+      amountCents = BigInt(req.body?.amountCents ?? 0);
+    } catch {
+      return res.status(400).json({ error: 'amountCents must be a whole number of centavos.' });
+    }
+    if (amountCents <= 0n) return res.status(400).json({ error: 'A payment amount is required.' });
+
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+    if (folio.status !== 'OPEN') return res.status(409).json({ error: 'This folio is not open.' });
+
+    const intent = await prisma.paymentIntent.create({
+      data: {
+        token: newToken(),
+        folioId: folio.id,
+        amountCents,
+        expiresAt: new Date(Date.now() + INTENT_TTL_MS),
+        createdBy: req.user?.username || req.user?.sub,
+      },
+    });
+
+    const url = publicUrl(`/pay/${intent.token}`);
+    res.status(201).json({
+      id: intent.id,
+      url,
+      expiresAt: intent.expiresAt,
+      amountCents: intent.amountCents.toString(),
+      qrDataUrl: await qrDataUrl(url),
+      // Lets the desk say "scan this" or "confirm on screen" truthfully. A code
+      // encoding localhost cannot be opened by a phone — see lib/publicUrl.js.
+      scannable: publicUrl.isScannableByPhone,
+    });
+  } catch (err) {
+    console.error('[Folio] Payment intent error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

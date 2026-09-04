@@ -22,6 +22,8 @@ export default function Folios() {
   // people are settling different parts of the bill.
   const [siblings, setSiblings] = useState([]);
   const [moving, setMoving] = useState(null);
+  // The QR payment code currently on screen, if any.
+  const [qr, setQr] = useState(null);
 
   useEffect(() => {
     api
@@ -159,6 +161,31 @@ export default function Folios() {
       toast.error(errMsg(e));
     }
   }
+  async function chargeByQr() {
+    const amount = Math.round(Number(payment.amount) * 100);
+    if (!amount || amount <= 0) return toast.error('Enter the amount to charge first.');
+    try {
+      const { data } = await api.post(`/api/folios/${folioId}/payment-intents`, { amountCents: amount });
+      setQr({ ...data, issuedAt: new Date().toISOString() });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  // When the guest confirms on their phone, the folio service publishes
+  // folio:payment_received and the live refresh below reloads this page. Clear the
+  // code once its amount has landed, so the desk is not left showing a spent code.
+  useEffect(() => {
+    if (!qr || !statement) return;
+    const paid = (statement.folio.payments || []).some(
+      (p) => String(p.amountCents) === String(qr.amountCents) && new Date(p.createdAt) > new Date(qr.issuedAt || 0)
+    );
+    if (paid) {
+      setQr(null);
+      toast.success('Payment received.');
+    }
+  }, [statement]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function printReceipt(paymentId) {
     try {
       await downloadAuthed(`/api/folios/${folioId}/payments/${paymentId}/receipt`, {
@@ -422,8 +449,44 @@ export default function Folios() {
                   />
                 </div>
               </div>
-              <button>Post payment</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button>Post payment</button>
+                <button type="button" className="secondary" onClick={chargeByQr}>
+                  Charge by QR
+                </button>
+              </div>
             </form>
+
+            {qr && (
+              <div className="qr-charge">
+                <img src={qr.qrDataUrl} alt="Scan to pay" width="180" height="180" />
+                <div className="qr-charge-side">
+                  <div className="qr-charge-amount">{formatPeso(qr.amountCents)}</div>
+                  {qr.scannable ? (
+                    <p className="muted">Ask the guest to scan this with their phone camera.</p>
+                  ) : (
+                    <p className="muted">
+                      {/* Honest about the offline case: a phone resolving localhost
+                          reaches itself, so the code cannot be scanned from one. */}
+                      This code points at <code>localhost</code>, so it can only be opened on this
+                      machine. Open the link in another tab to demonstrate, or set{' '}
+                      <code>PUBLIC_BASE_URL</code> to this machine&rsquo;s network address to make it
+                      scannable.
+                    </p>
+                  )}
+                  <a href={qr.url} target="_blank" rel="noreferrer" className="qr-charge-link">
+                    {qr.url}
+                  </a>
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Expires {new Date(qr.expiresAt).toLocaleTimeString()}. The folio updates itself
+                    when the guest confirms.
+                  </p>
+                  <button className="secondary small" onClick={() => setQr(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="panel">
