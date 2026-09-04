@@ -9,7 +9,11 @@ const net = require('node:net');
 const SMTP_HOST = process.env.SMTP_HOST || 'mailhog';
 const SMTP_PORT = Number(process.env.SMTP_PORT || 1025);
 const FROM_ADDR = process.env.NOTIFY_FROM || 'no-reply@innsight.local';
-const PORTAL_URL = (process.env.PORTAL_URL || 'http://localhost:5180').replace(/\/$/, '');
+// Guest-facing links come from the shared publicUrl helper so there is one answer
+// to "what address can the guest actually reach?" rather than a per-module guess.
+// The old default here was port 5180 — the gateway's second published port — which
+// worked but disagreed with everything else in the stack.
+const { publicUrl } = require('./publicUrl');
 
 // SMTP dot-stuffing. A line that is exactly "." terminates a DATA block, so any
 // body line starting with one must be doubled or the message is truncated there
@@ -124,7 +128,7 @@ const TEMPLATES = {
       `  Check-in:     ${new Date(r.checkIn).toDateString()}`,
       `  Check-out:    ${new Date(r.checkOut).toDateString()}`,
       ``,
-      `View or change your booking: ${PORTAL_URL}/portal/${r.confirmationNumber}`,
+      `View or change your booking: ${publicUrl(`/portal/${r.confirmationNumber}`)}`,
       ``,
       `See you soon,`,
       `The InnSight Team`,
