@@ -5,6 +5,7 @@ const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/au
 const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
+const { planTransfer } = require('../lib/transfer');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -354,6 +355,49 @@ router.get('/folios', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) =
   }
 });
 
+// GET /api/folios/outstanding?stayId=  — every open folio on a stay that still
+// carries a balance. Purpose-built for the check-out guard in the stay service:
+// with bill splitting a stay can have several folios, and releasing the room while
+// one of them is unpaid strands the balance with nobody left to bill.
+//
+// Defined BEFORE /folios/:id so the literal path wins over the :id param route.
+router.get('/folios/outstanding', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const { stayId } = req.query;
+    if (!stayId) return res.status(400).json({ error: 'stayId is required.' });
+
+    const folios = await prisma.folio.findMany({
+      where: { stayId, status: 'OPEN' },
+      include: { transactions: true },
+    });
+
+    // Same classifier the printed folio uses, so the number the desk is blocked on
+    // is the number on the guest's bill — not a second, subtly different sum.
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const codes = {
+      roomCodes: new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code)),
+      facilityCodes: new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code)),
+    };
+
+    const unsettled = folios
+      .map((f) => ({
+        id: f.id,
+        folioNumber: f.folioNumber,
+        balanceCents: classifyTransactions(f.transactions, codes).balanceCents,
+      }))
+      .filter((f) => f.balanceCents !== 0n)
+      .map((f) => ({ ...f, balanceCents: f.balanceCents.toString() }));
+
+    res.json({ stayId, unsettled });
+  } catch (err) {
+    console.error('[Folio] Outstanding error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/folios/amenity-revenue?from=&to=  — walk-in amenity/facility sales,
 // totalled and broken down by facility (charge code). Defined BEFORE /folios/:id
 // so the literal path wins over the :id param route.
@@ -448,6 +492,10 @@ router.get('/folios/daily-totals', requireRole(...ROLE_GROUPS.MGMT_AUDIT), async
       } else if (t.type === 'REFUND') {
         paymentsCents -= t.amountCents; // a refund reduces net payments taken
       }
+      // TRANSFER is deliberately absent, and unlike in classifyTransactions that is
+      // correct here: a transfer posts a matched +/- pair in one database
+      // transaction, so property-wide revenue for the day is unchanged. Counting it
+      // would be harmless arithmetic but misleading to read.
     }
 
     res.json({
@@ -489,18 +537,27 @@ router.get('/folios/:id/statement', requireRole(...ROLE_GROUPS.DESK_AUDIT), asyn
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
-    let balance = 0n;
-    for (const tx of folio.transactions) {
-      if (tx.type === 'CHARGE' || tx.type === 'TAX' || tx.type === 'ADJUSTMENT')
-        balance += tx.amountCents + tx.taxAmountCents;
-      else if (tx.type === 'PAYMENT') balance -= tx.amountCents;
-      else if (tx.type === 'REFUND') balance += tx.amountCents; // refund returns money to the guest → increases balance owed
-    }
+    // Delegated to classifyTransactions rather than summed inline. This route used
+    // to carry its own copy of the balance formula, and when TRANSFER was added for
+    // bill splitting the copy was not updated — so a folio whose charges had all
+    // been moved off it still showed the full amount owing, while the folio that
+    // received them showed nothing. One formula, one place.
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const summary = classifyTransactions(folio.transactions, {
+      roomCodes: new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code)),
+      facilityCodes: new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code)),
+    });
 
     res.json({
       folio,
-      balanceCents: balance.toString(),
-      totalCharges: folio.transactions.filter((t) => t.type === 'CHARGE').length,
+      balanceCents: summary.balanceCents.toString(),
+      // TRANSFER counts as a charge line: on the receiving folio it is the only
+      // thing there, and reporting "0 charges" beside a non-zero balance reads as
+      // a bug to the person at the desk.
+      totalCharges: folio.transactions.filter((t) => t.type === 'CHARGE' || t.type === 'TRANSFER').length,
       totalPayments: folio.payments.length,
     });
   } catch (err) {
@@ -772,6 +829,74 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
     res.json(reversal);
   } catch (err) {
     console.error('[Folio] Void tx error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/transfer — move one transaction to another folio on the
+// same stay. This is the mechanism behind bill splitting: the front desk opens a
+// second folio for the stay (POST /api/folios with the same stayId) and moves the
+// lines that a different payer is settling.
+//
+// Guarded tightly on purpose. Both folios must be OPEN, both must belong to the
+// SAME stay, and a transfer may not itself be transferred — otherwise a charge
+// could be walked off a stay entirely, or bounced between folios until its history
+// is unreadable.
+router.post('/folios/:id/transfer', requireRole(...CASHIER), async (req, res) => {
+  try {
+    const { transactionId, toFolioId } = req.body;
+    if (!transactionId || !toFolioId) {
+      return res.status(400).json({ error: 'transactionId and toFolioId are required.' });
+    }
+
+    const [from, to] = await Promise.all([
+      prisma.folio.findUnique({ where: { id: req.params.id } }),
+      prisma.folio.findUnique({ where: { id: toFolioId } }),
+    ]);
+    if (!from || !to) return res.status(404).json({ error: 'Folio not found.' });
+    if (from.id === to.id) return res.status(400).json({ error: 'Cannot transfer to the same folio.' });
+    if (from.status !== 'OPEN' || to.status !== 'OPEN') {
+      return res.status(409).json({ error: 'Both folios must be open to transfer a charge.' });
+    }
+    // A folio with no stay is a walk-in POS sale. Allowing a transfer off one would
+    // let a cashier move a stranger's bar tab onto a guest's room account.
+    if (!from.stayId || from.stayId !== to.stayId) {
+      return res.status(409).json({ error: 'Folios must belong to the same stay.' });
+    }
+
+    const tx = await prisma.folioTransaction.findUnique({ where: { id: transactionId } });
+    if (!tx || tx.folioId !== from.id) {
+      return res.status(404).json({ error: 'Transaction not found on this folio.' });
+    }
+    if (tx.type === 'TRANSFER') {
+      return res.status(409).json({ error: 'A transfer cannot itself be transferred.' });
+    }
+    if (tx.type === 'PAYMENT' || tx.type === 'REFUND') {
+      return res.status(409).json({ error: 'Only charges and adjustments can be transferred, not payments.' });
+    }
+
+    const rows = planTransfer(tx, {
+      fromFolioId: from.id,
+      toFolioId: to.id,
+      folioNumbers: { [from.id]: from.folioNumber, [to.id]: to.folioNumber },
+    });
+
+    // One transaction: a half-applied transfer would invent or destroy money.
+    const created = await prisma.$transaction(
+      rows.map((data) =>
+        prisma.folioTransaction.create({
+          data: { ...data, postedBy: req.user?.username || req.user?.sub, sourceSystem: 'transfer' },
+        })
+      )
+    );
+
+    redis.publish(
+      'folio:transferred',
+      JSON.stringify({ fromFolioId: from.id, toFolioId: to.id, transactionId, stayId: from.stayId })
+    );
+    res.status(201).json({ transactions: created });
+  } catch (err) {
+    console.error('[Folio] Transfer error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -1084,11 +1209,14 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
     doc.moveDown();
 
     // ── Particulars ──
-    // No Tax1-4 slots and no separate "Transferred From/To Folio" sections:
-    // InnSight tracks one combined taxAmountCents per charge (not a
-    // decomposed VAT/service-charge/local-tax breakdown), and folio-to-folio
-    // transfer isn't a supported workflow here — both are honest deviations
-    // from the literal reference template, documented in the design spec.
+    // No Tax1-4 slots: InnSight tracks one combined taxAmountCents per charge
+    // rather than a decomposed VAT/service-charge/local-tax breakdown — an honest
+    // deviation from the literal reference template, documented in the design spec.
+    //
+    // Transfers ARE supported now (POST /folios/:id/transfer, added for bill
+    // splitting). They need no section of their own: a transfer posts a matched
+    // pair of TRANSFER rows that name the other folio in their description, so
+    // they read in line with the rest of the particulars.
     doc.fontSize(11).text('Particulars', { underline: true });
     doc.moveDown(0.3);
     const line = (label, value, opts = {}) => {

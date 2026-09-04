@@ -107,3 +107,49 @@ test('with no facility codes configured nothing changes', () => {
   assert.equal(result.facilityChargeCents, 0n);
   assert.equal(result.extraChargeCents, 20000n);
 });
+
+// ── Transfers ───────────────────────────────────────────────────────────────
+// A TRANSFER row moves money between two folios of one stay (see lib/transfer.js).
+// It has to affect the balance on both sides, or a split bill shows the charge
+// still owing on the folio it left and missing from the one it arrived on.
+
+test('a transfer out cancels the charge it moved', () => {
+  const result = classifyTransactions(
+    [
+      { type: 'CHARGE', chargeCode: 'MB', amountCents: 15000n, taxAmountCents: 1800n },
+      { type: 'TRANSFER', chargeCode: 'MB', amountCents: -15000n, taxAmountCents: -1800n },
+    ],
+    { roomCodes: new Set(['RM']) }
+  );
+  assert.equal(result.balanceCents, 0n, 'the folio it left must now owe nothing');
+  assert.equal(result.totalChargesCents, 0n);
+});
+
+test('a transfer in is owed on the receiving folio', () => {
+  const result = classifyTransactions(
+    [{ type: 'TRANSFER', chargeCode: 'MB', amountCents: 15000n, taxAmountCents: 1800n }],
+    { roomCodes: new Set(['RM']) }
+  );
+  assert.equal(result.balanceCents, 16800n);
+  assert.equal(result.extraChargeCents, 15000n);
+});
+
+test('a transferred room charge stays room revenue', () => {
+  // The charge code travels with the transfer, so the receiving folio must classify
+  // it into the same bucket — otherwise moving a room charge to a company folio
+  // quietly turns it into miscellaneous income.
+  const result = classifyTransactions(
+    [{ type: 'TRANSFER', chargeCode: 'RM', amountCents: 500000n, taxAmountCents: 0n }],
+    { roomCodes: new Set(['RM']) }
+  );
+  assert.equal(result.roomChargeCents, 500000n);
+  assert.equal(result.extraChargeCents, 0n);
+});
+
+test('a transferred facility charge stays facility revenue', () => {
+  const result = classifyTransactions(
+    [{ type: 'TRANSFER', chargeCode: 'POOL', amountCents: 20000n, taxAmountCents: 0n }],
+    { roomCodes: new Set(['RM']), facilityCodes: new Set(['POOL']) }
+  );
+  assert.equal(result.facilityChargeCents, 20000n);
+});
