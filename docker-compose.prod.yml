@@ -1,0 +1,73 @@
+# Production overlay — apply ON TOP of docker-compose.yml, never instead of it:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Target is a Docker-capable VPS (Hostinger VPS, or equivalent). Hostinger's SHARED
+# hosting cannot run Docker and cannot host this stack.
+#
+# Vercel cannot host this either, and it is worth writing down why so nobody spends
+# a week finding out: Vercel runs static frontends and serverless functions, while
+# this is fifteen long-lived containers — Postgres, Redis, MinIO, Mailhog, an nginx
+# gateway and nine Node/Prisma services. Putting only the SPA there splits the
+# browser's origin in two and breaks a load-bearing design decision: web/src/api.js
+# sets API_BASE = '' so every request is same-origin, which is why there is no CORS,
+# no preflight, and why the gateway's rate limiter sees the real client IP.
+#
+# WHAT THIS FILE DOES: closes the infrastructure ports. In development every backing
+# service publishes to the host so you can reach Postgres with psql and read captured
+# mail at :8025. On a public box those are an open database, an open cache, an open
+# object store and an open mail UI. Only the gateway should be reachable.
+#
+# STILL TO DO ON THE SERVER, none of which belongs in a committed file:
+#
+#   1. PUBLIC_BASE_URL=https://<your domain> in the server's .env. That one variable
+#      is what turns QR codes from "demo link, this machine only" into codes a guest
+#      can actually scan — no rebuild (see services/_shared/publicUrl.js).
+#   2. Add the real hostname to the CORS map at services/gateway/nginx.conf:51.
+#   3. Terminate TLS in front of the gateway (certbot container, or the host's own
+#      reverse proxy) and redirect HTTP to HTTPS. HTTPS is also what would make the
+#      browser camera API available, if the app is ever to SCAN a code rather than
+#      only display one — that needs HTTPS or localhost, and a plain LAN address
+#      will not do.
+#      After changing the gateway config, CHECK THE CSP STILL ALLOWS THE 3D:
+#      'wasm-unsafe-eval' in script-src and blob: in connect-src, or every model
+#      silently fails to load.
+#   4. Run scripts/gen-env.sh into a FRESH .env on the server and change the admin
+#      password. HOW-TO-OPEN-EDITOR.md documents a live credential; that file must
+#      not travel to a public deployment.
+#   5. Verify from another machine that nothing but the gateway answers:
+#         nmap -p 5433,6380,8025,9000,9001 <host>      # expect closed/filtered
+#   6. Re-run the offline audit on the laptop afterwards, with PUBLIC_BASE_URL back
+#      at localhost:
+#         AUDIT_PASS='...' node scripts/offline-audit.mjs
+#      Deploying must not cost the classroom demo — the client needs both.
+
+services:
+  postgres:
+    # Not published. Reach it with `docker compose exec postgres psql -U innsight`.
+    ports: !override []
+
+  redis:
+    ports: !override []
+
+  minio:
+    ports: !override []
+
+  mailhog:
+    # Mailhog's web UI has no authentication and shows every captured message. On a
+    # public host that is an open inbox. Reach it over an SSH tunnel instead:
+    #   ssh -L 8025:localhost:8025 <user>@<host>
+    ports: !override []
+
+  gateway:
+    # The only thing the outside world talks to.
+    #
+    # !override matters here as much as anywhere: compose MERGES port lists, so
+    # without it the base file's second published port (5180, a development
+    # convenience) survives and the gateway answers on two ports in production.
+    #
+    # 8080 stays published for a TLS terminator in front of it. If that proxy runs
+    # on this same host, narrow this to "127.0.0.1:8080:8080" so the plaintext port
+    # is not reachable from the network at all.
+    ports: !override
+      - "8080:8080"
