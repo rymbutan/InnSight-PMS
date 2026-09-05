@@ -947,6 +947,22 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
       return res.status(409).json({ error: 'Transaction has already been voided.' });
     }
 
+    // The reversal carries the NEGATED breakdown of the row it reverses, not a
+    // null. taxAmountCents remains the single source of truth for the totals —
+    // this only decides which component lines the reversed tax is shown
+    // against. Left null, the print model's pre-migration fallback attributed
+    // the whole negative figure to VAT, so a voided taxed charge printed a
+    // fabricated "VAT -1,000.00 / Service Charge +1,000.00" pair that nets to
+    // zero (which is why no subtotal check ever caught it).
+    const originalBreakdown = Array.isArray(original.taxBreakdown) ? original.taxBreakdown : null;
+    const reversalBreakdown = originalBreakdown?.length
+      ? originalBreakdown.map((b) => ({
+          ...b,
+          // Stored as decimal STRINGS: BigInt has no JSON representation.
+          amountCents: (-BigInt(b.amountCents || 0)).toString(),
+        }))
+      : null;
+
     const reversal = await prisma.folioTransaction.create({
       data: {
         folioId: req.params.id,
@@ -955,6 +971,7 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
         description: `REVERSAL of ${original.description}`,
         amountCents: -original.amountCents,
         taxAmountCents: -original.taxAmountCents,
+        taxBreakdown: reversalBreakdown,
         reversalOf: original.id,
       },
     });
