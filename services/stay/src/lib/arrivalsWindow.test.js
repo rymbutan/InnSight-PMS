@@ -55,3 +55,29 @@ test('a rolling window crosses month and year boundaries correctly', () => {
   assert.equal(w.checkInFrom, '2026-12-29');
   assert.equal(w.checkInTo, '2027-01-05');
 });
+
+// ── includeOverdue ──────────────────────────────────────────────────────────
+//
+// Overdue rows have no lower bound and accumulate until a night audit sweeps
+// them, so whether they are attached is not a detail: a Dashboard tile labelled
+// just "Arrivals", sitting beside a strictly-today "Departures" tile, read 14
+// on a day with no arrivals due. The window says overdue rows belong only to a
+// caller that actually NAMED a range.
+
+test('a named range asks for overdue rows', () => {
+  for (const r of ARRIVAL_RANGES) {
+    assert.equal(arrivalsWindow(r, NOW).includeOverdue, true, `range ${r}`);
+  }
+  assert.equal(arrivalsWindow('WEEK', NOW).includeOverdue, true, 'case does not change the answer');
+  // An unrecognised range is still a range the caller asked for; it resolves to
+  // today's window, and the worklist behaviour goes with it.
+  assert.equal(arrivalsWindow('fortnight', NOW).includeOverdue, true);
+});
+
+test('no range at all means today, literally — no overdue rows', () => {
+  assert.equal(arrivalsWindow(undefined, NOW).includeOverdue, false);
+  assert.equal(arrivalsWindow(undefined, NOW).range, 'today', 'still today, as before');
+  // An empty ?range= names nothing, so it is not a request for the worklist.
+  assert.equal(arrivalsWindow('', NOW).includeOverdue, false);
+  assert.equal(arrivalsWindow('   ', NOW).includeOverdue, false);
+});

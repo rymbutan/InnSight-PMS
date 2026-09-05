@@ -112,6 +112,10 @@ require.cache[require.resolve('../lib/inventoryClient')] = {
 let reservations = [];
 let reservationReachable = true;
 let lastReservationQuery = null;
+// Every query the route sent for the current request, so a test can assert
+// that the overdue slice was not fetched at all -- not merely that it returned
+// nothing.
+let reservationQueries = [];
 
 require.cache[require.resolve('../lib/serviceCall')] = {
   exports: {
@@ -120,6 +124,7 @@ require.cache[require.resolve('../lib/serviceCall')] = {
       call: async (url) => {
         if (!reservationReachable) throw new Error('ECONNREFUSED');
         lastReservationQuery = new URL(url, 'http://x').searchParams;
+        reservationQueries.push(lastReservationQuery);
         const from = lastReservationQuery.get('checkInFrom');
         const to = lastReservationQuery.get('checkInTo');
         return reservations.filter((r) => {
@@ -164,10 +169,24 @@ function call(app, method, path, body) {
   });
 }
 
-// Today, as the UTC day key the route builds its window from.
-const TODAY = new Date().toISOString().slice(0, 10);
+// Today, as the BUSINESS day the route builds its window from.
+//
+// These two helpers used to be `new Date().toISOString().slice(0, 10)` and
+// `Date.now() + n * 86400000` — Convention 2 (UTC) applied to a Convention 1
+// (local business day) question, the exact mix lib/date.js opens by warning
+// against. arrivalsWindow() derives its window from utcDayStart(), which reads
+// LOCAL calendar fields, so between 16:00 and midnight in a UTC+8 container the
+// test's "today" was the route's YESTERDAY. Every no-argument test then passed
+// only because the unbounded overdue query happened to sweep the row back in —
+// which stopped being true the moment overdue became opt-in, and had been
+// hiding what those tests actually asserted for eight hours of every day.
+const { localDay, startOfLocalDay } = require('../lib/date');
+
+const TODAY = localDay(new Date());
 function dayOffset(n) {
-  return new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const d = startOfLocalDay(new Date());
+  d.setDate(d.getDate() + n);
+  return localDay(d);
 }
 
 function reset() {
@@ -176,6 +195,7 @@ function reset() {
   reservations = [];
   reservationReachable = true;
   lastReservationQuery = null;
+  reservationQueries = [];
 }
 
 // ── The regression gate ─────────────────────────────────────────────────────
@@ -369,4 +389,79 @@ test('the reservation service is asked only for CONFIRMED reservations', async (
   await call(makeApp(), 'GET', '/api/arrivals?range=week', null);
   assert.equal(lastReservationQuery.get('status'), 'CONFIRMED');
   assert.ok(lastReservationQuery.get('checkInTo'), 'an arrival window must be sent');
+});
+
+// ── Overdue belongs to the caller who ASKED for a range ──────────────────────
+//
+// THE BUG THESE EXIST FOR
+// -----------------------
+// Overdue rows were attached to every range, and a no-argument call resolves to
+// range=today -- so a bare `/api/arrivals` returned today PLUS every CONFIRMED
+// reservation from the beginning of time that never checked in. That query has
+// no lower bound: the set grows without limit until a night audit sweeps the
+// no-shows. Both no-argument callers put the result straight into a count --
+// the Dashboard's "Arrivals" tile, sitting beside a strictly-today "Departures"
+// tile, and the reports service's arrivals summary. The tile read 14 on a day
+// with no arrivals due.
+//
+// The ruling: overdue rows only when `range` was explicitly passed. All three
+// cases are pinned below, because the difference between them is invisible
+// from the response shape alone.
+
+// One guest due today, one who was due three days ago and never turned up.
+function seedTodayAndOverdue() {
+  reset();
+  reservations = [
+    { id: 'today1', status: 'CONFIRMED', guestId: 'g1', guestName: 'Due Today', confirmationNumber: 'CN-A',
+      checkIn: `${TODAY}T00:00:00.000Z`, checkOut: `${dayOffset(1)}T00:00:00.000Z`, adults: 1, children: 0, roomTypeCode: 'STD' },
+    { id: 'late1', status: 'CONFIRMED', guestId: 'g2', guestName: 'Never Showed', confirmationNumber: 'CN-B',
+      checkIn: `${dayOffset(-3)}T00:00:00.000Z`, checkOut: `${dayOffset(-1)}T00:00:00.000Z`, adults: 1, children: 0, roomTypeCode: 'STD' },
+  ];
+}
+
+test('NO params: today only — an overdue row must not inflate the count', async () => {
+  seedTodayAndOverdue();
+  const res = await call(makeApp(), 'GET', '/api/arrivals', null);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.arrivals.length, 1, 'a bare /api/arrivals is a today question');
+  assert.equal(res.body.arrivals[0].reservationId, 'today1');
+  assert.equal(res.body.range, 'today', 'the response shape is unchanged');
+  assert.equal(
+    reservationQueries.length, 1,
+    'the unbounded overdue query must not be issued at all, not merely filtered afterwards'
+  );
+});
+
+test('explicit range=today: the overdue row IS included', async () => {
+  seedTodayAndOverdue();
+  const res = await call(makeApp(), 'GET', '/api/arrivals?range=today', null);
+  assert.equal(res.body.arrivals.length, 2, 'the Arrivals page is a worklist and always sends a range');
+  assert.equal(res.body.arrivals[0].reservationId, 'late1', 'overdue sorts first — it needs action');
+  assert.equal(res.body.arrivals[0].overdue, true);
+  assert.equal(res.body.range, 'today', 'the SAME range as the no-param call, and a different answer');
+  assert.equal(reservationQueries.length, 2, 'in-range plus overdue');
+});
+
+test('?date= still excludes overdue, as the night audit requires', async () => {
+  seedTodayAndOverdue();
+  const res = await call(makeApp(), 'GET', `/api/arrivals?date=${TODAY}`, null);
+  assert.equal(res.body.arrivals.length, 1);
+  assert.equal(res.body.arrivals[0].reservationId, 'today1');
+  assert.equal(res.body.range, null);
+  assert.equal(reservationQueries.length, 1);
+});
+
+test('an empty ?range= names nothing, and is treated as no range', async () => {
+  seedTodayAndOverdue();
+  const res = await call(makeApp(), 'GET', '/api/arrivals?range=', null);
+  assert.equal(res.body.arrivals.length, 1);
+  assert.equal(reservationQueries.length, 1);
+});
+
+test('range=week and range=month still carry overdue rows', async () => {
+  for (const range of ['week', 'month']) {
+    seedTodayAndOverdue();
+    const res = await call(makeApp(), 'GET', `/api/arrivals?range=${range}`, null);
+    assert.equal(res.body.arrivals.length, 2, `range=${range} must keep the worklist behaviour`);
+  }
 });

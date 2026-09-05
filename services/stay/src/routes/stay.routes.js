@@ -142,15 +142,22 @@ router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) =
           // overdueBefore === checkInFrom means nothing can be overdue: the audit
           // asks a bounded historical question, and rows from other days would
           // inflate its count.
-          return { range: null, checkInFrom: day, checkInTo: next, overdueBefore: day };
+          return { range: null, checkInFrom: day, checkInTo: next, overdueBefore: day, includeOverdue: false };
         })()
       : arrivalsWindow(req.query.range);
 
     // Two queries, not one: the in-range window, plus everything still expected
     // from BEFORE today. An overdue arrival is a problem the desk must see in
-    // every view — today's strict window is exactly why a guest who was due
-    // yesterday and never turned up used to vanish off the screen instead of
-    // demanding action.
+    // every view it asked for — today's strict window is exactly why a guest
+    // who was due yesterday and never turned up used to vanish off the screen
+    // instead of demanding action.
+    //
+    // The overdue slice is attached only when the caller NAMED a range (see
+    // lib/arrivalsWindow.js). A bare `/api/arrivals` is a today question and
+    // gets a today answer: the dashboard tile that asks it sits beside a
+    // strictly-today Departures tile and was reading 14 on a day with no
+    // arrivals due, because overdue rows have no lower bound and pile up until
+    // the night audit sweeps them.
     const qs = (params) => new URLSearchParams({ status: 'CONFIRMED', ...params }).toString();
 
     let reservations = [];
@@ -163,14 +170,11 @@ router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) =
             checkInTo: window.checkInTo,
           })}`
         ),
-        // Skipped entirely for ?date= (range === null there): overdueBefore
-        // equals checkInFrom in that branch by construction, so an overdue
-        // query would just re-fetch rows the caller must not see. It is NOT
-        // skipped for range= windows -- arrivalsWindow() also sets
-        // overdueBefore equal to checkInFrom there (an overdue arrival must
-        // show in every range), so that equality can't be used to tell the
-        // two cases apart; only the branch itself can.
-        window.range !== null
+        // Skipped for ?date= (the audit asks a bounded historical question) and
+        // for a bare no-argument call (today means today). overdueBefore
+        // equals checkInFrom in EVERY branch by construction, so that equality
+        // cannot be used to tell the cases apart -- only the explicit flag can.
+        window.includeOverdue
           ? reservationCall.call(
               `${RESERVATION_URL}/api/reservations?${qs({ checkInTo: window.overdueBefore })}`
             )
