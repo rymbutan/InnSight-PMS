@@ -94,8 +94,21 @@ function computeTax({ subtotalCents, category = 'ROOM', rates } = {}) {
     // Percent × cents in integer space: multiply by the rate scaled to four
     // decimal places, then divide out. Doing this in floating point loses
     // centavos on large folios, and money must never round through a float.
+    //
+    // The +500000n/1000000n step is round-half-up, which only works for a
+    // non-negative dividend: BigInt division truncates toward zero, and
+    // truncation toward zero equals floor only when the value is >= 0. For a
+    // negative subtotal (discounts, charge reversals), truncation toward zero
+    // acts as a ceiling instead, so adding the same positive offset pushes the
+    // result toward zero and silently drops up to a full cent -- even on an
+    // exact multiple that needs no rounding at all. Rounding the magnitude and
+    // re-applying the sign keeps this "round half away from zero" for every
+    // sign of subtotal, which is the trap the next reader should not re-add.
     const scaled = BigInt(Math.round(rate * 10000));
-    const amountCents = (base * scaled + 500000n) / 1000000n;
+    const negative = base < 0n;
+    const magnitude = negative ? -base : base;
+    const rounded = (magnitude * scaled + 500000n) / 1000000n;
+    const amountCents = negative ? -rounded : rounded;
     taxCents += amountCents;
     breakdown.push({ key, label, rate, amountCents });
   }
