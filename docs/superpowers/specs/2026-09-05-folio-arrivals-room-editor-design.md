@@ -103,8 +103,29 @@ taxBreakdown Json?   // [{ name, rate, amountCents }], null for pre-migration ro
 
 `POST /api/folios/:id/charges` calls `computeTax` when the caller does **not**
 supply an explicit `taxAmountCents`, and stores both the component array and the
-existing `taxAmountCents` sum. An explicit `taxAmountCents` still wins, so the
-night audit and every other programmatic poster keep their current behaviour.
+existing `taxAmountCents` sum. An explicit `taxAmountCents` still wins, so a
+poster that **sends** its own figure keeps its current behaviour.
+
+**Correction (2026-09-06, from the final branch review).** An earlier draft of
+this sentence claimed the night audit was among them. It is not.
+`services/audit/src/routes/audit.routes.js:202-210` posts `RM` charges with
+**no** `taxAmountCents`, so its room charges now attract VAT 12% + Service
+Charge 10% like any other untaxed post. That is the intended outcome — §0
+identifies zero tax as the bug — but it has a consequence this spec did not
+anticipate:
+
+> `Reservation.totalEstimateCents` is `baseRate × nights` with **no tax**
+> (`services/reservation/src/index.js:102-118`). A guest quoted ₱25,350 at
+> booking now checks out owing ₱30,927, and any deposit was sized against the
+> untaxed figure. A guest in-house across the deploy gets ₱0 tax on nights
+> posted before it and 22% on nights after — one bill, two regimes.
+> `GET /api/folios/daily-totals` `taxCents` also steps from zero to non-zero
+> overnight, putting an unannotated discontinuity in revenue reports.
+
+**Unresolved — for the product owner.** Whether reservation quoting should
+become tax-inclusive, show tax as a separate line, or leave the gap as a
+training-system quirk is a business decision outside what this spec was asked
+to change. Nothing here resolves it.
 
 **Backward compatibility is the hard requirement here.** `taxAmountCents`
 remains the single source of truth for every total: `classifyTransactions`
