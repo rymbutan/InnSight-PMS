@@ -20,7 +20,6 @@ export default function Folios() {
   const [payment, setPayment] = useState({ method: 'CASH', amount: '' });
   const [deposit, setDeposit] = useState({ method: 'CASH', amount: '' });
   const [codes, setCodes] = useState([]);
-  const [loading, setLoading] = useState(false);
   // Bill splitting: the other open folios on the same stay, and which transaction
   // the user is currently moving. A stay can carry several folios when different
   // people are settling different parts of the bill.
@@ -50,12 +49,9 @@ export default function Folios() {
       .catch(() => {});
   }, []);
 
-  // `live` marks an SSE-triggered reload. Refresh in place rather than showing
-  // the skeleton, so the list does not blank on every event from any module.
-  async function load(id, { live = false } = {}) {
+  async function load(id) {
     const target = id || folioId;
     if (!target) return;
-    if (!live) setLoading(true);
     try {
       const [f, s] = await Promise.all([
         api.get(`/api/folios/${target}`),
@@ -66,8 +62,6 @@ export default function Folios() {
       setFolioId(target);
     } catch (e) {
       toast.error(errMsg(e));
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -153,9 +147,17 @@ export default function Folios() {
     searchFolios('', 'browse');
   }
 
-  // Populate the list on first render.
+  // Populate the list on first render. Ordering hazard: the `?id=` effect
+  // above runs first on mount and sets listMode to 'selected' SYNCHRONOUSLY
+  // (before this effect's fetch even starts). This effect's `searchFolios`
+  // call is async, so its `setListMode('browse')` lands a network round trip
+  // later — after 'selected' has already been set — and would otherwise
+  // stomp it back to 'browse', popping the list open above the already-loaded
+  // folio card. So: only force 'browse' when there is no `?id=` waiting to
+  // claim 'selected'. The fetch still runs either way, so `results` holds the
+  // recent-folios list and "Show all" works immediately after a deep link.
   useEffect(() => {
-    searchFolios('', 'browse');
+    searchFolios('', searchParams.get('id') ? undefined : 'browse');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
