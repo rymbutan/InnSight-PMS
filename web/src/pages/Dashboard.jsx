@@ -48,6 +48,12 @@ export default function Dashboard() {
   async function load() {
     try {
       const [a, h, d, rs, days, res, types, _rooms] = await Promise.all([
+        // NO `range` on purpose. The tile beside this one counts departures for
+        // today only, and a bare /api/arrivals answers the same question:
+        // arrivals DUE TODAY. Passing a range would instead ask for the desk's
+        // worklist, which also carries every unbounded overdue no-show — the
+        // tile read 14 on a day with no arrivals due. The worklist lives on the
+        // Arrivals page, which sends `range` explicitly.
         api.get('/api/arrivals'),
         api.get('/api/in-house'),
         api.get('/api/departures'),
