@@ -36,6 +36,14 @@ model FolioTransaction {
   description       String
   amountCents       BigInt
   taxAmountCents    BigInt           @default(0)
+  // Per-component tax for the printed folio: [{ key, label, rate, amountCents }]
+  // with amountCents as a decimal STRING, because JSON cannot carry BigInt.
+  //
+  // taxAmountCents above stays the single source of truth for every total and
+  // balance — this column is presentation detail layered on top. Rows written
+  // before this migration are null and print their whole tax as VAT, so no
+  // historical folio's figures move.
+  taxBreakdown      Json?
   quantity          Int              @default(1)
   note              String?
   paymentMethod     String?
