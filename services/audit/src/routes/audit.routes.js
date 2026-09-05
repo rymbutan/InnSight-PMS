@@ -264,6 +264,7 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
     const revenue = await recordStep(day.id, 'revenue_aggregation', async () => {
       const totals = await callService(`${FOLIO_URL}/api/folios/daily-totals?date=${dateStr}`).catch(() => ({
         roomRevenueCents: '0',
+        facilityRevenueCents: '0',
         otherRevenueCents: '0',
         taxCents: '0',
         paymentsCents: '0',
@@ -273,6 +274,10 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
 
     // Step 7 — finalize
     const roomRevenueCents = BigInt(revenue.roomRevenueCents || 0);
+    // `|| 0` is doing real work here: a folio service running an older image
+    // returns no facilityRevenueCents at all, and BigInt(undefined) throws — which
+    // would abort the night audit rather than report a zero.
+    const facilityRevenueCents = BigInt(revenue.facilityRevenueCents || 0);
     const otherRevenueCents = BigInt(revenue.otherRevenueCents || 0);
     const taxCents = BigInt(revenue.taxCents || 0);
     const paymentsCents = BigInt(revenue.paymentsCents || 0);
@@ -292,6 +297,7 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
         departures: movements.departures,
         noShows: Array.isArray(noShowSummary.marked) ? noShowSummary.marked.length : 0,
         roomRevenueCents,
+        facilityRevenueCents,
         otherRevenueCents,
         taxCents,
         paymentsCents,

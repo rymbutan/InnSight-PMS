@@ -2,6 +2,11 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+// Room numbering and inventory totals live in lib/inventoryPlan.js so they can be
+// unit-tested without a database. See the comment there for why the numbering rule
+// is load-bearing.
+const { planInventory } = require('./lib/inventoryPlan');
+
 // baseRate is stored in centavos (the web app's money helpers convert to
 // pesos for display): ₱2,800.00 → 280000.
 //
@@ -9,7 +14,7 @@ const prisma = new PrismaClient();
 // too small a property to exercise the system against: with a handful of rooms
 // and one booking there is no queue to work through, no second room of the same
 // type to compare, and the housekeeping map draws a single stub row.
-const FLOORS = 3;
+const FLOORS = 4;
 const ROOM_TYPES = [
   { code: 'STD', name: 'Standard', baseRate: 280000, maxOccupancy: 2, perFloor: 8 },
   { code: 'DLX', name: 'Deluxe', baseRate: 420000, maxOccupancy: 3, perFloor: 4 },
@@ -17,52 +22,42 @@ const ROOM_TYPES = [
   { code: 'PRS', name: 'Presidential', baseRate: 1500000, maxOccupancy: 4, perFloor: 1 },
 ];
 
-// A room's number is floor × 100 + its index on that floor — 101…115, 201…215.
-// The housekeeping map sorts on this to split rooms into its two rows, and a
-// flat 101…145 run would put every room on "floor 1" as far as
-// `Math.floor(number / 100)` is concerned.
-function roomsFor(floor) {
-  const out = [];
-  let idx = 0;
-  for (const rt of ROOM_TYPES) {
-    for (let i = 0; i < rt.perFloor; i += 1) {
-      idx += 1;
-      out.push({ number: String(floor * 100 + idx), typeCode: rt.code, floor });
-    }
-  }
-  return out;
-}
 
 async function seed() {
   console.log('[Inventory] Seeding rooms and room types...');
 
-  const existing = await prisma.roomType.count();
-  if (existing > 0) {
-    console.log('[Inventory] Already seeded. Skipping.');
-    return;
-  }
+  // Upsert rather than skip-if-anything-exists. The old guard returned early on a
+  // non-empty roomType table, so editing FLOORS or a rate did nothing to a database
+  // that had ever been seeded — and scripts/db-seed.sh already promises callers that
+  // every seed is idempotent. This makes that promise true.
+  const { rooms, totals } = planInventory(FLOORS, ROOM_TYPES);
 
   for (const rt of ROOM_TYPES) {
-    await prisma.roomType.create({
-      data: {
-        code: rt.code,
-        name: rt.name,
-        baseRate: rt.baseRate,
-        maxOccupancy: rt.maxOccupancy,
-        // Must equal the number of rooms that actually exist: availability is
-        // totalInventory minus held nights, so a count set below the real one
-        // refuses bookings for rooms standing empty — which looks exactly like a
-        // bug in the booking engine rather than a seeding mistake.
-        totalInventory: rt.perFloor * FLOORS,
-      },
+    const data = {
+      name: rt.name,
+      baseRate: rt.baseRate,
+      maxOccupancy: rt.maxOccupancy,
+      // Must equal the number of rooms that actually exist: availability is
+      // totalInventory minus held nights, so a count set below the real one
+      // refuses bookings for rooms standing empty — which looks exactly like a
+      // bug in the booking engine rather than a seeding mistake.
+      totalInventory: totals[rt.code],
+    };
+    await prisma.roomType.upsert({
+      where: { code: rt.code },
+      update: data,
+      create: { code: rt.code, ...data },
     });
   }
 
-  const rooms = [];
-  for (let floor = 1; floor <= FLOORS; floor += 1) rooms.push(...roomsFor(floor));
   for (const r of rooms) {
-    await prisma.room.create({
-      data: {
+    await prisma.room.upsert({
+      where: { id: r.number },
+      // Deliberately narrow: never reset status, assignment or features on a room
+      // that already exists. A re-seed must not wipe a room housekeeping has in
+      // progress, or un-assign the housekeeper standing in it.
+      update: { typeCode: r.typeCode, floor: r.floor },
+      create: {
         id: r.number,
         number: r.number,
         typeCode: r.typeCode,
@@ -73,10 +68,14 @@ async function seed() {
     });
   }
 
-  // Default rate plans
+  // Default rate plans. RatePlan has no natural unique key to upsert on, so only
+  // create the BAR plan when this room type has none — re-seeding must not stack up
+  // duplicate rate plans, and must not overwrite an admin's edited rate.
   const now = new Date();
   const yearOut = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
   for (const rt of ROOM_TYPES) {
+    const existingPlans = await prisma.ratePlan.count({ where: { roomTypeCode: rt.code } });
+    if (existingPlans > 0) continue;
     await prisma.ratePlan.create({
       data: {
         roomTypeCode: rt.code,

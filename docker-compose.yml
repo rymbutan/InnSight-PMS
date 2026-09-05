@@ -169,8 +169,17 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
       PORT: 3006
       REDIS_URL: redis://redis:6379
+      # What guest-facing links and QR codes point at. localhost is right for an
+      # offline laptop demo; set it to the public origin once deployed and the same
+      # image starts printing phone-scannable codes with no rebuild.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
+      # Check-out asks the folio service whether every folio on the stay is clear.
+      # With bill splitting a stay can carry more than one.
+      FOLIO_URL: http://folio-service:3007
+      # Resolves a stay's confirmation number for the registration-card QR.
+      RESERVATION_URL: http://reservation-service:3011
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -191,6 +200,10 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
       PORT: 3007
       REDIS_URL: redis://redis:6379
+      # What guest-facing links and QR codes point at. localhost is right for an
+      # offline laptop demo; set it to the public origin once deployed and the same
+      # image starts printing phone-scannable codes with no rebuild.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       GUEST_URL: http://guest-service:3008
       STAY_URL: http://stay-service:3006
@@ -289,6 +302,10 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
       PORT: 3011
       REDIS_URL: redis://redis:6379
+      # What guest-facing links and QR codes point at. localhost is right for an
+      # offline laptop demo; set it to the public origin once deployed and the same
+      # image starts printing phone-scannable codes with no rebuild.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
     depends_on:
