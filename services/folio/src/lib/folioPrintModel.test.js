@@ -84,6 +84,26 @@ test('a null breakdown attributes the whole tax to VAT', () => {
   assert.equal(tax.subtotalCents, 557700n, 'the total is unchanged');
 });
 
+// The harder half of the same rule: a breakdown can also OVER-attribute (rows
+// summing to more than taxAmountCents). The remainder is then negative, and
+// must be pulled back out of VAT rather than left to inflate the subtotal.
+test('a breakdown that sums to more than taxAmountCents pulls the excess back out of VAT', () => {
+  const m = build([
+    { type: 'CHARGE', chargeCode: 'RM', description: 'Room charge',
+      amountCents: 100000n, taxAmountCents: 10000n,
+      taxBreakdown: [
+        { key: 'vat', label: 'VAT', rate: 12, amountCents: '9000' },
+        { key: 'serviceCharge', label: 'Service Charge', rate: 10, amountCents: '3000' },
+      ] },
+  ]);
+  const tax = sectionNamed(m, 'Add : Room Tax');
+  // attributed = 9000 + 3000 = 12000, but taxAmountCents is only 10000: the
+  // 2000 excess comes back out of VAT (9000 - 2000 = 7000).
+  assert.equal(tax.rows[0].amountCents, 7000n);
+  assert.equal(tax.rows[1].amountCents, 3000n);
+  assert.equal(tax.subtotalCents, 10000n, 'still sums to the real tax amount, not the over-attributed breakdown');
+});
+
 // The reference prints Room Charges gross with Less Discount beneath. The
 // classifier already nets a negative room charge in, so printing its figure as
 // "Room Charges" AND the discount again would deduct it twice.
@@ -135,6 +155,19 @@ test('transfers split into the From and To sections by sign', () => {
   assert.equal(sectionNamed(m, 'Less : Transferred To Folio').subtotalCents, 20000n, 'shown as a positive deduction');
 });
 
+// classifyTransactions folds TRANSFER into roomChargeCents exactly like CHARGE
+// (a transferred charge keeps its chargeCode). Room Charges must not ALSO
+// count that principal — it already has its own Transferred From/To sections.
+test('transfer principal does not inflate Room Charges — it is booked once, in its own section', () => {
+  const m = build([
+    { type: 'TRANSFER', chargeCode: 'RM', description: 'From folio 12', amountCents: 30000n, taxAmountCents: 0n },
+  ]);
+  const room = sectionNamed(m, 'Room Charges');
+  assert.equal(room.subtotalCents, 0n, 'the transfer principal belongs to Transferred From Folio, not here');
+  assert.equal(sectionNamed(m, 'Add : Transferred From Folio').subtotalCents, 30000n);
+  assert.equal(m.totals.balanceCents, 30000n, 'the balance itself is untouched — only the section grid was wrong');
+});
+
 test('payments appear under Less : Amount Paid, net of refunds', () => {
   const m = build([
     { type: 'CHARGE', chargeCode: 'RM', description: 'Room', amountCents: 100000n, taxAmountCents: 0n },
@@ -159,6 +192,54 @@ test('totals match classifyTransactions exactly', () => {
   const m = build(tx);
   assert.equal(m.totals.totalChargesCents, summary.totalChargesCents);
   assert.equal(m.totals.balanceCents, summary.balanceCents);
+});
+
+// The invariant that would have caught the double-counted-transfer defect: sum
+// every "Add" section and subtract every "Less" section, and the result must
+// equal the balance — because that is exactly what a reader summing the grid
+// by its own labels would compute. Exercised with transfers in BOTH directions
+// alongside ordinary room and extra charges, so a transfer's principal has to
+// land in exactly one place for this to hold.
+test('reconciliation invariant: Add sections minus Less sections equals the balance, with transfers both ways', () => {
+  const tx = [
+    { type: 'CHARGE', chargeCode: 'RM', description: 'Room', amountCents: 100000n, taxAmountCents: 12000n,
+      taxBreakdown: [{ key: 'vat', label: 'VAT', rate: 12, amountCents: '12000' }] },
+    { type: 'CHARGE', chargeCode: 'MB', description: 'Minibar', amountCents: 50000n, taxAmountCents: 6000n,
+      taxBreakdown: [{ key: 'vat', label: 'VAT', rate: 12, amountCents: '6000' }] },
+    { type: 'TRANSFER', chargeCode: 'RM', description: 'From folio 12', amountCents: 30000n, taxAmountCents: 0n },
+    { type: 'TRANSFER', chargeCode: 'RM', description: 'To folio 13', amountCents: -20000n, taxAmountCents: 0n },
+    { type: 'PAYMENT', chargeCode: null, description: 'Cash', amountCents: 80000n, taxAmountCents: 0n },
+    { type: 'REFUND', chargeCode: null, description: 'Refund', amountCents: 5000n, taxAmountCents: 0n },
+    { type: 'ADJUSTMENT', chargeCode: null, description: 'Goodwill', amountCents: 2000n, taxAmountCents: 0n },
+    { type: 'ADJUSTMENT', chargeCode: null, description: 'Loyalty discount', amountCents: -3000n, taxAmountCents: 0n },
+  ];
+  const m = build(tx);
+
+  const ADD_TITLES = new Set([
+    'Room Charges', 'Add : Room Tax', 'Add : Extra Charges', 'Add : Tax On Charges',
+    'Add : Transferred From Folio', 'Adjustment',
+  ]);
+  const LESS_TITLES = new Set([
+    'Less : Flat Discount', 'Less : Amount Paid', 'Less : Transferred To Folio',
+  ]);
+
+  let addTotal = 0n;
+  let lessTotal = 0n;
+  for (const s of m.sections) {
+    if (ADD_TITLES.has(s.title)) addTotal += s.subtotalCents;
+    else if (LESS_TITLES.has(s.title)) lessTotal += s.subtotalCents;
+    else assert.fail(`unclassified section in the invariant check: ${s.title}`);
+  }
+
+  assert.equal(
+    addTotal - lessTotal,
+    m.totals.balanceCents,
+    'the section grid, summed by its own Add/Less labels, must reconcile with the balance'
+  );
+
+  // The specific defect this guards against: transfer principal double-counted
+  // into Room Charges alongside its own Transferred From/To sections.
+  assert.equal(sectionNamed(m, 'Room Charges').subtotalCents, 100000n);
 });
 
 test('every section is present even when empty, so the layout never collapses', () => {
