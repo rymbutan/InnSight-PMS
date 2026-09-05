@@ -59,6 +59,11 @@ export default function Settings() {
   const [hotel, setHotel] = useState({ name: '', address: '', phone: '', fax: '', email: '', url: '' });
 
   const canTheme = hasRole('ADMIN', 'MANAGER');
+  // Both Billing endpoints (PUT /api/settings/tax-rates, PUT /api/settings/hotel)
+  // are admin/manager-only server-side. Gate the cards the same way the System
+  // Color Changer above gates on `canTheme`, so a FRONT_DESK user is not shown
+  // editable inputs that only end in a 403 toast on save.
+  const canBilling = hasRole('ADMIN', 'MANAGER');
 
   useEffect(() => {
     api
@@ -511,90 +516,98 @@ export default function Settings() {
         </form>
       ) : null}
 
-      {/* ── Billing ── */}
-      <div className="set-section-label">Billing</div>
+      {/* ── Billing ──
+          Both endpoints below (PUT /api/settings/tax-rates, PUT
+          /api/settings/hotel) are admin/manager-only, so the whole section —
+          heading included — is gated on `canBilling`, the same predicate the
+          System Color Changer above uses for `canTheme`. */}
+      {canBilling ? (
+        <>
+          <div className="set-section-label">Billing</div>
 
-      <form className="set-card is-wide" onSubmit={saveTaxRates}>
-        <div className="set-card-head">
-          <span className="set-card-icon">
-            <Icon name="dollar-sign" size={16} strokeWidth={1.9} />
-          </span>
-          <div className="set-card-heading">
-            <div className="set-card-title">Tax Rates</div>
-            <div className="set-card-sub">
-              Applied to charges as they are posted. Existing charges keep the rates they
-              were posted with.
+          <form className="set-card is-wide" onSubmit={saveTaxRates}>
+            <div className="set-card-head">
+              <span className="set-card-icon">
+                <Icon name="dollar-sign" size={16} strokeWidth={1.9} />
+              </span>
+              <div className="set-card-heading">
+                <div className="set-card-title">Tax Rates</div>
+                <div className="set-card-sub">
+                  Applied to charges as they are posted. Existing charges keep the rates they
+                  were posted with.
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="set-card-body">
-          <div className="set-row-3">
-            {[
-              ['vat', 'VAT (%)'],
-              ['serviceCharge', 'Service Charge (%)'],
-              ['localTax', 'Local Tax (%)'],
-              ['realPropertyTax', 'Real Property Tax (%)'],
-            ].map(([key, label]) => (
-              <Field key={key} label={label}>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  value={taxRates[key]}
-                  onChange={(e) => setTaxRates({ ...taxRates, [key]: e.target.value })}
-                />
-              </Field>
-            ))}
-          </div>
-          <p className="muted" style={{ fontSize: 12 }}>
-            Local Tax and Real Property Tax ship at 0% — they vary by locality, so set them
-            to this property&rsquo;s actual rates before billing guests.
-          </p>
-        </div>
-        <div className="set-card-foot">
-          <button type="submit" className="btn-primary" disabled={busy === 'tax'}>
-            {busy === 'tax' ? 'Saving…' : 'Save Rates'}
-          </button>
-        </div>
-      </form>
+            <div className="set-card-body">
+              <div className="set-row-3">
+                {[
+                  ['vat', 'VAT (%)'],
+                  ['serviceCharge', 'Service Charge (%)'],
+                  ['localTax', 'Local Tax (%)'],
+                  ['realPropertyTax', 'Real Property Tax (%)'],
+                ].map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={taxRates[key]}
+                      onChange={(e) => setTaxRates({ ...taxRates, [key]: e.target.value })}
+                    />
+                  </Field>
+                ))}
+              </div>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Local Tax and Real Property Tax ship at 0% — they vary by locality, so set them
+                to this property&rsquo;s actual rates before billing guests.
+              </p>
+            </div>
+            <div className="set-card-foot">
+              <button type="submit" className="btn-primary" disabled={busy === 'tax'}>
+                {busy === 'tax' ? 'Saving…' : 'Save Rates'}
+              </button>
+            </div>
+          </form>
 
-      <form className="set-card is-wide" onSubmit={saveHotel}>
-        <div className="set-card-head">
-          <span className="set-card-icon">
-            <Icon name="building-2" size={16} strokeWidth={1.9} />
-          </span>
-          <div className="set-card-heading">
-            <div className="set-card-title">Hotel Details</div>
-            <div className="set-card-sub">Printed at the top of every guest folio.</div>
-          </div>
-        </div>
-        <div className="set-card-body">
-          <div className="set-row-3">
-            {[
-              ['name', 'Hotel name'],
-              ['address', 'Address'],
-              ['phone', 'Phone'],
-              ['fax', 'Fax'],
-              ['email', 'E-mail'],
-              ['url', 'Website'],
-            ].map(([key, label]) => (
-              <Field key={key} label={label}>
-                <input
-                  value={hotel[key] || ''}
-                  maxLength={200}
-                  onChange={(e) => setHotel({ ...hotel, [key]: e.target.value })}
-                />
-              </Field>
-            ))}
-          </div>
-        </div>
-        <div className="set-card-foot">
-          <button type="submit" className="btn-primary" disabled={busy === 'hotel'}>
-            {busy === 'hotel' ? 'Saving…' : 'Save Details'}
-          </button>
-        </div>
-      </form>
+          <form className="set-card is-wide" onSubmit={saveHotel}>
+            <div className="set-card-head">
+              <span className="set-card-icon">
+                <Icon name="building-2" size={16} strokeWidth={1.9} />
+              </span>
+              <div className="set-card-heading">
+                <div className="set-card-title">Hotel Details</div>
+                <div className="set-card-sub">Printed at the top of every guest folio.</div>
+              </div>
+            </div>
+            <div className="set-card-body">
+              <div className="set-row-3">
+                {[
+                  ['name', 'Hotel name'],
+                  ['address', 'Address'],
+                  ['phone', 'Phone'],
+                  ['fax', 'Fax'],
+                  ['email', 'E-mail'],
+                  ['url', 'Website'],
+                ].map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      value={hotel[key] || ''}
+                      maxLength={200}
+                      onChange={(e) => setHotel({ ...hotel, [key]: e.target.value })}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </div>
+            <div className="set-card-foot">
+              <button type="submit" className="btn-primary" disabled={busy === 'hotel'}>
+                {busy === 'hotel' ? 'Saving…' : 'Save Details'}
+              </button>
+            </div>
+          </form>
+        </>
+      ) : null}
     </div>
   );
 }
