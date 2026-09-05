@@ -5,6 +5,12 @@ const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/au
 const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
+const { planTransfer } = require('../lib/transfer');
+const { receiptModel } = require('../lib/receipt');
+const { send: sendMail } = require('../lib/notifier');
+const { qrPngBuffer, qrDataUrl } = require('../lib/qr');
+const { newToken, intentState, INTENT_TTL_MS } = require('../lib/paymentIntent');
+const { publicUrl } = require('../lib/publicUrl');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -354,6 +360,49 @@ router.get('/folios', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) =
   }
 });
 
+// GET /api/folios/outstanding?stayId=  — every open folio on a stay that still
+// carries a balance. Purpose-built for the check-out guard in the stay service:
+// with bill splitting a stay can have several folios, and releasing the room while
+// one of them is unpaid strands the balance with nobody left to bill.
+//
+// Defined BEFORE /folios/:id so the literal path wins over the :id param route.
+router.get('/folios/outstanding', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const { stayId } = req.query;
+    if (!stayId) return res.status(400).json({ error: 'stayId is required.' });
+
+    const folios = await prisma.folio.findMany({
+      where: { stayId, status: 'OPEN' },
+      include: { transactions: true },
+    });
+
+    // Same classifier the printed folio uses, so the number the desk is blocked on
+    // is the number on the guest's bill — not a second, subtly different sum.
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const codes = {
+      roomCodes: new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code)),
+      facilityCodes: new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code)),
+    };
+
+    const unsettled = folios
+      .map((f) => ({
+        id: f.id,
+        folioNumber: f.folioNumber,
+        balanceCents: classifyTransactions(f.transactions, codes).balanceCents,
+      }))
+      .filter((f) => f.balanceCents !== 0n)
+      .map((f) => ({ ...f, balanceCents: f.balanceCents.toString() }));
+
+    res.json({ stayId, unsettled });
+  } catch (err) {
+    console.error('[Folio] Outstanding error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/folios/amenity-revenue?from=&to=  — walk-in amenity/facility sales,
 // totalled and broken down by facility (charge code). Defined BEFORE /folios/:id
 // so the literal path wins over the :id param route.
@@ -415,22 +464,30 @@ router.get('/folios/daily-totals', requireRole(...ROLE_GROUPS.MGMT_AUDIT), async
       select: { type: true, amountCents: true, taxAmountCents: true, chargeCode: true },
     });
 
-    // Room revenue is classified by the charge code's category, not a hardcoded
-    // 'ROOM' string (the seeded room code is 'RM'). REFUND and ADJUSTMENT are
-    // included so the night-audit revenue/payment figures actually reconcile.
-    const roomCodes = new Set(
-      (await prisma.chargeCode.findMany({ where: { category: 'ROOM' }, select: { code: true } })).map(
-        (c) => c.code
-      )
-    );
+    // Revenue is classified by the charge code's category, not a hardcoded 'ROOM'
+    // string (the seeded room code is 'RM'). REFUND and ADJUSTMENT are included so
+    // the night-audit revenue/payment figures actually reconcile.
+    //
+    // FACILITY is pulled out as its own bucket: walk-in facility sales are a
+    // separate line of business from a resident guest's extras, and the night audit
+    // is required to report them separately. Both categories are fetched in one
+    // query rather than two round trips.
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const roomCodes = new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code));
+    const facilityCodes = new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code));
 
     let roomRevenueCents = 0n;
+    let facilityRevenueCents = 0n;
     let otherRevenueCents = 0n;
     let taxCents = 0n;
     let paymentsCents = 0n;
     for (const t of txs) {
       if (t.type === 'CHARGE') {
         if (roomCodes.has(t.chargeCode)) roomRevenueCents += t.amountCents;
+        else if (facilityCodes.has(t.chargeCode)) facilityRevenueCents += t.amountCents;
         else otherRevenueCents += t.amountCents;
         taxCents += t.taxAmountCents;
       } else if (t.type === 'ADJUSTMENT') {
@@ -440,11 +497,16 @@ router.get('/folios/daily-totals', requireRole(...ROLE_GROUPS.MGMT_AUDIT), async
       } else if (t.type === 'REFUND') {
         paymentsCents -= t.amountCents; // a refund reduces net payments taken
       }
+      // TRANSFER is deliberately absent, and unlike in classifyTransactions that is
+      // correct here: a transfer posts a matched +/- pair in one database
+      // transaction, so property-wide revenue for the day is unchanged. Counting it
+      // would be harmless arithmetic but misleading to read.
     }
 
     res.json({
       date: start,
       roomRevenueCents: roomRevenueCents.toString(),
+      facilityRevenueCents: facilityRevenueCents.toString(),
       otherRevenueCents: otherRevenueCents.toString(),
       taxCents: taxCents.toString(),
       paymentsCents: paymentsCents.toString(),
@@ -480,18 +542,27 @@ router.get('/folios/:id/statement', requireRole(...ROLE_GROUPS.DESK_AUDIT), asyn
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
-    let balance = 0n;
-    for (const tx of folio.transactions) {
-      if (tx.type === 'CHARGE' || tx.type === 'TAX' || tx.type === 'ADJUSTMENT')
-        balance += tx.amountCents + tx.taxAmountCents;
-      else if (tx.type === 'PAYMENT') balance -= tx.amountCents;
-      else if (tx.type === 'REFUND') balance += tx.amountCents; // refund returns money to the guest → increases balance owed
-    }
+    // Delegated to classifyTransactions rather than summed inline. This route used
+    // to carry its own copy of the balance formula, and when TRANSFER was added for
+    // bill splitting the copy was not updated — so a folio whose charges had all
+    // been moved off it still showed the full amount owing, while the folio that
+    // received them showed nothing. One formula, one place.
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const summary = classifyTransactions(folio.transactions, {
+      roomCodes: new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code)),
+      facilityCodes: new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code)),
+    });
 
     res.json({
       folio,
-      balanceCents: balance.toString(),
-      totalCharges: folio.transactions.filter((t) => t.type === 'CHARGE').length,
+      balanceCents: summary.balanceCents.toString(),
+      // TRANSFER counts as a charge line: on the receiving folio it is the only
+      // thing there, and reporting "0 charges" beside a non-zero balance reads as
+      // a bug to the person at the desk.
+      totalCharges: folio.transactions.filter((t) => t.type === 'CHARGE' || t.type === 'TRANSFER').length,
       totalPayments: folio.payments.length,
     });
   } catch (err) {
@@ -767,6 +838,122 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
   }
 });
 
+// POST /api/folios/:id/transfer — move one transaction to another folio on the
+// same stay. This is the mechanism behind bill splitting: the front desk opens a
+// second folio for the stay (POST /api/folios with the same stayId) and moves the
+// lines that a different payer is settling.
+//
+// Guarded tightly on purpose. Both folios must be OPEN, both must belong to the
+// SAME stay, and a transfer may not itself be transferred — otherwise a charge
+// could be walked off a stay entirely, or bounced between folios until its history
+// is unreadable.
+router.post('/folios/:id/transfer', requireRole(...CASHIER), async (req, res) => {
+  try {
+    const { transactionId, toFolioId } = req.body;
+    if (!transactionId || !toFolioId) {
+      return res.status(400).json({ error: 'transactionId and toFolioId are required.' });
+    }
+
+    const [from, to] = await Promise.all([
+      prisma.folio.findUnique({ where: { id: req.params.id } }),
+      prisma.folio.findUnique({ where: { id: toFolioId } }),
+    ]);
+    if (!from || !to) return res.status(404).json({ error: 'Folio not found.' });
+    if (from.id === to.id) return res.status(400).json({ error: 'Cannot transfer to the same folio.' });
+    if (from.status !== 'OPEN' || to.status !== 'OPEN') {
+      return res.status(409).json({ error: 'Both folios must be open to transfer a charge.' });
+    }
+    // A folio with no stay is a walk-in POS sale. Allowing a transfer off one would
+    // let a cashier move a stranger's bar tab onto a guest's room account.
+    if (!from.stayId || from.stayId !== to.stayId) {
+      return res.status(409).json({ error: 'Folios must belong to the same stay.' });
+    }
+
+    const tx = await prisma.folioTransaction.findUnique({ where: { id: transactionId } });
+    if (!tx || tx.folioId !== from.id) {
+      return res.status(404).json({ error: 'Transaction not found on this folio.' });
+    }
+    if (tx.type === 'TRANSFER') {
+      return res.status(409).json({ error: 'A transfer cannot itself be transferred.' });
+    }
+    if (tx.type === 'PAYMENT' || tx.type === 'REFUND') {
+      return res.status(409).json({ error: 'Only charges and adjustments can be transferred, not payments.' });
+    }
+
+    const rows = planTransfer(tx, {
+      fromFolioId: from.id,
+      toFolioId: to.id,
+      folioNumbers: { [from.id]: from.folioNumber, [to.id]: to.folioNumber },
+    });
+
+    // One transaction: a half-applied transfer would invent or destroy money.
+    const created = await prisma.$transaction(
+      rows.map((data) =>
+        prisma.folioTransaction.create({
+          data: { ...data, postedBy: req.user?.username || req.user?.sub, sourceSystem: 'transfer' },
+        })
+      )
+    );
+
+    redis.publish(
+      'folio:transferred',
+      JSON.stringify({ fromFolioId: from.id, toFolioId: to.id, transactionId, stayId: from.stayId })
+    );
+    res.status(201).json({ transactions: created });
+  } catch (err) {
+    console.error('[Folio] Transfer error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/payment-intents — generate a QR code for a simulated
+// wallet payment. The client asked whether payment could be simulated this way.
+//
+// Nothing here touches real payment rails: a simulated e-wallet is exactly as valid
+// as the simulated card payments this system already takes. The teaching value is
+// in what happens next — confirming publishes to Redis, so the front-desk screen
+// updates the moment the payment lands, which is the part students need to see.
+router.post('/folios/:id/payment-intents', requireRole(...CASHIER), async (req, res) => {
+  try {
+    let amountCents;
+    try {
+      amountCents = BigInt(req.body?.amountCents ?? 0);
+    } catch {
+      return res.status(400).json({ error: 'amountCents must be a whole number of centavos.' });
+    }
+    if (amountCents <= 0n) return res.status(400).json({ error: 'A payment amount is required.' });
+
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+    if (folio.status !== 'OPEN') return res.status(409).json({ error: 'This folio is not open.' });
+
+    const intent = await prisma.paymentIntent.create({
+      data: {
+        token: newToken(),
+        folioId: folio.id,
+        amountCents,
+        expiresAt: new Date(Date.now() + INTENT_TTL_MS),
+        createdBy: req.user?.username || req.user?.sub,
+      },
+    });
+
+    const url = publicUrl(`/pay/${intent.token}`);
+    res.status(201).json({
+      id: intent.id,
+      url,
+      expiresAt: intent.expiresAt,
+      amountCents: intent.amountCents.toString(),
+      qrDataUrl: await qrDataUrl(url),
+      // Lets the desk say "scan this" or "confirm on screen" truthfully. A code
+      // encoding localhost cannot be opened by a phone — see lib/publicUrl.js.
+      scannable: publicUrl.isScannableByPhone,
+    });
+  } catch (err) {
+    console.error('[Folio] Payment intent error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // POST /api/folios/:id/lock
 // POST /api/folios/:id/settle — checkout settlement: pay the outstanding balance
 // (if any) with the given method, then close the folio. Front-desk cashiering.
@@ -1008,6 +1195,208 @@ router.post('/folios/:id/early-departure-adjustment', requireRole(...FINANCE), a
   }
 });
 
+// The guest-portal link for a stay, or null when there is nothing to link to. A QR
+// leading to "Not found" is worse than no QR, so this never guesses a URL.
+function portalLinkFor(stay) {
+  const ref = stay?.confirmationNumber || stay?.reservation?.confirmationNumber;
+  return ref ? publicUrl(`/portal/${encodeURIComponent(ref)}`) : null;
+}
+
+// The receipt PDF, as a PDFDocument the caller pipes or collects. Shared by the
+// download route and the email route so the printed copy and the emailed copy can
+// never drift apart.
+async function renderReceiptPdf(model, { portalLink } = {}) {
+  const money = (cents) => `${model.currency} ${(Number(cents) / 100).toFixed(2)}`;
+  const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
+  const doc = new PDFDocument({ size: 'A4', margin: 48 });
+
+  doc.fontSize(20).text('InnSight PMS', { align: 'left' });
+  doc.fontSize(12).fillColor('#555').text('Payment Receipt', { align: 'left' });
+  // Says plainly what this document is. A training system that prints something
+  // indistinguishable from a BIR official receipt is teaching the wrong lesson.
+  doc.fontSize(8).fillColor('#888').text('Simulation — not a BIR-registered official receipt.');
+  doc.moveDown();
+  doc.fillColor('black').fontSize(10);
+
+  // Two real columns at fixed x positions, rather than one continued text flow.
+  // The `continued: true` idiom the other PDF routes use makes the label's width
+  // constrain the VALUE too, so a long value wraps mid-string: the receipt number
+  // broke across two lines and "2026-09-04 14:11" split after the date. Folio
+  // numbers here are timestamp-based and genuinely long, so this has to hold.
+  const LABEL_X = 48;
+  const VALUE_X = 168;
+  const row = (label, value) => {
+    const y = doc.y;
+    doc.font('Helvetica-Bold').text(label, LABEL_X, y, { width: 112 });
+    doc.font('Helvetica').text(String(value ?? '—'), VALUE_X, y, { width: 340 });
+  };
+
+  row('Receipt No.:', model.receiptNumber);
+  row('Folio No.:', model.folioNumber);
+  row('Received From:', model.guestName);
+  row('Date Received:', fmtDateTime(model.paidAt));
+  row('Payment Method:', model.method);
+  // Explicit x: the last row() left the cursor in the value column, so without it
+  // the whole amount block sits indented under that column.
+  doc.moveDown(0.5);
+  doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`, LABEL_X, doc.y);
+  doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`, LABEL_X, doc.y);
+
+  if (model.refunded) {
+    doc.moveDown(0.5);
+    doc
+      .fillColor('#b8382c')
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .text('THIS PAYMENT HAS BEEN REFUNDED', LABEL_X, doc.y);
+    doc.fillColor('black').font('Helvetica');
+  }
+
+  // The guest's digital copy, when this folio belongs to a booking worth linking
+  // to. Positioned absolutely because doc.image() does not advance the cursor
+  // predictably and the signature line below has to keep its place.
+  if (portalLink) {
+    try {
+      doc.image(await qrPngBuffer(portalLink), 400, 96, { width: 100 });
+      doc.fontSize(7).fillColor('#666').text('Scan for a digital copy', 400, 200, { width: 100, align: 'center' });
+      doc.fillColor('black');
+    } catch (err) {
+      // Never fail a guest's proof of payment over the convenience code on it.
+      console.error('[Folio] Receipt QR render failed:', err.message);
+    }
+  }
+
+  doc.moveDown(2);
+  doc.fontSize(9).fillColor('#555').text('Received by: ____________________________', LABEL_X, doc.y);
+  return doc;
+}
+
+// Collect a PDFDocument into a Buffer, for attaching to an email.
+function pdfToBuffer(doc) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.end();
+  });
+}
+
+// GET /api/folios/:id/payments/:paymentId/receipt — proof that ONE payment was
+// received, as a PDF the front desk can print or hand over.
+//
+// Distinct from /folios/:id/print, which renders the whole folio: a guest paying a
+// deposit at reservation time has no folio worth printing yet, but does need
+// something showing what they handed over. The client asked for exactly this.
+router.get('/folios/:id/payments/:paymentId/receipt', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+    // The folioId check is not redundant: without it, any payment id could be
+    // receipted against any folio, putting one guest's payment on another's paper.
+    if (!payment || payment.folioId !== folio.id) {
+      return res.status(404).json({ error: 'Payment not found on this folio.' });
+    }
+
+    const stay = folio.stayId
+      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+      : null;
+    const guest = folio.guestId
+      ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
+      : null;
+    const guestName = stay?.guestName || guest?.displayName || null;
+
+    let model;
+    try {
+      model = receiptModel(payment, folio, guestName);
+    } catch (err) {
+      // A voided or failed payment is a 409, not a 500 — the request was
+      // well-formed, the payment is simply not receiptable.
+      return res.status(409).json({ error: err.message });
+    }
+
+    const doc = await renderReceiptPdf(model, { portalLink: portalLinkFor(stay) });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="receipt-${model.receiptNumber}.pdf"`);
+    doc.pipe(res);
+    doc.end();
+
+  } catch (err) {
+    console.error('[Folio] Receipt error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/payments/:paymentId/receipt/email — send the receipt to the
+// guest as a PDF attachment. The client asked for receipts to be emailable.
+//
+// Honest about what this is: SMTP points at Mailhog, which CAPTURES mail and never
+// delivers it. That is right for a classroom — nobody wants a training exercise
+// mailing real guests — but it means "sent" here means "visible at :8025", and the
+// response says so rather than implying delivery.
+router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASHIER), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+    if (!payment || payment.folioId !== folio.id) {
+      return res.status(404).json({ error: 'Payment not found on this folio.' });
+    }
+
+    const stay = folio.stayId
+      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+      : null;
+    const guest = folio.guestId
+      ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
+      : null;
+
+    // An explicit `to` lets the desk send to a company payer who is not the guest —
+    // the split-bill case — but the guest's own address is the default.
+    const contacts = guest?.contacts || [];
+    const emails = contacts.filter((c) => String(c.type).toUpperCase() === 'EMAIL' && c.value);
+    const to = req.body?.to || emails.find((c) => c.isPrimary)?.value || emails[0]?.value;
+    if (!to) {
+      // 400, not 500, and it names the reason: the desk needs to know the guest has
+      // no address on file rather than watching a send silently do nothing.
+      return res.status(400).json({ error: 'No email address on file for this guest. Add one, or pass `to`.' });
+    }
+
+    let model;
+    try {
+      model = receiptModel(payment, folio, stay?.guestName || guest?.displayName || null);
+    } catch (err) {
+      return res.status(409).json({ error: err.message });
+    }
+
+    const pdf = await pdfToBuffer(await renderReceiptPdf(model, { portalLink: portalLinkFor(stay) }));
+    await sendMail({
+      to,
+      subject: `Receipt ${model.receiptNumber} — InnSight Hotel`,
+      body: [
+        `Dear ${model.guestName},`,
+        '',
+        `Thank you. We have received ${model.currency} ${(Number(model.paidCents) / 100).toFixed(2)} by ${model.method}.`,
+        `Your receipt (${model.receiptNumber}) is attached.`,
+        '',
+        'InnSight Hotel',
+      ].join('\r\n'),
+      attachment: {
+        filename: `receipt-${model.receiptNumber}.pdf`,
+        contentType: 'application/pdf',
+        content: pdf,
+      },
+    });
+
+    res.status(202).json({ sent: true, to, receiptNumber: model.receiptNumber });
+  } catch (err) {
+    console.error('[Folio] Receipt email error:', err.message);
+    res.status(502).json({ error: 'Could not send the receipt email.' });
+  }
+});
+
 // GET /api/folios/:id/print — renders a guest folio/receipt as PDF, formatted
 // to match the panel's reference invoice (Changes-to-be-made doc, item 2).
 router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
@@ -1075,11 +1464,14 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
     doc.moveDown();
 
     // ── Particulars ──
-    // No Tax1-4 slots and no separate "Transferred From/To Folio" sections:
-    // InnSight tracks one combined taxAmountCents per charge (not a
-    // decomposed VAT/service-charge/local-tax breakdown), and folio-to-folio
-    // transfer isn't a supported workflow here — both are honest deviations
-    // from the literal reference template, documented in the design spec.
+    // No Tax1-4 slots: InnSight tracks one combined taxAmountCents per charge
+    // rather than a decomposed VAT/service-charge/local-tax breakdown — an honest
+    // deviation from the literal reference template, documented in the design spec.
+    //
+    // Transfers ARE supported now (POST /folios/:id/transfer, added for bill
+    // splitting). They need no section of their own: a transfer posts a matched
+    // pair of TRANSFER rows that name the other folio in their description, so
+    // they read in line with the rest of the particulars.
     doc.fontSize(11).text('Particulars', { underline: true });
     doc.moveDown(0.3);
     const line = (label, value, opts = {}) => {

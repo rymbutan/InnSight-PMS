@@ -2,12 +2,22 @@
 // guest receipt shows. No Prisma, no HTTP, no pdfkit, so the arithmetic that
 // decides what a guest is billed can be unit-tested without a database.
 //
-// roomCodes: a Set of ChargeCode.code values whose category is 'ROOM'. Room
-// revenue is classified by the charge code's category, not a hardcoded
-// string — the seeded room code is 'RM', not 'ROOM' (see the identical
-// convention in the daily-totals route in folio.routes.js).
-function classifyTransactions(transactions, roomCodes) {
+// `codes` is either { roomCodes, facilityCodes } — Sets of ChargeCode.code values
+// whose category is 'ROOM' and 'FACILITY' — or, for the older call sites, a bare
+// Set meaning roomCodes alone. Revenue is classified by the charge code's category
+// and never by a hardcoded string: the seeded room code is 'RM', not 'ROOM' (the
+// daily-totals route in folio.routes.js follows the same convention).
+//
+// Facility income is split out because a non-guest paying for the pool is walk-in
+// facility revenue, and the night audit has to report it apart from a resident
+// guest's minibar. It still counts towards the folio total — reclassifying money
+// must never lose it.
+function classifyTransactions(transactions, codes) {
+  const roomCodes = codes instanceof Set ? codes : codes?.roomCodes || new Set();
+  const facilityCodes = codes instanceof Set ? new Set() : codes?.facilityCodes || new Set();
+
   let roomChargeCents = 0n;
+  let facilityChargeCents = 0n;
   let extraChargeCents = 0n;
   let taxCents = 0n;
   let paymentsCents = 0n;
@@ -17,8 +27,16 @@ function classifyTransactions(transactions, roomCodes) {
   for (const tx of transactions) {
     const amount = BigInt(tx.amountCents);
     const tax = BigInt(tx.taxAmountCents || 0);
-    if (tx.type === 'CHARGE') {
+    // TRANSFER is classified exactly like CHARGE, and must be: it is a charge-side
+    // movement between two folios of one stay (see lib/transfer.js). Ignoring it
+    // left the charge still owing on the folio it was moved off and invisible on
+    // the folio it landed on — a split bill that adds up to the wrong total on both
+    // halves. The pair nets to zero property-wide, so revenue reporting is
+    // unaffected; the charge code rides along so a transferred room charge is still
+    // room revenue rather than becoming miscellaneous income.
+    if (tx.type === 'CHARGE' || tx.type === 'TRANSFER') {
       if (roomCodes.has(tx.chargeCode)) roomChargeCents += amount;
+      else if (facilityCodes.has(tx.chargeCode)) facilityChargeCents += amount;
       else extraChargeCents += amount;
       taxCents += tax;
     } else if (tx.type === 'PAYMENT') {
@@ -33,7 +51,7 @@ function classifyTransactions(transactions, roomCodes) {
     // is deliberately no branch for it here.
   }
 
-  const totalChargesCents = roomChargeCents + extraChargeCents + taxCents;
+  const totalChargesCents = roomChargeCents + facilityChargeCents + extraChargeCents + taxCents;
   // Mirrors the balance formula in the daily-totals endpoint and the original
   // print route: a refund reduces net payments taken; a positive adjustment
   // increases what's owed, a negative one (a credit) reduces it.
@@ -42,6 +60,7 @@ function classifyTransactions(transactions, roomCodes) {
 
   return {
     roomChargeCents,
+    facilityChargeCents,
     extraChargeCents,
     taxCents,
     totalChargesCents,

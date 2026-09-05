@@ -1,0 +1,19 @@
+-- Walk-in facility revenue as its own audited line, at the client's request.
+-- Before this the night audit had two revenue buckets, roomRevenueCents and
+-- otherRevenueCents, so a non-guest paying for the pool was indistinguishable
+-- from a resident guest's minibar charge.
+--
+-- IF NOT EXISTS is mandatory, not defensive. db-init.sh re-applies every
+-- non-baseline migration.sql with `prisma db execute` on EVERY container start
+-- (see step 2 there — it is the only thing that installs raw constraints under
+-- `db push`, and the only thing that restores them if a later push drops them).
+-- A plain ADD COLUMN, which is what `prisma migrate dev` generates, therefore
+-- fails on the second start with "column already exists" and the service
+-- crash-loops with a healthy-looking image. Every migration in this repository
+-- has to be idempotent.
+--
+-- Existing rows default to 0 rather than being backfilled: business days closed
+-- before this column existed counted their facility income inside
+-- otherRevenueCents at the time, and rewriting a closed day's figures would be
+-- falsifying an audit record.
+ALTER TABLE "BusinessDay" ADD COLUMN IF NOT EXISTS "facilityRevenueCents" BIGINT NOT NULL DEFAULT 0;

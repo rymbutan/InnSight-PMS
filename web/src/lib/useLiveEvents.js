@@ -45,6 +45,7 @@ export const LIVE_CHANNELS = [
   'folio:deposit_received',
   'folio:refund_posted',
   'folio:early_departure_adjusted',
+  'folio:transferred',
   'guest:profile_created',
   'guest:profile_updated',
   'guest:flagged',
@@ -85,6 +86,7 @@ export const CHANNEL_GROUPS = {
     'folio:deposit_received',
     'folio:refund_posted',
     'folio:early_departure_adjusted',
+  'folio:transferred',
   ],
   guests: ['guest:profile_created', 'guest:profile_updated', 'guest:flagged'],
   maintenance: [
