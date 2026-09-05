@@ -4,6 +4,7 @@ const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/auth');
 const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
+const { folioPrintModel } = require('../lib/folioPrintModel');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
 const { receiptModel } = require('../lib/receipt');
@@ -1481,8 +1482,11 @@ router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASH
   }
 });
 
-// GET /api/folios/:id/print — renders a guest folio/receipt as PDF, formatted
-// to match the panel's reference invoice (Changes-to-be-made doc, item 2).
+// GET /api/folios/:id/print — the guest folio as a PDF, laid out to match the
+// panel's reference invoice: a bordered grid with every section always present.
+//
+// The arithmetic lives in lib/folioPrintModel.js so it can be unit tested; this
+// route is rendering only.
 router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
   try {
     const folio = await prisma.folio.findUnique({
@@ -1491,13 +1495,24 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
-    const roomCodes = new Set(
-      (await prisma.chargeCode.findMany({ where: { category: 'ROOM' }, select: { code: true } })).map(
-        (c) => c.code
-      )
-    );
-    const summary = classifyTransactions(folio.transactions, roomCodes);
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const roomCodes = new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code));
+    const facilityCodes = new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code));
 
+    // Tag each transaction with whether it is room revenue, so the print model
+    // can split room tax from tax on other charges without re-deriving the
+    // classification.
+    const transactions = folio.transactions.map((t) => ({
+      ...t,
+      __isRoom: roomCodes.has(t.chargeCode),
+    }));
+    const summary = classifyTransactions(transactions, { roomCodes, facilityCodes });
+
+    // Upstream failures degrade to a dash rather than failing the print: staff
+    // need folios to print during an audit even when a service is down.
     const guest = folio.guestId
       ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
       : null;
@@ -1508,92 +1523,164 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
       ? await fetchJsonOrNull(`${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`)
       : null;
 
-    const nights = reservation?.nights || 1;
-    const tariffCents = summary.roomChargeCents / BigInt(nights);
-    const guestName = stay?.guestName || reservation?.guestName || '—';
-    const money = (cents) => `${folio.currency} ${(Number(cents) / 100).toFixed(2)}`;
-    const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '—');
-    const fmtTime = (d) => (d ? new Date(d).toISOString().slice(11, 16) : '—');
-    const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
+    const model = folioPrintModel({
+      folio, transactions, summary,
+      guest, stay, reservation, hotel: await getHotel(),
+    });
 
-    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    // The reference prints amounts as "25,350.00 P".
+    const money = (cents) =>
+      `${(Number(cents) / 100).toLocaleString('en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      })} P`;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 36 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="folio-${folio.folioNumber}.pdf"`);
     doc.pipe(res);
 
-    // ── Header ──
-    doc.fontSize(18).text('InnSight PMS', { align: 'center' });
-    doc.fontSize(11).fillColor('#555').text('Guest Folio', { align: 'center' });
-    doc.moveDown(0.8).fillColor('black');
+    const L = 36;                       // left margin
+    const R = doc.page.width - 36;      // right margin
+    const W = R - L;
+    const SPLIT = L + W * 0.72;         // where the Particular column ends
+
+    // ── Hotel header ──
+    doc.font('Helvetica-Bold').fontSize(15).text(model.hotel.name, L, 40, { width: W, align: 'center' });
+    doc.font('Helvetica').fontSize(8);
+    for (const line of [
+      model.hotel.address,
+      [model.hotel.phone && `Phone: ${model.hotel.phone}`,
+       model.hotel.fax && `Fax: ${model.hotel.fax}`,
+       model.hotel.email && `E-Mail: ${model.hotel.email}`].filter(Boolean).join(' ; '),
+      model.hotel.url && `URL: ${model.hotel.url}`,
+    ].filter(Boolean)) {
+      doc.text(line, L, doc.y, { width: W, align: 'center' });
+    }
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').fontSize(10).text('Invoice', L, doc.y, { width: W, align: 'center' });
+    doc.moveDown(0.5);
+
+    // ── Boxed helpers ──
+    const cell = (x, y, w, h, text, opts = {}) => {
+      doc.rect(x, y, w, h).stroke();
+      if (text == null || text === '') return;
+      doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 8);
+      doc.text(String(text), x + 4, y + (opts.dy ?? 4), {
+        width: w - 8, align: opts.align || 'left', lineBreak: false,
+      });
+    };
 
     // ── Guest / stay grid ──
-    // No "G.R. Card No." row: InnSight has no physical registration-card
-    // concept, so the confirmation number stands in for it. No guest address
-    // line: not a field this system captures.
-    const row = (label, value) => {
-      doc.font('Helvetica-Bold').fontSize(9).text(label, { continued: true, width: 150 });
-      doc.font('Helvetica').text(`  ${value ?? '—'}`);
-    };
-    row('Folio No.:', folio.folioNumber);
-    row('Date:', fmtDate(new Date()));
-    row('Guest Name:', guestName);
-    row('Nationality:', guest?.nationality || '—');
-    row('No. of Pax:', reservation ? reservation.adults + reservation.children : '—');
-    row('Adult / Child:', reservation ? `${reservation.adults} / ${reservation.children}` : '—');
-    row('Confirmation No.:', reservation?.confirmationNumber || '—');
-    row('Date of Arrival:', fmtDate(stay?.actualCheckInAt || reservation?.checkIn));
-    row('Date of Departure:', fmtDate(stay?.actualCheckOutAt || reservation?.checkOut));
-    row('Time of Arrival:', fmtTime(stay?.actualCheckInAt));
-    row('Tariff:', money(tariffCents));
-    doc.moveDown();
+    let y = doc.y;
+    const rowH = 16;
 
-    // ── Particulars ──
-    // No Tax1-4 slots: InnSight tracks one combined taxAmountCents per charge
-    // rather than a decomposed VAT/service-charge/local-tax breakdown — an honest
-    // deviation from the literal reference template, documented in the design spec.
-    //
-    // Transfers ARE supported now (POST /folios/:id/transfer, added for bill
-    // splitting). They need no section of their own: a transfer posts a matched
-    // pair of TRANSFER rows that name the other folio in their description, so
-    // they read in line with the rest of the particulars.
-    doc.fontSize(11).text('Particulars', { underline: true });
-    doc.moveDown(0.3);
-    const line = (label, value, opts = {}) => {
-      doc.fontSize(9).font(opts.bold ? 'Helvetica-Bold' : 'Helvetica');
-      doc.text(label, 60, doc.y, { continued: true, width: 380 });
-      doc.text(value, { align: 'right' });
-    };
-    line('Room Charges', money(summary.roomChargeCents));
-    line('Add: Taxes', money(summary.taxCents));
-    line('Add: Extra Charges', money(summary.extraChargeCents));
-    doc.moveDown(0.3);
-    line('Total Charges', money(summary.totalChargesCents), { bold: true });
-    doc.moveDown(0.3);
-    line('Less: Payments', money(summary.paymentsCents));
-    if (summary.refundsCents > 0n) line('Less: Refunds', `-${money(summary.refundsCents)}`);
-    line('Adjustments', money(summary.adjustmentsCents));
-    doc.moveDown(0.3);
-    doc.moveTo(48, doc.y).lineTo(547, doc.y).stroke();
-    doc.moveDown(0.3);
-    line('Balance', money(summary.balanceCents), { bold: true });
-    doc.moveDown();
+    cell(L, y, W * 0.55, rowH, 'Folio No.', { bold: true });
+    cell(L + W * 0.55, y, W * 0.45, rowH, `Date  :  ${model.meta.date}`, { bold: true });
+    doc.font('Helvetica').fontSize(8).text(`:  ${model.meta.folioNumber}`, L + 90, y + 4, { lineBreak: false });
+    y += rowH;
 
-    doc.fontSize(9).font('Helvetica-Bold').text(`This Folio is in: ${folio.currency}`);
-    doc.font('Helvetica').text(`Amount in Words: ${centsToWords(summary.balanceCents)}`);
-    doc.moveDown();
+    cell(L, y, W, rowH, 'Guest Name', { bold: true });
+    doc.font('Helvetica').fontSize(8).text(`:  ${model.meta.guestName}`, L + 90, y + 4, { lineBreak: false });
+    y += rowH;
 
-    doc
-      .fontSize(8)
-      .fillColor('#555')
-      .text(
-        'NOTICE TO GUESTS: This property is privately owned and the management reserves the right to ' +
-          'refuse service to anyone. Management will not be responsible for accidents or injury to guests ' +
-          'or for loss of money, jewelry or valuables of any kind. Management will not be responsible for ' +
-          'any item left in the room.',
-        { align: 'justify' }
-      );
-    doc.moveDown(0.5);
-    doc.fillColor('#888').text(`Printed ${fmtDateTime(new Date())} — InnSight PMS`, { align: 'center' });
+    const q = W / 4;
+    for (const [i, [label, value]] of [
+      ['Nationality', model.meta.nationality],
+      ['No. of Pax', model.meta.pax],
+      ['Adult Child', `${model.meta.adults} / ${model.meta.children}`],
+      ['G.R. Card No', model.meta.grCardNo],
+    ].entries()) {
+      cell(L + q * i, y, q, rowH, label, { bold: true, align: i === 0 ? 'left' : 'center' });
+      cell(L + q * i, y + rowH, q, rowH, value, { align: i === 0 ? 'left' : 'center' });
+    }
+    y += rowH * 2;
+
+    const t = W / 3;
+    cell(L, y, t, rowH, 'Date of Arrival', { bold: true });
+    cell(L + t, y, t, rowH, model.meta.arrival);
+    cell(L + t * 2, y, t, rowH, `Tariff   ${money(model.meta.tariffCents)}`, { bold: true });
+    y += rowH;
+    cell(L, y, t, rowH, 'Date of Departure', { bold: true });
+    cell(L + t, y, t, rowH, model.meta.departure);
+    cell(L + t * 2, y, t, rowH, '');
+    y += rowH;
+    cell(L, y, t, rowH, 'Time of Arrival', { bold: true });
+    cell(L + t, y, t, rowH, model.meta.arrivalTime);
+    cell(L + t * 2, y, t, rowH, '');
+    y += rowH + 4;
+
+    // ── Particular / Total header ──
+    cell(L, y, SPLIT - L, rowH + 2, 'Particular', { bold: true, size: 10, dy: 5 });
+    cell(SPLIT, y, R - SPLIT, rowH + 2, 'Total', { bold: true, size: 10, dy: 5, align: 'right' });
+    y += rowH + 2;
+
+    const bodyTop = y;
+    const lineH = 13;
+    const AMOUNT_COL = SPLIT - 130;
+
+    for (const section of model.sections) {
+      doc.font('Helvetica-Bold').fontSize(8.5).text(section.title, L + 4, y + 2, { lineBreak: false });
+      y += lineH;
+      for (const row of section.rows) {
+        doc.font('Helvetica').fontSize(8);
+        doc.text(row.label, L + 20, y + 2, { width: 200, lineBreak: false });
+        doc.text(money(row.amountCents), AMOUNT_COL, y + 2, { width: 110, align: 'right', lineBreak: false });
+        y += lineH;
+      }
+      // The section subtotal sits in the right-hand rail, as in the reference.
+      doc.font('Helvetica').fontSize(8);
+      doc.text(money(section.subtotalCents), SPLIT + 4, y - lineH + 2, {
+        width: R - SPLIT - 8, align: 'right', lineBreak: false,
+      });
+      y += 3;
+    }
+
+    // Column rules for the body block.
+    doc.rect(L, bodyTop, SPLIT - L, y - bodyTop).stroke();
+    doc.rect(SPLIT, bodyTop, R - SPLIT, y - bodyTop).stroke();
+
+    // ── Totals rail ──
+    for (const [label, value] of [
+      ['Total Charges', model.totals.totalChargesCents],
+      ['Total Payment', model.totals.totalPaymentCents],
+      ['Balance', model.totals.balanceCents],
+    ]) {
+      cell(SPLIT - 130, y, 130, rowH, label, { bold: true });
+      cell(SPLIT, y, R - SPLIT, rowH, money(value), { bold: true, align: 'right' });
+      y += rowH;
+    }
+    y += 4;
+
+    // ── Footer block ──
+    cell(L, y, W, rowH, `Remark        :  ${model.footer.remark}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `This Folio is in   :  ${model.footer.currency}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `Bill To               :  ${model.footer.billTo}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `Address             :  ${model.footer.address}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `${model.footer.currency} ${model.footer.amountInWords.toUpperCase()}`);
+    y += rowH + 8;
+
+    doc.font('Helvetica').fontSize(7).fillColor('#000');
+    doc.text(
+      'NOTICE TO GUESTS: This property is privately owned and the management reserves the right to refuse ' +
+        'service to anyone. Management will not be responsible for accidents or injury to guests or for loss ' +
+        'of money, jewelry or valuables of any kind. Management will not be responsible for any item left in ' +
+        'the room.',
+      L, y, { width: W, align: 'left' }
+    );
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').text('CHECKOUT TIME: 11:00 AM        SELF REGISTRATION ONLY', { width: W });
+    doc.font('Helvetica').text(
+      'I AGREE that my liability for this bill is not waived and agree to be held personally liable in the ' +
+        'event that the indicated person or company failed to pay for any part or full amount of these ' +
+        'charges. I agree that if an attorney is retained to collect these charges, I will pay all reasonable ' +
+        "attorney's fees and costs incurred. I agree that the sole purpose of renting this room is for my own " +
+        'residency only.',
+      { width: W, align: 'justify' }
+    );
 
     doc.end();
   } catch (err) {
