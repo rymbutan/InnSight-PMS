@@ -19,12 +19,38 @@ const DASH = '—';
 // The fallback is what keeps historical folios printing the SAME total they
 // always did: their whole taxAmountCents lands on VAT rather than being invented
 // across four lines or dropped.
+//
+// REVERSALS ARE MIRRORED, NOT FALLEN BACK ON
+// ------------------------------------------
+// A void writes a reversal row carrying -taxAmountCents. Reversals written
+// before the void route started copying the breakdown carry NO taxBreakdown of
+// their own, and the pre-migration fallback above would then dump that whole
+// NEGATIVE figure on VAT — printing, for a voided 10,000.00 room night,
+// "VAT -1,000.00" and "Service Charge +1,000.00" on a guest's bill. The
+// subtotal is right either way, which is exactly why nothing caught it: the
+// error nets to zero one level up.
+//
+// So a breakdown-less row that is a reversal borrows its ORIGINAL's breakdown
+// and negates it. This repairs rows already in the database as well as new
+// ones, and it degrades correctly when the original has no breakdown either
+// (both fall back to VAT, and net to zero there, which is right).
 function taxByComponent(transactions) {
   const totals = Object.fromEntries(TAX_COMPONENTS.map((c) => [c.key, 0n]));
+  const byId = new Map(transactions.filter((t) => t.id).map((t) => [t.id, t]));
   for (const tx of transactions) {
     const tax = BigInt(tx.taxAmountCents || 0);
     if (tax === 0n) continue;
-    const rows = Array.isArray(tx.taxBreakdown) ? tx.taxBreakdown : null;
+    let rows = Array.isArray(tx.taxBreakdown) ? tx.taxBreakdown : null;
+    // -1 when the rows being read belong to the transaction this one reverses.
+    let sign = 1n;
+    if (!rows || rows.length === 0) {
+      const original = tx.reversalOf ? byId.get(tx.reversalOf) : null;
+      const originalRows = Array.isArray(original?.taxBreakdown) ? original.taxBreakdown : null;
+      if (originalRows && originalRows.length > 0) {
+        rows = originalRows;
+        sign = -1n;
+      }
+    }
     if (!rows || rows.length === 0) {
       totals.vat += tax;
       continue;
@@ -32,7 +58,7 @@ function taxByComponent(transactions) {
     let attributed = 0n;
     for (const row of rows) {
       if (!(row.key in totals)) continue;
-      const amt = BigInt(row.amountCents || 0);
+      const amt = sign * BigInt(row.amountCents || 0);
       totals[row.key] += amt;
       attributed += amt;
     }
