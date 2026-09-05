@@ -11,6 +11,8 @@ const { send: sendMail } = require('../lib/notifier');
 const { qrPngBuffer, qrDataUrl } = require('../lib/qr');
 const { newToken, intentState, INTENT_TTL_MS } = require('../lib/paymentIntent');
 const { publicUrl } = require('../lib/publicUrl');
+const { validateTaxRates, validateHotel } = require('../lib/settings');
+const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -340,6 +342,57 @@ router.post('/folios/laundry-sale', requireRole(...CASHIER), async (req, res) =>
     });
   } catch (err) {
     console.error('[Folio] Laundry sale error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Folio configuration ─────────────────────────────────────────────────────
+// Reachable only through the longer-prefix gateway locations for
+// /api/settings/tax-rates and /api/settings/hotel; the bare /api/settings prefix
+// still proxies to the reservation service.
+
+// GET /api/settings/tax-rates — every desk role, because the folio screen shows
+// the rates a charge will attract.
+router.get('/settings/tax-rates', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (_req, res) => {
+  try {
+    res.json(await getTaxRates());
+  } catch (err) {
+    console.error('[Folio] Get tax rates error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/tax-rates — management only. These change what guests are
+// billed.
+router.put('/settings/tax-rates', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const result = validateTaxRates(req.body || {});
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json(await saveTaxRates(result.rates));
+  } catch (err) {
+    console.error('[Folio] Set tax rates error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/settings/hotel — the identity block printed on a folio.
+router.get('/settings/hotel', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (_req, res) => {
+  try {
+    res.json(await getHotel());
+  } catch (err) {
+    console.error('[Folio] Get hotel error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/hotel — management only.
+router.put('/settings/hotel', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const result = validateHotel(req.body || {});
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json(await saveHotel(result.hotel));
+  } catch (err) {
+    console.error('[Folio] Set hotel error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

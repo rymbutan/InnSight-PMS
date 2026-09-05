@@ -139,3 +139,13 @@ enum PaymentIntentStatus {
   EXPIRED
   CANCELLED
 }
+
+// Folio-service configuration: tax component rates and the hotel identity block
+// printed at the top of a guest folio. Mirrors the reservation service's
+// AppSetting rather than sharing it, because posting a charge must not depend on
+// the reservation service being reachable.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
