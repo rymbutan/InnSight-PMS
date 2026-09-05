@@ -55,6 +55,8 @@ export default function Settings() {
   const [pForm, setPForm] = useState({ current: '', next: '', confirm: '' });
   const [busy, setBusy] = useState('');
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
+  const [taxRates, setTaxRates] = useState({ vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 });
+  const [hotel, setHotel] = useState({ name: '', address: '', phone: '', fax: '', email: '', url: '' });
 
   const canTheme = hasRole('ADMIN', 'MANAGER');
 
@@ -65,6 +67,11 @@ export default function Settings() {
       .catch(() => {
         /* keep the shipped palette */
       });
+  }, []);
+
+  useEffect(() => {
+    api.get('/api/settings/tax-rates').then((r) => setTaxRates(r.data)).catch(() => {});
+    api.get('/api/settings/hotel').then((r) => setHotel(r.data)).catch(() => {});
   }, []);
 
   async function submitUsername(e) {
@@ -192,6 +199,39 @@ export default function Settings() {
       toast.error(errMsg(err));
     } finally {
       setBusy('');
+    }
+  }
+
+  async function saveTaxRates(e) {
+    e.preventDefault();
+    setBusy('tax');
+    try {
+      const { data } = await api.put('/api/settings/tax-rates', {
+        vat: Number(taxRates.vat),
+        serviceCharge: Number(taxRates.serviceCharge),
+        localTax: Number(taxRates.localTax),
+        realPropertyTax: Number(taxRates.realPropertyTax),
+      });
+      setTaxRates(data);
+      toast.success('Tax rates saved. They apply to charges posted from now on.');
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveHotel(e) {
+    e.preventDefault();
+    setBusy('hotel');
+    try {
+      const { data } = await api.put('/api/settings/hotel', hotel);
+      setHotel(data);
+      toast.success('Hotel details saved.');
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -470,6 +510,91 @@ export default function Settings() {
           </div>
         </form>
       ) : null}
+
+      {/* ── Billing ── */}
+      <div className="set-section-label">Billing</div>
+
+      <form className="set-card is-wide" onSubmit={saveTaxRates}>
+        <div className="set-card-head">
+          <span className="set-card-icon">
+            <Icon name="dollar-sign" size={16} strokeWidth={1.9} />
+          </span>
+          <div className="set-card-heading">
+            <div className="set-card-title">Tax Rates</div>
+            <div className="set-card-sub">
+              Applied to charges as they are posted. Existing charges keep the rates they
+              were posted with.
+            </div>
+          </div>
+        </div>
+        <div className="set-card-body">
+          <div className="set-row-3">
+            {[
+              ['vat', 'VAT (%)'],
+              ['serviceCharge', 'Service Charge (%)'],
+              ['localTax', 'Local Tax (%)'],
+              ['realPropertyTax', 'Real Property Tax (%)'],
+            ].map(([key, label]) => (
+              <Field key={key} label={label}>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={taxRates[key]}
+                  onChange={(e) => setTaxRates({ ...taxRates, [key]: e.target.value })}
+                />
+              </Field>
+            ))}
+          </div>
+          <p className="muted" style={{ fontSize: 12 }}>
+            Local Tax and Real Property Tax ship at 0% — they vary by locality, so set them
+            to this property&rsquo;s actual rates before billing guests.
+          </p>
+        </div>
+        <div className="set-card-foot">
+          <button type="submit" className="btn-primary" disabled={busy === 'tax'}>
+            {busy === 'tax' ? 'Saving…' : 'Save Rates'}
+          </button>
+        </div>
+      </form>
+
+      <form className="set-card is-wide" onSubmit={saveHotel}>
+        <div className="set-card-head">
+          <span className="set-card-icon">
+            <Icon name="building-2" size={16} strokeWidth={1.9} />
+          </span>
+          <div className="set-card-heading">
+            <div className="set-card-title">Hotel Details</div>
+            <div className="set-card-sub">Printed at the top of every guest folio.</div>
+          </div>
+        </div>
+        <div className="set-card-body">
+          <div className="set-row-3">
+            {[
+              ['name', 'Hotel name'],
+              ['address', 'Address'],
+              ['phone', 'Phone'],
+              ['fax', 'Fax'],
+              ['email', 'E-mail'],
+              ['url', 'Website'],
+            ].map(([key, label]) => (
+              <Field key={key} label={label}>
+                <input
+                  value={hotel[key] || ''}
+                  maxLength={200}
+                  onChange={(e) => setHotel({ ...hotel, [key]: e.target.value })}
+                />
+              </Field>
+            ))}
+          </div>
+        </div>
+        <div className="set-card-foot">
+          <button type="submit" className="btn-primary" disabled={busy === 'hotel'}>
+            {busy === 'hotel' ? 'Saving…' : 'Save Details'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
