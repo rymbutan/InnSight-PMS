@@ -89,6 +89,12 @@ listeners.push((m) => {
     if (!sseIds.has(m.params.requestId)) { inflight = Math.max(0, inflight - 1); lastActivity = Date.now(); }
   }
   if (m.method === 'Network.loadingFailed') {
+    // A request the BROWSER cancelled is not a failure. Navigating to the next
+    // route aborts whatever the previous page still had in flight, and because the
+    // evidence buckets reset at navigation start that abort lands in the next
+    // route's bucket — reporting a healthy page as broken. Only genuine transport
+    // failures count.
+    if (m.params.canceled) return;
     const u = m.params.request?.url || '';
     failed.push({ err: m.params.errorText, url: u.slice(0, 120) });
   }
