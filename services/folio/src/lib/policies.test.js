@@ -95,3 +95,41 @@ test('a number-typed subtotal is accepted and returns BigInt', () => {
   const { taxCents } = computeTax({ subtotalCents: 100000, category: 'ROOM' });
   assert.equal(taxCents, 22000n);
 });
+
+// Negative subtotals show up as discounts and charge reversals. Rounding must
+// go half away from zero for these too, not silently truncate toward zero.
+test('negative subtotals round half away from zero, not toward it', () => {
+  const exactVat = computeTax({ subtotalCents: -100n, category: 'ROOM', rates: { vat: 12 } });
+  const byExactVat = Object.fromEntries(exactVat.breakdown.map((b) => [b.key, b.amountCents]));
+  assert.equal(byExactVat.vat, -12n, '-100 at 12% is an exact multiple: -12, not -11');
+
+  const exactHalf = computeTax({ subtotalCents: -2n, category: 'ROOM', rates: { vat: 50 } });
+  const byExactHalf = Object.fromEntries(exactHalf.breakdown.map((b) => [b.key, b.amountCents]));
+  assert.equal(byExactHalf.vat, -1n, '-2 at 50% is an exact multiple: -1, not 0');
+
+  const halfCentBoundary = computeTax({ subtotalCents: -1n, category: 'ROOM', rates: { vat: 50 } });
+  const byBoundary = Object.fromEntries(halfCentBoundary.breakdown.map((b) => [b.key, b.amountCents]));
+  assert.equal(byBoundary.vat, -1n, '-1 at 50% is a genuine half-cent boundary: rounds away from zero to -1');
+});
+
+test('the components still sum exactly to taxCents for negative subtotals', () => {
+  for (const subtotal of [-1n, -2n, -100n, -333n, -99999n, -2535000n, -123456789n]) {
+    const { taxCents, breakdown } = computeTax({
+      subtotalCents: subtotal,
+      category: 'ROOM',
+      rates: { vat: 12, serviceCharge: 10, localTax: 1.85, realPropertyTax: 14.33 },
+    });
+    const summed = breakdown.reduce((a, b) => a + b.amountCents, 0n);
+    assert.equal(summed, taxCents, `components must sum to the total for ${subtotal}`);
+  }
+});
+
+test('positive results are unchanged by the sign-aware rounding', () => {
+  const { breakdown } = computeTax({
+    subtotalCents: REFERENCE_ROOM_CENTS,
+    category: 'ROOM',
+    rates: { vat: 12 },
+  });
+  const by = Object.fromEntries(breakdown.map((b) => [b.key, b.amountCents]));
+  assert.equal(by.vat, 304200n, 'VAT at 12% of 25,350.00 is still exactly 304200');
+});
