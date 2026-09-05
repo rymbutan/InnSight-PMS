@@ -413,9 +413,21 @@ EOF
 
 **Interfaces:**
 - Consumes: `arrivalsWindow(range, now)` from Task 2; `reservationCall` and `RESERVATION_URL`, both already declared at `stay.routes.js:19,26`; `GET /api/reservations?status=CONFIRMED&checkInFrom=&checkInTo=` from Task 1.
-- Produces: `GET /api/arrivals?range=today|week|month` → `{ range, degraded, arrivals: [...] }`.
+- Produces: `GET /api/arrivals?range=today|week|month` **and** `GET /api/arrivals?date=YYYY-MM-DD` → `{ range, degraded, arrivals: [...] }`.
 
-  **This is a breaking shape change** — the route currently returns a bare array. Task 4 updates the only consumer (`web/src/pages/Arrivals.jsx`). Verify no other caller exists before finishing this task; a search is included as a step.
+  **This is a breaking shape change** — the route currently returns a bare array. There are **four** consumers, updated in Task 4 (`web/src/pages/Arrivals.jsx`) and Task 5 (`Dashboard.jsx`, the audit service, the reports service).
+
+  **`?date=` MUST be preserved.** The night audit's `movements_snapshot` step (`services/audit/src/routes/audit.routes.js:257`) and `GET /api/reports/arrivals` (`services/reports/src/routes/reports.routes.js:132`) both call `/api/arrivals?date=`. Dropping the param would make the audit record a wrong arrival count for every business day. Semantics:
+
+  | Query | Window | Overdue rows |
+  |---|---|---|
+  | `?date=YYYY-MM-DD` | exactly that UTC day | **excluded** |
+  | `?range=today\|week\|month` | rolling from today | included |
+  | neither | today | included |
+
+  `date` wins over `range` when both are sent. `range` is `null` in the response when `date` was used. Overdue rows are excluded from `?date=` because the audit asks a bounded historical question — "who was due on day X" — and injecting rows from other days would inflate its count.
+
+  **Expected behaviour change for the audit:** arrival counts may rise, because reservations that never got a `Stay` row now appear. That is the bug being fixed, not a regression. The old route's exclusion of already-checked-in guests is preserved exactly, so counts stay otherwise comparable.
 
   Each arrival row: `{ id, stayId, reservationId, guestId, guestName, confirmationNumber, expectedCheckIn, expectedCheckOut, nights, adults, children, roomTypeCode, status, overdue }`. `id` is the stay id when a stay row exists, otherwise the reservation id prefixed `res:` — the React list needs a stable key and a reservation with no stay has no stay id.
 
@@ -728,6 +740,45 @@ test('overdue rows sort before in-range rows', async () => {
   assert.equal(res.body.arrivals[1].reservationId, 'today1');
 });
 
+// ── ?date= — the night audit's and reports service's form ───────────────────
+
+test('?date= returns exactly that day, with NO overdue rows', async () => {
+  reset();
+  reservations = [
+    { id: 'onday', status: 'CONFIRMED', guestId: 'g7', guestName: 'On The Day', confirmationNumber: 'CN-7',
+      checkIn: `${TODAY}T00:00:00.000Z`, checkOut: `${dayOffset(1)}T00:00:00.000Z`, adults: 1, children: 0, roomTypeCode: 'STD' },
+    { id: 'earlier', status: 'CONFIRMED', guestId: 'g8', guestName: 'Days Ago', confirmationNumber: 'CN-8',
+      checkIn: `${dayOffset(-3)}T00:00:00.000Z`, checkOut: `${dayOffset(1)}T00:00:00.000Z`, adults: 1, children: 0, roomTypeCode: 'STD' },
+  ];
+  const res = await call(makeApp(), 'GET', `/api/arrivals?date=${TODAY}`, null);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.arrivals.length, 1, 'the audit asks a bounded question -- other days must not leak in');
+  assert.equal(res.body.arrivals[0].reservationId, 'onday');
+  assert.equal(res.body.range, null, 'range is null when date was used');
+});
+
+test('?date= for a past day returns that day, not today', async () => {
+  reset();
+  const past = dayOffset(-3);
+  reservations = [
+    { id: 'past1', status: 'CONFIRMED', guestId: 'g9', guestName: 'Past Guest', confirmationNumber: 'CN-9',
+      checkIn: `${past}T00:00:00.000Z`, checkOut: `${dayOffset(-1)}T00:00:00.000Z`, adults: 1, children: 0, roomTypeCode: 'STD' },
+  ];
+  const res = await call(makeApp(), 'GET', `/api/arrivals?date=${past}`, null);
+  assert.equal(res.body.arrivals.length, 1);
+  assert.equal(res.body.arrivals[0].overdue, false, 'nothing is overdue relative to its own day');
+});
+
+test('date wins over range when both are sent', async () => {
+  reset();
+  reservations = [
+    { id: 'far', status: 'CONFIRMED', guestId: 'g10', guestName: 'Far', confirmationNumber: 'CN-10',
+      checkIn: `${dayOffset(20)}T00:00:00.000Z`, checkOut: `${dayOffset(21)}T00:00:00.000Z`, adults: 1, children: 0, roomTypeCode: 'STD' },
+  ];
+  const res = await call(makeApp(), 'GET', `/api/arrivals?date=${TODAY}&range=month`, null);
+  assert.deepEqual(res.body.arrivals, [], 'the date window, not the month window');
+});
+
 // ── Degraded mode ───────────────────────────────────────────────────────────
 
 test('an unreachable reservation service degrades to local stays, not a 500', async () => {
@@ -777,6 +828,12 @@ In `services/stay/src/routes/stay.routes.js`, add the import near the other `lib
 const { arrivalsWindow } = require('../lib/arrivalsWindow');
 ```
 
+`utcDayStart` and `utcDayKey` are also needed by the `?date=` branch. Extend the existing date import on line 9 — do NOT add a second require for the same module:
+
+```js
+const { localDayBounds, parseLocalDay, utcDayStart, utcDayKey } = require('../lib/date');
+```
+
 Then replace the whole `/arrivals` route (currently lines 110-126) with:
 
 ```js
@@ -802,7 +859,21 @@ Then replace the whole `/arrivals` route (currently lines 110-126) with:
 // is what actually keeps an in-house guest off the arrivals list.
 router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) => {
   try {
-    const window = arrivalsWindow(req.query.range);
+    // `?date=` is the NIGHT AUDIT's and the reports service's form: exactly one
+    // business day, no overdue rows. Dropping it would make the audit's
+    // movements_snapshot record a wrong arrival count for every day it closes.
+    // It wins over `range` when both are sent.
+    const dateParam = req.query.date;
+    const window = dateParam
+      ? (() => {
+          const day = utcDayKey(utcDayStart(dateParam));
+          const next = utcDayKey(new Date(utcDayStart(dateParam).getTime() + 86400000));
+          // overdueBefore === checkInFrom means nothing can be overdue: the audit
+          // asks a bounded historical question, and rows from other days would
+          // inflate its count.
+          return { range: null, checkInFrom: day, checkInTo: next, overdueBefore: day };
+        })()
+      : arrivalsWindow(req.query.range);
 
     // Two queries, not one: the in-range window, plus everything still expected
     // from BEFORE today. An overdue arrival is a problem the desk must see in
@@ -821,9 +892,13 @@ router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) =
             checkInTo: window.checkInTo,
           })}`
         ),
-        reservationCall.call(
-          `${RESERVATION_URL}/api/reservations?${qs({ checkInTo: window.overdueBefore })}`
-        ),
+        // Skipped entirely for ?date=, where overdueBefore equals checkInFrom and
+        // an overdue query would just re-fetch rows the caller must not see.
+        window.overdueBefore > window.checkInFrom
+          ? reservationCall.call(
+              `${RESERVATION_URL}/api/reservations?${qs({ checkInTo: window.overdueBefore })}`
+            )
+          : Promise.resolve([]),
       ]);
       // A reservation cannot be both in-range and overdue, but de-duplicate by
       // id anyway rather than trusting two independent queries to stay disjoint.
@@ -1278,6 +1353,173 @@ Stay row when none exists. A future-dated check-in asks first and names the
 date, since Week and Month show guests who are not due today.
 
 A degraded response renders a warning rather than a silently short list.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 5: Update the three other `/api/arrivals` consumers
+
+**Files:**
+- Modify: `web/src/pages/Dashboard.jsx:51`
+- Modify: `services/audit/src/routes/audit.routes.js:257`
+- Modify: `services/reports/src/routes/reports.routes.js:132`
+
+**Interfaces:**
+- Consumes: `GET /api/arrivals` → `{ range, degraded, arrivals: [...] }` from Task 3.
+- Produces: nothing.
+
+Task 3 changed the response from a bare array to an envelope. Three callers besides the Arrivals page read it, and every one of them treats the result as an array. Left unchanged, the night audit records `undefined` arrivals for every business day it closes — a silent corruption of financial records, which is why this task is not optional.
+
+All three are the same one-line change, so this is **one dispatch, reviewed as one diff**.
+
+- [ ] **Step 1: Write the failing test for the audit's movements snapshot**
+
+The audit is the consumer where breakage is silent and permanent, so it gets the test. Append to `services/audit/src/routes/audit.test.js` if that file exists; otherwise create `services/audit/src/lib/movements.test.js` with the helper extracted. First check which:
+
+```bash
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS" && ls services/audit/src/routes/*.test.js services/audit/src/lib/*.test.js 2>/dev/null
+```
+
+Extract the counting into a pure helper in `services/audit/src/lib/movements.js`:
+
+```js
+// Counts a movements response from the stay service.
+//
+// /api/arrivals returns { range, degraded, arrivals } and /api/departures still
+// returns a bare array. Reading `.length` off the arrivals envelope yielded
+// undefined, which the audit then recorded as the day's arrival count -- a wrong
+// number written into a financial record with nothing reporting it.
+function movementCount(payload) {
+  if (Array.isArray(payload)) return payload.length;
+  if (payload && Array.isArray(payload.arrivals)) return payload.arrivals.length;
+  return 0;
+}
+
+module.exports = { movementCount };
+```
+
+And its test, `services/audit/src/lib/movements.test.js`:
+
+```js
+const test = require('node:test');
+const assert = require('node:assert');
+
+const { movementCount } = require('./movements');
+
+test('counts the arrivals envelope', () => {
+  assert.equal(movementCount({ range: 'today', degraded: false, arrivals: [{}, {}, {}] }), 3);
+});
+
+test('still counts a bare array, which /api/departures returns', () => {
+  assert.equal(movementCount([{}, {}]), 2);
+});
+
+test('an empty envelope counts zero', () => {
+  assert.equal(movementCount({ range: 'today', degraded: false, arrivals: [] }), 0);
+});
+
+// The regression this file exists for: reading .length off an envelope gave
+// undefined, and undefined was written into the audit record as the count.
+test('never returns undefined for a malformed or failed payload', () => {
+  for (const bad of [null, undefined, {}, 'nope', 0]) {
+    assert.equal(movementCount(bad), 0, `${JSON.stringify(bad)} must count 0, never undefined`);
+  }
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+```bash
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS/services/audit" && node --test src/lib/movements.test.js
+```
+
+Expected: FAIL — `Cannot find module './movements'`.
+
+- [ ] **Step 3: Create the helper and use it in the audit**
+
+Create the file from Step 1, then in `services/audit/src/routes/audit.routes.js` add the import beside the other `lib/` requires and change the movements step:
+
+```js
+      return { arrivals: movementCount(arrivals), departures: movementCount(departures) };
+```
+
+replacing `{ arrivals: arrivals.length, departures: departures.length }`.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+```bash
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS/services/audit" && node --test src/lib/movements.test.js && npm test
+```
+
+Expected: all PASS.
+
+- [ ] **Step 5: Update the reports service**
+
+In `services/reports/src/routes/reports.routes.js`, in `GET /api/reports/arrivals`, unwrap the envelope. Change:
+
+```js
+    const data = await callService(`${STAY_URL}/api/arrivals${date ? `?date=${date}` : ''}`);
+    const summary = { date, count: data.length, rows: data };
+```
+
+to:
+
+```js
+    const payload = await callService(`${STAY_URL}/api/arrivals${date ? `?date=${date}` : ''}`);
+    // /api/arrivals returns { range, degraded, arrivals }; departures still
+    // returns a bare array. Tolerate both so this keeps working either way.
+    const data = Array.isArray(payload) ? payload : payload?.arrivals || [];
+    const summary = { date, count: data.length, rows: data };
+```
+
+Leave `GET /api/reports/departures` alone — `/api/departures` is unchanged.
+
+- [ ] **Step 6: Update the Dashboard**
+
+In `web/src/pages/Dashboard.jsx`, in the `setData({ ... })` call, change `arrivals: a.data,` to:
+
+```jsx
+        // /api/arrivals returns { range, degraded, arrivals }. Tolerate a bare
+        // array too, so a stale cached bundle cannot blank the dashboard during
+        // a rolling deploy.
+        arrivals: Array.isArray(a.data) ? a.data : a.data?.arrivals || [],
+```
+
+- [ ] **Step 7: Verify every consumer is updated**
+
+```bash
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS"
+grep -rn "api/arrivals" web/src services --exclude-dir=node_modules | grep -v "\.test\.js" | grep -v nginx.conf | grep -v schema.prisma
+```
+
+Expected: four hits — the route definition itself, `Arrivals.jsx`, `Dashboard.jsx`, `audit.routes.js`, `reports.routes.js`. Confirm none of the consumers still calls `.length` or `.map` directly on the response.
+
+```bash
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS/services/audit" && npm test
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS/services/reports" && npm test
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS/web" && npm run build
+```
+
+Expected: all pass.
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd "/Users/arymsr.vendiola/Documents/InnSight PMS"
+git add services/audit/src/lib/movements.js services/audit/src/lib/movements.test.js \
+        services/audit/src/routes/audit.routes.js \
+        services/reports/src/routes/reports.routes.js web/src/pages/Dashboard.jsx
+git commit -m "$(cat <<'EOF'
+fix: unwrap the arrivals envelope in the audit, reports and dashboard
+
+/api/arrivals now returns { range, degraded, arrivals }. All three of these
+read .length or iterated the response directly, so the night audit would have
+recorded undefined as the arrival count for every business day it closed --
+a wrong number in a financial record with nothing reporting it.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
