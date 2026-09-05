@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth';
 import { formatPeso, pesosToCents } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -12,6 +13,7 @@ import Modal from '../components/Modal';
 import FilterPanel, { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
 import Timeline from '../components/Timeline';
+import { labelize } from '../lib/labels';
 
 const TABS = [
   'Accommodations',
@@ -28,6 +30,7 @@ export default function ReservationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
   const { hasRole } = useAuth();
   const [res, setRes] = useState(null);
   const [activeTab, setActiveTab] = useState('Accommodations');
@@ -139,7 +142,14 @@ export default function ReservationDetail() {
         await api.post(`/api/folios/${open.id}/settle`, { method: method.trim().toUpperCase() });
         toast.success(`Settled ${formatPeso(balanceCents)} via ${method.trim().toUpperCase()}.`);
       } else {
-        if (!confirm(`No outstanding balance. Check out ${res.guestName}?`)) return;
+        const ok = await confirm({
+          title: 'Check out guest',
+          message: `Check out ${res.guestName}?`,
+          detail: 'No outstanding balance.',
+          confirmLabel: 'Check out',
+          danger: false,
+        });
+        if (!ok) return;
         if (open) await api.post(`/api/folios/${open.id}/settle`, {}); // close the zero-balance folio
       }
       await api.post(`/api/check-out/${stay.id}`);
@@ -240,7 +250,7 @@ export default function ReservationDetail() {
           </div>
           <div>
             <div className="res-field-label">Source</div>
-            <div className="res-field-value">{res.source || 'Direct'}</div>
+            <div className="res-field-value">{labelize(res.source) || 'Direct'}</div>
           </div>
           <div>
             <div className="res-field-label">Payment Type</div>
@@ -415,44 +425,44 @@ function AccommodationsTab({ res, stay, onQuickEdit, navigate }) {
           <tr>
             <th>Res ID</th>
             <th>Type</th>
-            <th>Assignment</th>
+            <th className="t-c">Assignment</th>
             <th>Guest</th>
             <th>Arrival/Departure</th>
-            <th>Guests</th>
-            <th>Nights</th>
-            <th>Total</th>
-            <th>Occupied</th>
-            <th></th>
+            <th className="t-c">Guests</th>
+            <th className="t-c">Nights</th>
+            <th className="t-n">Total</th>
+            <th className="t-c">Occupied</th>
+            <th className="t-c"></th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>{res.confirmationNumber || res.id?.slice(0, 8)}</td>
             <td>{res.roomTypeCode}</td>
-            <td>{res.assignedRoomId || stay?.assignedRoomId || '—'}</td>
+            <td className="t-c">{res.assignedRoomId || stay?.assignedRoomId || '—'}</td>
             <td>{res.guestName}</td>
             <td>
               {new Date(res.checkIn).toLocaleDateString()}{' '}
               <Icon name="arrow-right" size={12} style={{ verticalAlign: 'middle', margin: '0 2px' }} />{' '}
               {new Date(res.checkOut).toLocaleDateString()}
             </td>
-            <td>
+            <td className="t-c">
               <Icon name="user" size={12} /> {res.adults || 0} · <Icon name="users" size={12} />{' '}
               {res.children || 0}
             </td>
-            <td>
+            <td className="t-c">
               {res.nights ||
                 Math.max(1, Math.round((new Date(res.checkOut) - new Date(res.checkIn)) / 86400000))}
             </td>
-            <td>{total}</td>
-            <td>
+            <td className="t-n">{total}</td>
+            <td className="t-c">
               {stay && stay.status === 'CHECKED_IN' ? (
                 <Icon name="check" size={16} color="var(--green)" />
               ) : (
                 <Icon name="x" size={16} color="var(--muted)" />
               )}
             </td>
-            <td style={{ position: 'relative' }}>
+            <td className="t-c" style={{ position: 'relative' }}>
               <button className="icon" onClick={() => setMenuOpen(!menuOpen)} aria-label="More actions">
                 <Icon name="more-vertical" size={14} />
               </button>
@@ -572,13 +582,13 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
                 <th>Reservation ID</th>
                 <th>Date/Time</th>
                 <th>Name</th>
-                <th>Room</th>
+                <th className="t-c">Room</th>
                 <th>Type</th>
                 <th>Notes</th>
-                <th>Quantity</th>
-                <th>Debit</th>
-                <th>Credit</th>
-                <th></th>
+                <th className="t-c">Quantity</th>
+                <th className="t-n">Debit</th>
+                <th className="t-n">Credit</th>
+                <th className="t-c"></th>
               </tr>
             </thead>
             <tbody>
@@ -595,17 +605,13 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
                     <td>{folio.stayId?.slice(0, 10)}</td>
                     <td>{t.postedAt ? new Date(t.postedAt).toLocaleString() : '—'}</td>
                     <td>{t.postedBy || '—'}</td>
-                    <td>{t.roomNumber || 'N/A'}</td>
+                    <td className="t-c">{t.roomNumber || 'N/A'}</td>
                     <td>{t.chargeCode || (t.type === 'PAYMENT' ? 'Payment' : 'Charge')}</td>
                     <td>{t.note || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{t.quantity || 1}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {t.type === 'CHARGE' ? formatPeso(t.amountCents) : ''}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {t.type === 'PAYMENT' ? formatPeso(t.amountCents) : ''}
-                    </td>
-                    <td>
+                    <td className="t-c">{t.quantity || 1}</td>
+                    <td className="t-n">{t.type === 'CHARGE' ? formatPeso(t.amountCents) : ''}</td>
+                    <td className="t-n">{t.type === 'PAYMENT' ? formatPeso(t.amountCents) : ''}</td>
+                    <td className="t-actions">
                       <button className="icon" aria-label="More">
                         <Icon name="more-vertical" size={14} />
                       </button>
@@ -617,11 +623,15 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
             {txns.length > 0 && (
               <tfoot>
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'right', fontWeight: 600 }}>
+                  <td className="t-n" colSpan={8} style={{ fontWeight: 600 }}>
                     TOTAL
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatPeso(totalDebit)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatPeso(totalCredit)}</td>
+                  <td className="t-n" style={{ fontWeight: 600 }}>
+                    {formatPeso(totalDebit)}
+                  </td>
+                  <td className="t-n" style={{ fontWeight: 600 }}>
+                    {formatPeso(totalCredit)}
+                  </td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -1229,33 +1239,101 @@ function RefundModal({ open, onClose, folio, txns, onDone }) {
 function QuickEditModal({ open, onClose, res, stay, onDone }) {
   const toast = useToast();
   const [newCheckOut, setNewCheckOut] = useState(res?.checkOut?.slice(0, 10) || '');
+  // Guest details are editable here too: correcting a misspelled name meant
+  // leaving the reservation for the Guests screen and finding the profile again.
+  //
+  // These four fields and no more, because they are exactly what the server
+  // accepts — GUEST_EDITABLE in services/guest/src/routes/guest.routes.js
+  // whitelists the patch and drops anything else. Email and phone are NOT on the
+  // Guest model at all (contacts are a separate GuestContact table), so offering
+  // them here would have been two inputs that silently saved nothing.
+  const [guest, setGuest] = useState({
+    firstName: '',
+    lastName: '',
+    nationality: '',
+    vipLevel: 'NONE',
+  });
   const [busy, setBusy] = useState(false);
+
   useEffect(() => {
-    if (res) setNewCheckOut(res.checkOut?.slice(0, 10) || '');
+    if (!res || !open) return;
+    setNewCheckOut(res.checkOut?.slice(0, 10) || '');
+    // The reservation carries a single guestName; split it only to seed the
+    // fields. The guest RECORD is the source of truth, so load it when there is
+    // one and let it win.
+    const [first = '', ...rest] = String(res.guestName || '')
+      .trim()
+      .split(/\s+/);
+    setGuest({
+      firstName: first,
+      lastName: rest.join(' '),
+      nationality: '',
+      vipLevel: 'NONE',
+    });
+    if (res.guestId) {
+      api
+        .get(`/api/guests/${res.guestId}`)
+        .then(({ data }) =>
+          setGuest({
+            firstName: data.firstName || '',
+            lastName: data.lastName || '',
+            nationality: data.nationality || '',
+            vipLevel: data.vipLevel || 'NONE',
+          })
+        )
+        .catch(() => {
+          /* keep the values derived from the reservation */
+        });
+    }
   }, [res, open]);
 
   async function submit() {
     if (!res) return;
     setBusy(true);
     try {
-      const original = new Date(res.checkOut);
-      const updated = new Date(newCheckOut);
-      const diffDays = Math.round((updated - original) / 86400000);
-      if (diffDays === 0) {
+      let changed = false;
+
+      // ── Guest details ──
+      if (res.guestId) {
+        const patch = {
+          firstName: guest.firstName.trim(),
+          lastName: guest.lastName.trim(),
+          nationality: guest.nationality.trim() || null,
+          vipLevel: guest.vipLevel,
+        };
+        if (!patch.firstName || !patch.lastName) {
+          toast.error('First and last name are required.');
+          return;
+        }
+        await api.patch(`/api/guests/${res.guestId}`, patch);
+        changed = true;
+      }
+
+      // ── Dates ──
+      const diffDays = Math.round((new Date(newCheckOut) - new Date(res.checkOut)) / 86400000);
+      if (diffDays !== 0) {
+        if (stay) {
+          // Both directions just move the expected checkout date. /extend handles
+          // that; /early-departure is a different action (departs the guest now
+          // with a refund) and must not be triggered by a date edit.
+          await api.post(`/api/stays/${stay.id}/extend`, { newCheckOut });
+          toast.success(
+            diffDays > 0
+              ? `Extended by ${diffDays} night(s).`
+              : `Shortened by ${Math.abs(diffDays)} night(s).`
+          );
+        } else {
+          await api.patch(`/api/reservations/${res.id}`, { checkOut: newCheckOut });
+          toast.success('Reservation dates updated.');
+        }
+        changed = true;
+      } else if (changed) {
+        toast.success('Guest details updated.');
+      }
+
+      if (!changed) {
         toast.info('No change.');
         return;
-      }
-      if (stay) {
-        // Both directions just move the expected checkout date. /extend handles
-        // that; /early-departure is a different action (departs the guest now
-        // with a refund) and must not be triggered by a date edit.
-        await api.post(`/api/stays/${stay.id}/extend`, { newCheckOut });
-        toast.success(
-          diffDays > 0 ? `Extended by ${diffDays} night(s).` : `Shortened by ${Math.abs(diffDays)} night(s).`
-        );
-      } else {
-        await api.patch(`/api/reservations/${res.id}`, { checkOut: newCheckOut });
-        toast.success('Reservation dates updated.');
       }
       onDone();
     } catch (e) {
@@ -1280,6 +1358,9 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
       open={open}
       onClose={onClose}
       title="Quick Edit"
+      // Wider than the 480px default: it now carries two-column guest fields as
+      // well as the 14-day date strip.
+      width={620}
       footer={
         <>
           <button className="secondary" onClick={onClose}>
@@ -1292,8 +1373,56 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
       }
     >
       <div className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
-        {res.guestName} · {res.confirmationNumber} · {res.roomTypeCode}
+        {res.confirmationNumber} · {res.roomTypeCode}
       </div>
+
+      {res.guestId ? (
+        <>
+          <h4 className="guest-sub" style={{ marginTop: 0 }}>
+            Guest details
+          </h4>
+          <div className="row">
+            <div>
+              <label>First name</label>
+              <input
+                value={guest.firstName}
+                onChange={(e) => setGuest({ ...guest, firstName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Last name</label>
+              <input
+                value={guest.lastName}
+                onChange={(e) => setGuest({ ...guest, lastName: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="row">
+            <div>
+              <label>Nationality</label>
+              <input
+                value={guest.nationality}
+                onChange={(e) => setGuest({ ...guest, nationality: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>VIP level</label>
+              <select
+                value={guest.vipLevel}
+                onChange={(e) => setGuest({ ...guest, vipLevel: e.target.value })}
+              >
+                {['NONE', 'SILVER', 'GOLD', 'PLATINUM', 'BLACKLISTED'].map((v) => (
+                  <option key={v} value={v}>
+                    {labelize(v)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <h4 className="guest-sub">Stay dates</h4>
+        </>
+      ) : null}
+
       <label>Check-out date</label>
       <input type="date" value={newCheckOut} onChange={(e) => setNewCheckOut(e.target.value)} />
       <div style={{ marginTop: 16, overflowX: 'auto' }}>

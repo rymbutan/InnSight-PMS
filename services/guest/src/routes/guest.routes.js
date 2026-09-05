@@ -47,17 +47,28 @@ router.post('/guests', requireRole(...STAFF), async (req, res) => {
 router.get('/guests/search', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
   try {
     const { q } = req.query;
-    if (!q) return res.json([]);
+    // No term = the most recent profiles, NOT an empty array. This endpoint
+    // backs the Guest Profiles list as well as the type-ahead, and returning []
+    // for a blank query meant the page opened empty and stayed empty: you could
+    // create a guest and watch nothing appear, because the only way to make a
+    // row show up was to already know the name and search for it.
     const guests = await prisma.guest.findMany({
       where: {
         status: 'ACTIVE',
-        OR: [
-          { firstName: { contains: q, mode: 'insensitive' } },
-          { lastName: { contains: q, mode: 'insensitive' } },
-          { displayName: { contains: q, mode: 'insensitive' } },
-          { profileNumber: { contains: q, mode: 'insensitive' } },
-        ],
+        ...(q
+          ? {
+              OR: [
+                { firstName: { contains: q, mode: 'insensitive' } },
+                { lastName: { contains: q, mode: 'insensitive' } },
+                { displayName: { contains: q, mode: 'insensitive' } },
+                { profileNumber: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
       },
+      // Newest first so a profile created a second ago is the first row on the
+      // page. The type-ahead is unaffected — it never sends a blank term.
+      orderBy: { createdAt: 'desc' },
       take: 20,
     });
     res.json(guests);

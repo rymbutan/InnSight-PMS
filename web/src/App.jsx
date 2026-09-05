@@ -27,6 +27,7 @@ import Amenities from './pages/Amenities';
 import Training from './pages/Training';
 import RoomLayouts from './pages/RoomLayouts';
 import InspectionScenarios from './pages/InspectionScenarios';
+import Settings from './pages/Settings';
 
 export default function App() {
   return (
@@ -171,6 +172,9 @@ export default function App() {
           }
         />
         <Route path="/change-password" element={<ChangePassword />} />
+        {/* Per-user preferences only, so no role guard — every signed-in account
+            has an account and a theme. */}
+        <Route path="/settings" element={<Settings />} />
         <Route
           path="/audit"
           element={

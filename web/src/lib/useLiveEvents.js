@@ -129,96 +129,142 @@ function warnUnforwarded(names) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ONE EventSource per tab, shared by every subscriber.
+//
+// Each useLiveEvents() call used to open its own EventSource, so a tab held one
+// connection per hook. The gateway caps /api/events at 24 concurrent streams per
+// client address (limit_conn sse_conn 24 in services/gateway/nginx.conf), and
+// that cap is per ADDRESS — so a hotel whose terminals share one NAT'd address
+// is spending from a pool of 24 for the whole property. The notification bell
+// lives in the app shell and subscribes for the entire session, which on the
+// old one-connection-per-hook model would have made every tab cost two streams
+// and halved how many terminals could be open at once.
+//
+// This costs no extra bandwidth: /api/events is mounted as sseStream(LIVE_CHANNELS),
+// so the server sends every channel the caller's ROLE permits regardless of what
+// the browser listens for. The per-hook channel list was only ever deciding which
+// events fired that hook's callback locally, which the dispatch below preserves
+// exactly — a subscriber still hears only its own channels.
+// ─────────────────────────────────────────────────────────────────────────────
+const subscribers = new Set();
+let sharedEs = null;
+let sharedRetry = null;
+let sharedAttempts = 0;
+let sharedConnected = false;
+
+function notifyConnection() {
+  for (const s of subscribers) s.onConnection?.(sharedConnected);
+}
+
+function dispatch(e) {
+  let data = null;
+  try {
+    data = e.data ? JSON.parse(e.data) : null;
+  } catch {
+    /* malformed payload — ignore */
+  }
+  for (const s of subscribers) {
+    if (s.channels.has(e.type)) s.cb?.(e.type, data);
+  }
+}
+
+function teardown() {
+  clearTimeout(sharedRetry);
+  sharedRetry = null;
+  if (sharedEs) {
+    LIVE_CHANNELS.forEach((n) => sharedEs.removeEventListener(n, dispatch));
+    try {
+      sharedEs.close();
+    } catch {
+      /* already gone */
+    }
+    sharedEs = null;
+  }
+  sharedConnected = false;
+}
+
+async function openShared() {
+  // A subscriber may have unmounted while the ticket request was in flight.
+  if (subscribers.size === 0 || sharedEs) return;
+  const token = localStorage.getItem('innsight_token');
+  if (!token) {
+    // Not logged in yet — check again shortly rather than giving up.
+    sharedRetry = setTimeout(openShared, 3000);
+    return;
+  }
+  // EventSource cannot send an Authorization header, so something has to go in
+  // the URL. It used to be the 12-hour session JWT — which nginx then logged.
+  // Instead, exchange the token for a SINGLE-USE 30-second ticket over a normal
+  // authenticated POST, and put only that in the query string.
+  let ticket;
+  try {
+    const r = await fetch(`${API_BASE}/api/events/ticket`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) throw new Error(`ticket ${r.status}`);
+    ({ ticket } = await r.json());
+  } catch {
+    // Could be an expired session or a service restart; back off and retry.
+    sharedAttempts += 1;
+    sharedRetry = setTimeout(openShared, Math.min(30000, 1000 * 2 ** Math.min(sharedAttempts, 5)));
+    return;
+  }
+  if (subscribers.size === 0 || sharedEs) return;
+  // Native EventSource auto-retries, but always with the ORIGINAL url — and a
+  // ticket is single-use, so its built-in retry would 401-loop forever. We
+  // manage reconnection ourselves and mint a fresh ticket each attempt.
+  sharedEs = new EventSource(`${API_BASE}/api/events?ticket=${encodeURIComponent(ticket)}`);
+  // SSE events are NAMED (event: <channel>), so a plain onmessage won't see
+  // them — a listener per channel is required. Listen to all of them once and
+  // route in `dispatch`, rather than per subscriber.
+  LIVE_CHANNELS.forEach((n) => sharedEs.addEventListener(n, dispatch));
+  sharedEs.onopen = () => {
+    sharedAttempts = 0;
+    sharedConnected = true;
+    notifyConnection();
+  };
+  sharedEs.onerror = () => {
+    teardown();
+    notifyConnection();
+    if (subscribers.size === 0) return;
+    sharedAttempts += 1;
+    sharedRetry = setTimeout(openShared, Math.min(30000, 1000 * 2 ** Math.min(sharedAttempts, 5)));
+  };
+}
+
+function subscribe(entry) {
+  subscribers.add(entry);
+  if (!sharedEs && !sharedRetry) openShared();
+  else entry.onConnection?.(sharedConnected);
+  return () => {
+    subscribers.delete(entry);
+    // Last one out closes the connection, so a tab sitting on a page with no
+    // live needs is not holding a stream against the gateway's cap.
+    if (subscribers.size === 0) teardown();
+  };
+}
+
 // Low-level: invoke onEvent(channel, data) for each live event on `channels`
-// (defaults to all). Returns { connected } for a live indicator. EventSource
-// reconnects automatically on drops.
+// (defaults to all). Returns { connected } for a live indicator. Reconnects
+// automatically on drops.
 export function useLiveEvents(onEvent, channelList = LIVE_CHANNELS) {
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState(sharedConnected);
   const cbRef = useRef(onEvent);
   cbRef.current = onEvent;
   // Callers commonly pass a fresh array literal every render; key on the content
-  // so that does not tear down and rebuild the EventSource on each one.
+  // so that does not tear the subscription down and rebuild it on each one.
   const key = useMemo(() => channelList.join(','), [channelList.join(',')]);
 
   useEffect(() => {
-    let es = null;
-    let retryTimer = null;
-    let attempts = 0;
-    let closed = false;
     const names = key ? key.split(',') : LIVE_CHANNELS;
     warnUnforwarded(names);
-    const handler = (e) => {
-      let data = null;
-      try {
-        data = e.data ? JSON.parse(e.data) : null;
-      } catch {
-        /* ignore */
-      }
-      cbRef.current?.(e.type, data);
-    };
-
-    async function connect() {
-      if (closed) return;
-      const token = localStorage.getItem('innsight_token');
-      if (!token) {
-        // Not logged in yet — check again shortly rather than giving up.
-        retryTimer = setTimeout(connect, 3000);
-        return;
-      }
-      // EventSource cannot send an Authorization header, so something has to go in
-      // the URL. It used to be this 12-hour session JWT — which nginx then logged.
-      // Instead, exchange the token for a SINGLE-USE 30-second ticket over a normal
-      // authenticated POST, and put only that in the query string.
-      let ticket;
-      try {
-        const r = await fetch(`${API_BASE}/api/events/ticket`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        });
-        if (!r.ok) throw new Error(`ticket ${r.status}`);
-        ({ ticket } = await r.json());
-      } catch {
-        // Could be a expired session or a service restart; back off and retry.
-        attempts += 1;
-        const delay = Math.min(30000, 1000 * 2 ** Math.min(attempts, 5));
-        retryTimer = setTimeout(connect, delay);
-        return;
-      }
-      if (closed) return;
-      // Native EventSource auto-retries, but always with the ORIGINAL url — and a
-      // ticket is single-use, so its built-in retry would 401-loop forever. We
-      // manage reconnection ourselves and mint a fresh ticket each attempt.
-      es = new EventSource(`${API_BASE}/api/events?ticket=${encodeURIComponent(ticket)}`);
-      // SSE events are NAMED (event: <channel>), so a plain onmessage won't see
-      // them — we must register a listener per channel.
-      names.forEach((n) => es.addEventListener(n, handler));
-      es.onopen = () => {
-        attempts = 0;
-        setConnected(true);
-      };
-      es.onerror = () => {
-        setConnected(false);
-        try {
-          es.close();
-        } catch {
-          /* ignore */
-        }
-        if (closed) return;
-        attempts += 1;
-        const delay = Math.min(30000, 1000 * 2 ** Math.min(attempts, 5));
-        retryTimer = setTimeout(connect, delay);
-      };
-    }
-    connect();
-
-    return () => {
-      closed = true;
-      clearTimeout(retryTimer);
-      if (es) {
-        names.forEach((n) => es.removeEventListener(n, handler));
-        es.close();
-      }
-    };
+    return subscribe({
+      channels: new Set(names),
+      cb: (channel, data) => cbRef.current?.(channel, data),
+      onConnection: setConnected,
+    });
   }, [key]);
 
   return { connected };

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { pesosToCents, formatPeso } from '../lib/money';
 
 export default function Audit() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [current, setCurrent] = useState(null);
   const [days, setDays] = useState([]);
   const [nightlyRate, setNightlyRate] = useState('');
@@ -47,12 +49,13 @@ export default function Audit() {
       toast.error('Enter nightly rate first.');
       return;
     }
-    if (
-      !confirm(
-        `Run night audit?\n\nWill post ₱${nightlyRate} room charge to ${inHouseCount} in-house stay(s), mark overdue reservations as no-show, and close the day.`
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: 'Run night audit',
+      message: 'Run night audit and close the business day?',
+      detail: `Posts a ₱${nightlyRate} room charge to ${inHouseCount} in-house stay(s) and marks overdue reservations as no-show.`,
+      confirmLabel: 'Run audit',
+    });
+    if (!ok) return;
     setRunning(true);
     try {
       await api.post('/api/audit/run', { nightlyRateCents: pesosToCents(nightlyRate) });
@@ -162,7 +165,7 @@ export default function Audit() {
               {days.map((d) => (
                 <tr key={d.id}>
                   <td>{new Date(d.businessDate).toDateString()}</td>
-                  <td>
+                  <td className="t-c">
                     <span className={`badge ${d.status.toLowerCase()}`}>{d.status}</span>
                   </td>
                   <td>{d.arrivals ?? 0}</td>

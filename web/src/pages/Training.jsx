@@ -180,19 +180,19 @@ export default function Training() {
               <thead>
                 <tr>
                   <th>Staff</th>
-                  <th>Runs</th>
-                  <th>Avg best score</th>
+                  <th className="t-c">Runs</th>
+                  <th className="t-c">Avg best score</th>
                   <th>Room tiers practised</th>
                   <th>Other activities</th>
-                  <th>Status</th>
+                  <th className="t-c">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {competency.map((u) => (
                   <tr key={u.userId}>
                     <td>{u.userName || u.userId.slice(0, 8)}</td>
-                    <td>{u.runs}</td>
-                    <td>
+                    <td className="t-c">{u.runs}</td>
+                    <td className="t-c">
                       <strong>{u.avgBest}%</strong>
                     </td>
                     <td>
@@ -207,7 +207,7 @@ export default function Training() {
                         .map(([a, s]) => `${a.replace('_', ' ').toLowerCase()} ${s}%`)
                         .join(' · ') || '—'}
                     </td>
-                    <td>
+                    <td className="t-c">
                       <span className="badge" style={{ background: u.competent ? '#16a34a' : '#64748b' }}>
                         {u.competent ? 'Competent' : 'In training'}
                       </span>
@@ -235,9 +235,9 @@ export default function Training() {
                 <th>Date</th>
                 {isMgmt && <th>Staff</th>}
                 <th>Activity</th>
-                <th>Score</th>
-                <th>Tasks</th>
-                <th>Knowledge gaps</th>
+                <th className="t-c">Score</th>
+                <th className="t-c">Tasks</th>
+                <th className="t-c">Knowledge gaps</th>
               </tr>
             </thead>
             <tbody>
@@ -254,13 +254,13 @@ export default function Training() {
                       </span>
                     )}
                   </td>
-                  <td>
+                  <td className="t-c">
                     <strong style={{ color: toneColor(r.tone) }}>{r.scorePct}%</strong>
                   </td>
-                  <td>
+                  <td className="t-c">
                     {r.tasksAttempted}/{r.tasksTotal}
                   </td>
-                  <td>
+                  <td className="t-c">
                     {r.knowledgeGaps > 0 ? <span style={{ color: '#dc2626' }}>{r.knowledgeGaps}</span> : '0'}
                   </td>
                 </tr>

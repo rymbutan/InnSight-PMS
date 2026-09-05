@@ -4,6 +4,7 @@ import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { BarChart } from '../components/Chart';
 import EmptyState from '../components/EmptyState';
+import SectionSwitcher, { REPORTS_SECTIONS } from '../components/SectionSwitcher';
 
 const TYPES = [
   { value: 'occupancy', label: 'Occupancy (date range)' },
@@ -78,7 +79,12 @@ export default function Reports() {
 
   return (
     <div>
-      <h2>Reports</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Reports</h1>
+          <SectionSwitcher options={REPORTS_SECTIONS} />
+        </div>
+      </div>
       <div className="panel">
         <div className="row">
           <div>
@@ -127,11 +133,11 @@ function RenderReport({ type, data }) {
     const rows = data.rows || [];
     const cols = [
       { label: 'Date', accessor: (r) => new Date(r.businessDate).toLocaleDateString() },
-      { label: 'Status', accessor: 'status' },
-      { label: 'Occupancy %', accessor: (r) => (r.occupancyPct ?? 0).toFixed(1) },
-      { label: 'ADR', accessor: (r) => formatPeso(r.adr ?? 0) },
-      { label: 'RevPAR', accessor: (r) => formatPeso(r.revPar ?? 0) },
-      { label: 'Room revenue', accessor: (r) => formatPeso(r.roomRevenueCents) },
+      { label: 'Status', accessor: 'status', align: 't-c' },
+      { label: 'Occupancy %', accessor: (r) => (r.occupancyPct ?? 0).toFixed(1), align: 't-c' },
+      { label: 'ADR', accessor: (r) => formatPeso(r.adr ?? 0), align: 't-n' },
+      { label: 'RevPAR', accessor: (r) => formatPeso(r.revPar ?? 0), align: 't-n' },
+      { label: 'Room revenue', accessor: (r) => formatPeso(r.roomRevenueCents), align: 't-n' },
     ];
     const trend = rows.map((r) => r.occupancyPct || 0);
     const labels = rows.map((r) =>
@@ -170,10 +176,10 @@ function RenderReport({ type, data }) {
     const rows = data.rows || [];
     const cols = [
       { label: 'Date', accessor: (r) => new Date(r.businessDate).toLocaleDateString() },
-      { label: 'Room revenue', accessor: (r) => formatPeso(r.roomRevenueCents) },
-      { label: 'Other revenue', accessor: (r) => formatPeso(r.otherRevenueCents) },
-      { label: 'Tax', accessor: (r) => formatPeso(r.taxCents) },
-      { label: 'Payments', accessor: (r) => formatPeso(r.paymentsCents) },
+      { label: 'Room revenue', accessor: (r) => formatPeso(r.roomRevenueCents), align: 't-n' },
+      { label: 'Other revenue', accessor: (r) => formatPeso(r.otherRevenueCents), align: 't-n' },
+      { label: 'Tax', accessor: (r) => formatPeso(r.taxCents), align: 't-n' },
+      { label: 'Payments', accessor: (r) => formatPeso(r.paymentsCents), align: 't-n' },
     ];
     const t = data.totals || {};
     const revTrend = rows.map((r) => Number(r.roomRevenueCents || 0) / 100);
@@ -214,8 +220,8 @@ function RenderReport({ type, data }) {
     const cols = [
       { label: 'Stay', accessor: (r) => r.id?.slice(0, 8) },
       { label: 'Guest', accessor: 'guestName' },
-      { label: 'Room', accessor: 'assignedRoomId' },
-      { label: 'Status', accessor: 'status' },
+      { label: 'Room', accessor: 'assignedRoomId', align: 't-c' },
+      { label: 'Status', accessor: 'status', align: 't-c' },
       {
         label: 'Check-in',
         accessor: (r) =>
@@ -248,8 +254,8 @@ function RenderReport({ type, data }) {
       { label: 'Code', accessor: 'code' },
       { label: 'Amenity', accessor: 'name' },
       { label: 'Category', accessor: (r) => (r.category || '').replace('_', ' ') },
-      { label: 'Uses', accessor: 'count' },
-      { label: 'Revenue', accessor: (r) => formatPeso(r.totalCents) },
+      { label: 'Uses', accessor: 'count', align: 't-c' },
+      { label: 'Revenue', accessor: (r) => formatPeso(r.totalCents), align: 't-n' },
     ];
     const bars = rows.map((r) => Number(r.totalCents || 0) / 100);
     const labels = rows.map((r) => r.name || r.code);
@@ -294,8 +300,8 @@ function RenderReport({ type, data }) {
     const cols = [
       { label: 'Room', accessor: 'number' },
       { label: 'Type', accessor: 'typeCode' },
-      { label: 'Floor', accessor: 'floor' },
-      { label: 'Status', accessor: 'status' },
+      { label: 'Floor', accessor: 'floor', align: 't-c' },
+      { label: 'Status', accessor: 'status', align: 't-c' },
     ];
     return (
       <>
@@ -347,9 +353,15 @@ function ResultTable({ rows, cols, filename }) {
       ) : (
         <table>
           <thead>
+            {/* One `align` per column definition, stamped on the header AND on
+                every cell beneath it. Every report on this page is rendered by
+                this one loop, so a column can never end up with a centred body
+                and a left-aligned heading. */}
             <tr>
               {cols.map((c) => (
-                <th key={c.label}>{c.label}</th>
+                <th key={c.label} className={c.align || undefined}>
+                  {c.label}
+                </th>
               ))}
             </tr>
           </thead>
@@ -358,7 +370,11 @@ function ResultTable({ rows, cols, filename }) {
               <tr key={i}>
                 {cols.map((c) => {
                   const v = typeof c.accessor === 'function' ? c.accessor(r) : r[c.accessor];
-                  return <td key={c.label}>{v ?? '—'}</td>;
+                  return (
+                    <td key={c.label} className={c.align || undefined}>
+                      {v ?? '—'}
+                    </td>
+                  );
                 })}
               </tr>
             ))}
