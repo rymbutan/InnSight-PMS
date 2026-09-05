@@ -495,6 +495,12 @@ export default function Folios() {
                   <th>Code</th>
                   <th>Description</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
+                  {/* Tax was invisible here while every charge carried zero of
+                      it. Now that charges attract VAT and service charge, a
+                      cashier posting 1,000.00 watched Balance move 1,220.00
+                      with nothing on screen accounting for the 220.00. The
+                      ledger has to add up on its face. */}
+                  <th style={{ textAlign: 'right' }}>Tax</th>
                   {siblings.length > 0 && <th />}
                 </tr>
               </thead>
@@ -508,6 +514,17 @@ export default function Folios() {
                     <td>{t.chargeCode || '—'}</td>
                     <td>{t.description}</td>
                     <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                    {/* taxAmountCents arrives as a decimal STRING (BigInt has no
+                        JSON form); formatPeso takes either. Compared as a
+                        string rather than parsed — there is no arithmetic to do
+                        here, and money must never touch a float. A row with no
+                        tax shows a dash rather than 0.00, so a genuinely
+                        untaxed line reads as untaxed at a glance. */}
+                    <td style={{ textAlign: 'right' }}>
+                      {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
+                        ? '—'
+                        : formatPeso(t.taxAmountCents)}
+                    </td>
                     {siblings.length > 0 && (
                       <td style={{ textAlign: 'right' }}>
                         {/* Payments stay where they were taken, and a transfer cannot
