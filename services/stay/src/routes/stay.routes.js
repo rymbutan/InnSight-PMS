@@ -2,6 +2,9 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const Redis = require('ioredis');
 const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
+const { makeServiceCaller } = require('../lib/serviceCall');
+const { qrPngBuffer } = require('../lib/qr');
+const { publicUrl } = require('../lib/publicUrl');
 const { makeInventoryClient } = require('../lib/inventoryClient');
 const { localDayBounds, parseLocalDay } = require('../lib/date');
 
@@ -11,6 +14,21 @@ const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK']; // front-desk operations
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+const FOLIO_URL = process.env.FOLIO_URL || 'http://folio-service:3007';
+const RESERVATION_URL = process.env.RESERVATION_URL || 'http://reservation-service:3011';
+// Narrow on purpose: this caller only ever reads whether a stay's folios are clear.
+const folioCall = makeServiceCaller({
+  name: 'stay',
+  roles: ['FRONT_DESK'],
+  permissions: ['folio.read'],
+});
+// Reads a reservation's confirmation number for the registration card's QR code.
+const reservationCall = makeServiceCaller({
+  name: 'stay',
+  roles: ['FRONT_DESK'],
+  permissions: ['reservation.read'],
+});
 // Without an 'error' listener, ioredis throws on a connection blip and takes
 // the whole process down — which for this service means the capacity gate
 // disappears. Other files in this repo already do this; these did not.
@@ -221,6 +239,29 @@ router.post('/check-out/:stayId', requireRole(...STAFF), async (req, res) => {
         .status(409)
         .json({ error: `Only an in-house stay can be checked out (current: ${existing.status}).` });
     }
+
+    // EVERY folio on the stay must be clear, not just the first one. Bill splitting
+    // means a stay can carry several folios, and releasing the room while one is
+    // unpaid strands that balance with no guest left to bill it to.
+    //
+    // A folio service that is down or slow must NOT silently let an unpaid guest
+    // walk: this fails closed and asks the desk to retry, which is the safe
+    // direction for money.
+    try {
+      const { unsettled } = await folioCall.call(
+        `${FOLIO_URL}/api/folios/outstanding?stayId=${encodeURIComponent(existing.id)}`
+      );
+      if (unsettled && unsettled.length) {
+        return res.status(409).json({
+          error: `Cannot check out: ${unsettled.length} folio(s) still carry a balance.`,
+          folios: unsettled.map((f) => f.folioNumber),
+        });
+      }
+    } catch (err) {
+      console.error('[Stay] Folio balance check failed:', err.message);
+      return res.status(503).json({ error: 'Could not confirm the guest has settled. Try again.' });
+    }
+
     const checkOutAt = new Date();
     const stay = await prisma.stay.update({
       where: { id: req.params.stayId },
@@ -503,6 +544,59 @@ router.get('/stays/:id/registration-card', requireRole(...ROLE_GROUPS.DESK), asy
     row('Actual Check-In:', stay.actualCheckInAt?.toISOString().slice(0, 16).replace('T', ' '));
     row('Key Cards Issued:', stay.keyCardsIssued);
     row('Deposit (cents):', stay.depositAmount);
+
+    // The guest's digital copy. Encodes the guest portal, which already exists at
+    // /portal/:confirmationNumber, so scanning gives them their booking without an
+    // account or an app.
+    //
+    // Drawn at a fixed position rather than in the text flow: doc.image() does not
+    // advance the cursor predictably, and the acknowledgement paragraph below has
+    // to keep its place on the page. Absolute x/y is the only way this stays put as
+    // the row list above grows or shrinks.
+    // The portal keys strictly on the confirmation number, which a Stay does not
+    // carry — only reservationId. Resolve it, and if that fails, print NO code:
+    // a QR that leads to "Not found" is worse than a card without one.
+    let confirmationNumber = null;
+    if (stay.reservationId) {
+      try {
+        const r = await reservationCall.call(
+          `${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`
+        );
+        confirmationNumber = r?.confirmationNumber || null;
+      } catch (err) {
+        console.error('[Stay] Could not resolve confirmation number for QR:', err.message);
+      }
+    }
+
+    // doc.text() with explicit x/width leaves BOTH the cursor and the wrap width
+    // where it put them, so everything after the QR caption inherited the code's
+    // 108pt column — the acknowledgement paragraph rendered as a narrow strip down
+    // the right margin. Remember where the detail rows ended and restore it.
+    const yAfterRows = doc.y;
+    try {
+      if (!confirmationNumber) throw new Error('no confirmation number to link to');
+      const portalLink = publicUrl(`/portal/${encodeURIComponent(confirmationNumber)}`);
+      doc.image(await qrPngBuffer(portalLink), 420, 96, { width: 108 });
+      doc.fontSize(7.5).fillColor('#666').text('Scan for your digital copy', 420, 208, {
+        width: 108,
+        align: 'center',
+      });
+      if (!publicUrl.isScannableByPhone) {
+        // Says so on the paper rather than letting a student blame their phone.
+        doc.fontSize(6.5).text('(demo link — reachable on this machine only)', 420, 220, {
+          width: 108,
+          align: 'center',
+        });
+      }
+      doc.fillColor('black').fontSize(10);
+    } catch (qrErr) {
+      // A registration card without a QR is still a valid registration card. Never
+      // fail the guest's document over the convenience feature on it.
+      console.error('[Stay] QR render failed, card issued without one:', qrErr.message);
+    }
+
+    // Back to the left margin, below the rows, at full width.
+    doc.fontSize(10).fillColor('black').text('', 48, Math.max(yAfterRows, doc.y), { width: 500 });
     doc.moveDown();
 
     doc

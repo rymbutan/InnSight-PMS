@@ -9,9 +9,69 @@ const net = require('node:net');
 const SMTP_HOST = process.env.SMTP_HOST || 'mailhog';
 const SMTP_PORT = Number(process.env.SMTP_PORT || 1025);
 const FROM_ADDR = process.env.NOTIFY_FROM || 'no-reply@innsight.local';
-const PORTAL_URL = (process.env.PORTAL_URL || 'http://localhost:5180').replace(/\/$/, '');
+// Guest-facing links come from the shared publicUrl helper so there is one answer
+// to "what address can the guest actually reach?" rather than a per-module guess.
+// The old default here was port 5180 — the gateway's second published port — which
+// worked but disagreed with everything else in the stack.
+const { publicUrl } = require('./publicUrl');
 
-function send({ to, subject, body, from = FROM_ADDR }) {
+// SMTP dot-stuffing. A line that is exactly "." terminates a DATA block, so any
+// body line starting with one must be doubled or the message is truncated there
+// and the remainder is fed to the server as commands. Applies to attachment
+// base64 too — unlikely to start with a dot, but not worth reasoning about.
+function dotStuff(text) {
+  return text.replace(/(^|\r\n)\./g, '$1..');
+}
+
+// Base64 wrapped to 76 columns. RFC 5321 caps a line at 1000 octets including
+// CRLF, so a multi-hundred-kilobyte PDF emitted as one line is mangled or rejected
+// by any server stricter than Mailhog.
+function wrapBase64(buf) {
+  return (buf.toString('base64').match(/.{1,76}/g) || []).join('\r\n');
+}
+
+/**
+ * The RFC 5322 message — headers plus body — ready to go inside a DATA block.
+ * The caller appends the terminating "\r\n.\r\n".
+ *
+ * Split out of send() so the message format can be unit-tested without a socket,
+ * and so attachments could be added at all: the original inlined a fixed
+ * `Content-Type: text/plain` header, which is why the system could email a guest
+ * about a booking but could not send them the receipt PDF.
+ *
+ * @param {object} [attachment] { filename, contentType, content: Buffer }
+ */
+function buildMessage({ to, subject, body, from = FROM_ADDR, attachment }) {
+  const headers = [`From: ${from}`, `To: ${to}`, `Subject: ${subject}`, 'MIME-Version: 1.0'];
+
+  if (!attachment) {
+    return `${headers.join('\r\n')}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${dotStuff(body)}`;
+  }
+
+  // Boundary must not appear in either part. A random suffix is enough here and
+  // avoids scanning the payload for a collision.
+  const boundary = `innsight-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+  const parts = [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    dotStuff(body),
+    `--${boundary}`,
+    `Content-Type: ${attachment.contentType || 'application/octet-stream'}`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${attachment.filename}"`,
+    '',
+    dotStuff(wrapBase64(attachment.content)),
+    `--${boundary}--`,
+    '',
+  ];
+
+  return `${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}`;
+}
+
+function send({ to, subject, body, from = FROM_ADDR, attachment }) {
   return new Promise((resolve, reject) => {
     const sock = net.createConnection({ host: SMTP_HOST, port: SMTP_PORT });
     let buffer = '';
@@ -20,7 +80,7 @@ function send({ to, subject, body, from = FROM_ADDR }) {
       `MAIL FROM:<${from}>\r\n`,
       `RCPT TO:<${to}>\r\n`,
       `DATA\r\n`,
-      `From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${body}\r\n.\r\n`,
+      `${buildMessage({ to, subject, body, from, attachment })}\r\n.\r\n`,
       `QUIT\r\n`,
     ];
 
@@ -68,7 +128,7 @@ const TEMPLATES = {
       `  Check-in:     ${new Date(r.checkIn).toDateString()}`,
       `  Check-out:    ${new Date(r.checkOut).toDateString()}`,
       ``,
-      `View or change your booking: ${PORTAL_URL}/portal/${r.confirmationNumber}`,
+      `View or change your booking: ${publicUrl(`/portal/${r.confirmationNumber}`)}`,
       ``,
       `See you soon,`,
       `The InnSight Team`,
@@ -105,4 +165,4 @@ const TEMPLATES = {
   }),
 };
 
-module.exports = { send, TEMPLATES };
+module.exports = { send, buildMessage, TEMPLATES };

@@ -6359,3 +6359,132 @@ html[data-theme='dark'] .hk-tooltip {
   font-family: inherit;
   line-height: 1.45;
 }
+
+/* ==========================================================================
+   Simulated wallet payment (/pay/:token)
+   ==========================================================================
+   Opened by scanning a QR code, so it is designed for a phone held in one hand:
+   one number, one button, nothing else competing for the thumb. It sits outside
+   the app shell and is seen by people who are not logged in, so it defines its
+   own ground rather than inheriting the dashboard's. */
+.pay-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.pay-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0 0 28px;
+  overflow: hidden;
+  text-align: center;
+  box-shadow: 0 20px 50px -20px rgba(2, 6, 23, 0.45);
+}
+/* Deliberately loud. A training system that looks exactly like a real wallet app
+   teaches students to trust a screen that looks like this. */
+.pay-sim-banner {
+  background: var(--warn-soft, #fde68a);
+  color: #7c5000;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 8px 12px;
+}
+.pay-hotel {
+  font-size: 17px;
+  margin: 22px 0 20px;
+  color: var(--text);
+}
+.pay-amount-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.pay-amount {
+  font-size: 38px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+}
+.pay-method {
+  font-size: 13px;
+  margin-top: 2px;
+  /* No text-transform: the labels are written correctly in the component, and
+     capitalize would turn "QR wallet" into "Qr Wallet". */
+}
+.pay-confirm {
+  margin: 26px auto 0;
+  display: block;
+  width: calc(100% - 48px);
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+.pay-error {
+  margin: 18px 24px 0;
+  color: var(--danger);
+  font-size: 14px;
+}
+.pay-done {
+  padding: 8px 24px 0;
+}
+.pay-tick {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 30px;
+  line-height: 56px;
+  font-weight: 700;
+}
+.pay-done p {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+/* QR charge panel on the Folios screen — the code beside what it is for, so the
+   cashier can read the amount off the same block they are showing the guest. */
+.qr-charge {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft, var(--bg));
+}
+.qr-charge img {
+  border-radius: 6px;
+  background: #fff; /* a QR must stay dark-on-light in either theme to scan */
+  padding: 6px;
+  flex-shrink: 0;
+}
+.qr-charge-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.qr-charge-amount {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.qr-charge-link {
+  font-size: 12px;
+  font-family: ui-monospace, Menlo, monospace;
+  overflow-wrap: anywhere;
+}

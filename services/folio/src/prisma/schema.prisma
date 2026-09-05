@@ -112,3 +112,30 @@ enum PaymentStatus {
   REFUNDED
   VOIDED
 }
+
+// A pending simulated payment, addressed by a QR code.
+//
+// A row rather than a signed token on purpose: an instructor can SHOW students the
+// pending intent, and single-use enforcement comes free from a status column that
+// is flipped inside the same transaction as the payment.
+model PaymentIntent {
+  id          String              @id @default(uuid())
+  token       String              @unique
+  folioId     String
+  amountCents BigInt
+  method      String              @default("QR_WALLET")
+  status      PaymentIntentStatus @default(PENDING)
+  expiresAt   DateTime
+  confirmedAt DateTime?
+  createdAt   DateTime            @default(now())
+  createdBy   String?
+
+  @@index([folioId, status])
+}
+
+enum PaymentIntentStatus {
+  PENDING
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+}

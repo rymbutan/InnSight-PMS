@@ -90,13 +90,21 @@ export default function Audit() {
                 <div className="value">{formatPeso(current.roomRevenueCents ?? 0)}</div>
               </div>
               <div className="metric">
+                <div className="label">Facility revenue</div>
+                <div className="value">{formatPeso(current.facilityRevenueCents ?? 0)}</div>
+              </div>
+              <div className="metric">
                 <div className="label">Other revenue</div>
                 <div className="value">{formatPeso(current.otherRevenueCents ?? 0)}</div>
               </div>
               <div className="metric">
                 <div className="label">Total revenue</div>
                 <div className="value">
-                  {formatPeso(Number(current.roomRevenueCents ?? 0) + Number(current.otherRevenueCents ?? 0))}
+                  {formatPeso(
+                    Number(current.roomRevenueCents ?? 0) +
+                      Number(current.facilityRevenueCents ?? 0) +
+                      Number(current.otherRevenueCents ?? 0)
+                  )}
                 </div>
               </div>
             </div>
@@ -141,15 +149,16 @@ export default function Audit() {
             <thead>
               <tr>
                 <th>Date</th>
-                <th className="t-c">Status</th>
-                <th className="t-c">Arrivals</th>
-                <th className="t-c">Departures</th>
-                <th className="t-c">Occupancy</th>
-                <th className="t-n">ADR</th>
-                <th className="t-n">RevPAR</th>
-                <th className="t-n">Room revenue</th>
-                <th className="t-n">Other revenue</th>
-                <th className="t-n">Total revenue</th>
+                <th>Status</th>
+                <th>Arrivals</th>
+                <th>Departures</th>
+                <th>Occupancy</th>
+                <th>ADR</th>
+                <th>RevPAR</th>
+                <th>Room revenue</th>
+                <th>Facility revenue</th>
+                <th>Other revenue</th>
+                <th>Total revenue</th>
               </tr>
             </thead>
             <tbody>
@@ -159,15 +168,20 @@ export default function Audit() {
                   <td className="t-c">
                     <span className={`badge ${d.status.toLowerCase()}`}>{d.status}</span>
                   </td>
-                  <td className="t-c">{d.arrivals ?? 0}</td>
-                  <td className="t-c">{d.departures ?? 0}</td>
-                  <td className="t-c">{(d.occupancyPct ?? 0).toFixed(1)}%</td>
-                  <td className="t-n">{formatPeso(d.adr ?? 0)}</td>
-                  <td className="t-n">{formatPeso(d.revPar ?? 0)}</td>
-                  <td className="t-n">{formatPeso(d.roomRevenueCents)}</td>
-                  <td className="t-n">{formatPeso(d.otherRevenueCents ?? 0)}</td>
-                  <td className="t-n">
-                    {formatPeso(Number(d.roomRevenueCents ?? 0) + Number(d.otherRevenueCents ?? 0))}
+                  <td>{d.arrivals ?? 0}</td>
+                  <td>{d.departures ?? 0}</td>
+                  <td>{(d.occupancyPct ?? 0).toFixed(1)}%</td>
+                  <td>{formatPeso(d.adr ?? 0)}</td>
+                  <td>{formatPeso(d.revPar ?? 0)}</td>
+                  <td>{formatPeso(d.roomRevenueCents)}</td>
+                  <td>{formatPeso(d.facilityRevenueCents ?? 0)}</td>
+                  <td>{formatPeso(d.otherRevenueCents ?? 0)}</td>
+                  <td>
+                    {formatPeso(
+                      Number(d.roomRevenueCents ?? 0) +
+                        Number(d.facilityRevenueCents ?? 0) +
+                        Number(d.otherRevenueCents ?? 0)
+                    )}
                   </td>
                 </tr>
               ))}
