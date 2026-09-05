@@ -6,7 +6,8 @@ const { makeServiceCaller } = require('../lib/serviceCall');
 const { qrPngBuffer } = require('../lib/qr');
 const { publicUrl } = require('../lib/publicUrl');
 const { makeInventoryClient } = require('../lib/inventoryClient');
-const { localDayBounds, parseLocalDay } = require('../lib/date');
+const { localDayBounds, parseLocalDay, utcDayStart, utcDayKey } = require('../lib/date');
+const { arrivalsWindow } = require('../lib/arrivalsWindow');
 
 const AUDIT_ROLES = ['ADMIN', 'MANAGER', 'AUDITOR'];
 const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK']; // front-desk operations
@@ -107,18 +108,160 @@ function dayBounds(dateStr) {
   return localDayBounds(dateStr ? parseLocalDay(dateStr) : new Date());
 }
 
-// GET /api/arrivals?date=
+// GET /api/arrivals?range=today|week|month
+//
+// WHY THIS READS RESERVATIONS AND NOT Stay ROWS
+// ---------------------------------------------
+// This route used to query Stay rows with status PRE_ARRIVAL. Those rows exist
+// only because subscribers/redis.subscriber.js received a reservation:confirmed
+// message. A reservation confirmed while this service was down, or seeded
+// directly, never got a Stay row and was PERMANENTLY invisible to the front
+// desk — there is no reconciliation anywhere. Guests were missing off the
+// arrivals sheet and nothing reported it.
+//
+// So the RESERVATION is now the source of truth for "who is expected", and the
+// local Stay row is the source of truth for "have they arrived".
+//
+// The Stay join is load-bearing, not belt-and-braces: Reservation.status is
+// flipped to CHECKED_IN by ANOTHER Redis subscriber
+// (services/reservation/src/subscribers/redis.subscriber.js), so it is exactly
+// as lossy as the projection this route stopped reading. POST /api/check-in
+// writes the Stay row synchronously, which is why excluding on the stay's status
+// is what actually keeps an in-house guest off the arrivals list.
 router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) => {
   try {
-    const { start, end } = dayBounds(req.query.date);
-    const arrivals = await prisma.stay.findMany({
-      where: {
-        status: 'PRE_ARRIVAL',
-        expectedCheckIn: { gte: start, lt: end },
-      },
-      orderBy: { expectedCheckIn: 'asc' },
-    });
-    res.json(arrivals);
+    // `?date=` is the NIGHT AUDIT's and the reports service's form: exactly one
+    // business day, no overdue rows. Dropping it would make the audit's
+    // movements_snapshot record a wrong arrival count for every day it closes.
+    // It wins over `range` when both are sent.
+    const dateParam = req.query.date;
+    const window = dateParam
+      ? (() => {
+          const day = utcDayKey(utcDayStart(dateParam));
+          const next = utcDayKey(new Date(utcDayStart(dateParam).getTime() + 86400000));
+          // overdueBefore === checkInFrom means nothing can be overdue: the audit
+          // asks a bounded historical question, and rows from other days would
+          // inflate its count.
+          return { range: null, checkInFrom: day, checkInTo: next, overdueBefore: day };
+        })()
+      : arrivalsWindow(req.query.range);
+
+    // Two queries, not one: the in-range window, plus everything still expected
+    // from BEFORE today. An overdue arrival is a problem the desk must see in
+    // every view — today's strict window is exactly why a guest who was due
+    // yesterday and never turned up used to vanish off the screen instead of
+    // demanding action.
+    const qs = (params) => new URLSearchParams({ status: 'CONFIRMED', ...params }).toString();
+
+    let reservations = [];
+    let degraded = false;
+    try {
+      const [inRange, overdue] = await Promise.all([
+        reservationCall.call(
+          `${RESERVATION_URL}/api/reservations?${qs({
+            checkInFrom: window.checkInFrom,
+            checkInTo: window.checkInTo,
+          })}`
+        ),
+        // Skipped entirely for ?date= (range === null there): overdueBefore
+        // equals checkInFrom in that branch by construction, so an overdue
+        // query would just re-fetch rows the caller must not see. It is NOT
+        // skipped for range= windows -- arrivalsWindow() also sets
+        // overdueBefore equal to checkInFrom there (an overdue arrival must
+        // show in every range), so that equality can't be used to tell the
+        // two cases apart; only the branch itself can.
+        window.range !== null
+          ? reservationCall.call(
+              `${RESERVATION_URL}/api/reservations?${qs({ checkInTo: window.overdueBefore })}`
+            )
+          : Promise.resolve([]),
+      ]);
+      // A reservation cannot be both in-range and overdue, but de-duplicate by
+      // id anyway rather than trusting two independent queries to stay disjoint.
+      const byId = new Map();
+      for (const r of [...(overdue || []), ...(inRange || [])]) byId.set(r.id, r);
+      reservations = [...byId.values()];
+    } catch (err) {
+      // Fall back to the local projection rather than failing the page. A desk
+      // with a partial list can still work; a desk with an error cannot. But the
+      // response says so — a short list that silently claims to be complete is
+      // the exact failure this route was rewritten to remove.
+      console.error('[Stay] Arrivals: reservation service unreachable, degrading:', err.message);
+      degraded = true;
+    }
+
+    if (degraded) {
+      const local = await prisma.stay.findMany({
+        where: { status: 'PRE_ARRIVAL' },
+        orderBy: { expectedCheckIn: 'asc' },
+      });
+      return res.json({
+        range: window.range,
+        degraded: true,
+        arrivals: local.map((s) => ({
+          id: s.id,
+          stayId: s.id,
+          reservationId: s.reservationId,
+          guestId: s.guestId,
+          guestName: s.guestName,
+          confirmationNumber: null,
+          expectedCheckIn: s.expectedCheckIn,
+          expectedCheckOut: s.expectedCheckOut,
+          nights: null,
+          adults: null,
+          children: null,
+          roomTypeCode: null,
+          status: 'PRE_ARRIVAL',
+          overdue: false,
+        })),
+      });
+    }
+
+    // One query for every stay involved, rather than one per reservation.
+    const stays = reservations.length
+      ? await prisma.stay.findMany({
+          where: { reservationId: { in: reservations.map((r) => r.id) } },
+        })
+      : [];
+    const stayByReservation = new Map(stays.map((s) => [s.reservationId, s]));
+
+    // Statuses that mean the guest is no longer expected at the door.
+    const ARRIVED = new Set(['IN_HOUSE', 'DEPARTED', 'NO_SHOW']);
+    const overdueBefore = new Date(`${window.overdueBefore}T00:00:00.000Z`);
+
+    const arrivals = reservations
+      .map((r) => {
+        const stay = stayByReservation.get(r.id) || null;
+        if (stay && ARRIVED.has(stay.status)) return null;
+        const checkIn = r.checkIn ? new Date(r.checkIn) : null;
+        return {
+          // The React key. A reservation with no stay row has no stay id, so
+          // fall back to a prefixed reservation id rather than emitting null.
+          id: stay?.id || `res:${r.id}`,
+          stayId: stay?.id || null,
+          reservationId: r.id,
+          guestId: r.guestId,
+          guestName: r.guestName,
+          confirmationNumber: r.confirmationNumber || null,
+          expectedCheckIn: r.checkIn,
+          expectedCheckOut: r.checkOut,
+          nights: r.nights ?? null,
+          adults: r.adults ?? null,
+          children: r.children ?? null,
+          roomTypeCode: r.roomTypeCode || null,
+          status: stay?.status || 'PRE_ARRIVAL',
+          overdue: Boolean(checkIn && checkIn < overdueBefore),
+        };
+      })
+      .filter(Boolean)
+      // Overdue first — those are the rows that need someone to do something.
+      // Then by expected arrival, soonest first.
+      .sort((a, b) => {
+        if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+        return new Date(a.expectedCheckIn || 0) - new Date(b.expectedCheckIn || 0);
+      });
+
+    res.json({ range: window.range, degraded: false, arrivals });
   } catch (err) {
     console.error('[Stay] Arrivals error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
