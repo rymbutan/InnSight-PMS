@@ -110,9 +110,6 @@ ALTER TABLE "FacilitySlotLock"
 -- since edited in the UI.
 INSERT INTO "Facility" ("id","code","name","category","pricingModel","priceCents","unit","capacity","reservable","active","description","parentCode","createdAt","updatedAt")
 VALUES
-  (gen_random_uuid()::text,'HALL_A','Function Hall — Section A','EVENT_HALL','PER_HOUR',60000,'per hour',40,true,true,'One third of the Grand Function Hall, divided by air wall.','HALL',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-  (gen_random_uuid()::text,'HALL_B','Function Hall — Section B','EVENT_HALL','PER_HOUR',60000,'per hour',40,true,true,'One third of the Grand Function Hall, divided by air wall.','HALL',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-  (gen_random_uuid()::text,'HALL_C','Function Hall — Section C','EVENT_HALL','PER_HOUR',60000,'per hour',40,true,true,'One third of the Grand Function Hall, divided by air wall.','HALL',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
   (gen_random_uuid()::text,'LDY_POLO','Laundry — Polo','LAUNDRY','PER_USE',20000,'per piece',NULL,false,true,'Wash, dry and press, per polo shirt.',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
   (gen_random_uuid()::text,'LDY_LONGSLEEVE','Laundry — Long-sleeve shirt','LAUNDRY','PER_USE',15000,'per piece',NULL,false,true,'Wash, dry and press, per long-sleeve shirt.',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
   (gen_random_uuid()::text,'LDY_TROUSERS','Laundry — Trousers','LAUNDRY','PER_USE',18000,'per piece',NULL,false,true,'Wash, dry and press, per pair of trousers.',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
@@ -121,6 +118,34 @@ VALUES
   (gen_random_uuid()::text,'VALET','Valet Parking','PARKING','PER_DAY',15000,'per day',NULL,false,true,'Attended valet parking, per calendar day.',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
   (gen_random_uuid()::text,'MASSAGE_60','Massage — 60 minutes','SPA','PER_USE',120000,'per session',NULL,false,true,'Sixty-minute full-body massage with a licensed therapist.',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
   (gen_random_uuid()::text,'MASSAGE_90','Massage — 90 minutes','SPA','PER_USE',170000,'per session',NULL,false,true,'Ninety-minute full-body massage with a licensed therapist.',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+ON CONFLICT ("code") DO NOTHING;
+
+-- The hall's three sections, which reference 'HALL' via parentCode.
+--
+-- WHY THE `WHERE EXISTS` GUARD
+-- ---------------------------
+-- 'HALL' is created by src/seed.js, and the seed runs AFTER migrations
+-- (db-init.sh deliberately does not seed). On a from-scratch database the
+-- Facility table is therefore still empty here, so inserting these rows
+-- unconditionally violated Facility_parentCode_fkey and aborted the whole
+-- migration — Prisma then recorded it as failed and every subsequent boot
+-- died on P3009, crash-looping inventory-service on any fresh install.
+--
+-- The guard makes each path do the right thing: on a fresh database this is a
+-- no-op and seed.js creates all four rows in parent-then-children order, while
+-- on a database seeded before this change 'HALL' already exists and the
+-- sections are added here as the upgrade intends.
+INSERT INTO "Facility" ("id","code","name","category","pricingModel","priceCents","unit","capacity","reservable","active","description","parentCode","createdAt","updatedAt")
+SELECT gen_random_uuid()::text, v.code, v.name,
+       'EVENT_HALL','PER_HOUR',60000,'per hour',40,true,true,
+       'One third of the Grand Function Hall, divided by air wall.','HALL',
+       CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+FROM (VALUES
+  ('HALL_A','Function Hall — Section A'),
+  ('HALL_B','Function Hall — Section B'),
+  ('HALL_C','Function Hall — Section C')
+) AS v(code,name)
+WHERE EXISTS (SELECT 1 FROM "Facility" WHERE "code" = 'HALL')
 ON CONFLICT ("code") DO NOTHING;
 
 -- Retire the per-load laundry SKU in favour of the per-piece catalogue above.

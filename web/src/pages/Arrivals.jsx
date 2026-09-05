@@ -3,15 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import Modal from '../components/Modal';
 import { useToast, errMsg } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
 import Avatar from '../components/Avatar';
 import EmptyState from '../components/EmptyState';
+import StatusPill from '../components/StatusPill';
 
 export default function Arrivals() {
   const navigate = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
   const [arrivals, setArrivals] = useState([]);
   const [inHouse, setInHouse] = useState([]);
   const [departures, setDepartures] = useState([]);
@@ -80,7 +83,13 @@ export default function Arrivals() {
   }
 
   async function checkOut(stayId, guestName) {
-    if (!confirm(`Check out ${guestName}?`)) return;
+    const ok = await confirm({
+      title: 'Check out guest',
+      message: `Check out ${guestName}?`,
+      confirmLabel: 'Check out',
+      danger: false,
+    });
+    if (!ok) return;
     try {
       await api.post(`/api/check-out/${stayId}`);
       toast.success('Checked out.');
@@ -136,7 +145,7 @@ export default function Arrivals() {
 
   return (
     <div>
-      <h2>Arrivals · In-House Guests · Departures</h2>
+      <h2>Arrivals &amp; Departures</h2>
 
       <div className="panel">
         <h3>Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}</h3>
@@ -150,23 +159,23 @@ export default function Arrivals() {
           <table>
             <thead>
               <tr>
-                <th></th>
+                <th className="t-c"></th>
                 <th>Confirmation</th>
                 <th>Guest</th>
                 <th>Expected in</th>
-                <th></th>
+                <th className="t-c">Actions</th>
               </tr>
             </thead>
             <tbody>
               {arrivals.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ width: 40 }}>
+                  <td className="t-c" style={{ width: 40 }}>
                     <Avatar name={s.guestName || 'Guest'} size={30} />
                   </td>
                   <td>{s.reservationId?.slice(0, 8) || '—'}</td>
                   <td>{s.guestName || <span className="muted">—</span>}</td>
                   <td>{s.expectedCheckIn ? new Date(s.expectedCheckIn).toLocaleString() : '—'}</td>
-                  <td>
+                  <td className="t-actions">
                     <button
                       className="small"
                       onClick={() => setCheckInModal({ open: true, stay: s, roomId: '' })}
@@ -193,25 +202,44 @@ export default function Arrivals() {
           <table>
             <thead>
               <tr>
-                <th></th>
+                <th className="t-c"></th>
                 <th>Stay</th>
                 <th>Guest</th>
-                <th>Room</th>
+                <th className="t-c">Guest status</th>
+                <th className="t-c">Room</th>
+                <th>Checked in</th>
                 <th>Expected out</th>
-                <th></th>
+                <th className="t-c">Actions</th>
               </tr>
             </thead>
             <tbody>
               {inHouse.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ width: 40 }}>
+                  <td className="t-c" style={{ width: 40 }}>
                     <Avatar name={s.guestName || 'Guest'} size={30} />
                   </td>
                   <td>{s.id.slice(0, 8)}</td>
                   <td>{s.guestName || <span className="muted">—</span>}</td>
-                  <td>{s.assignedRoomId}</td>
-                  <td>{s.expectedCheckOut ? new Date(s.expectedCheckOut).toLocaleDateString() : '—'}</td>
+                  <td className="t-c">
+                    <StatusPill status={s.status} />
+                  </td>
+                  <td className="t-c">{s.assignedRoomId}</td>
+                  {/* Date AND time: on a check-in list "when did they arrive"
+                      is an operational question about today, not a calendar one. */}
                   <td>
+                    {s.actualCheckInAt ? (
+                      new Date(s.actualCheckInAt).toLocaleString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>{s.expectedCheckOut ? new Date(s.expectedCheckOut).toLocaleDateString() : '—'}</td>
+                  <td className="t-actions">
                     <button className="small" onClick={() => checkOut(s.id, s.guestName)}>
                       Check-out
                     </button>{' '}
@@ -249,21 +277,21 @@ export default function Arrivals() {
           <table>
             <thead>
               <tr>
-                <th></th>
+                <th className="t-c"></th>
                 <th>Stay</th>
                 <th>Guest</th>
-                <th>Room</th>
+                <th className="t-c">Room</th>
               </tr>
             </thead>
             <tbody>
               {departures.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ width: 40 }}>
+                  <td className="t-c" style={{ width: 40 }}>
                     <Avatar name={s.guestName || 'Guest'} size={30} />
                   </td>
                   <td>{s.id.slice(0, 8)}</td>
                   <td>{s.guestName || <span className="muted">—</span>}</td>
-                  <td>{s.assignedRoomId}</td>
+                  <td className="t-c">{s.assignedRoomId}</td>
                 </tr>
               ))}
             </tbody>

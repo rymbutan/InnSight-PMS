@@ -3,8 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso, pesosToCents } from '../lib/money';
 import Icon from '../components/Icon';
+import Autocomplete from '../components/Autocomplete';
 
 const STEPS = ['Availability', 'Details', 'Guests', 'Add-ons', 'Payment'];
 const SOURCES = ['DIRECT', 'WALK_IN', 'BOOKING_COM', 'AIRBNB', 'EXPEDIA', 'AGODA', 'OTA'];
@@ -22,6 +24,7 @@ export default function NewReservation() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
   const { hasRole } = useAuth();
   const isAdmin = hasRole('ADMIN', 'MANAGER');
   const [step, setStep] = useState(1);
@@ -40,7 +43,6 @@ export default function NewReservation() {
 
   // Step 3
   const [guestQ, setGuestQ] = useState('');
-  const [guestResults, setGuestResults] = useState([]);
   const [pickedGuest, setPickedGuest] = useState(null);
   const [newGuest, setNewGuest] = useState({
     firstName: '',
@@ -190,23 +192,6 @@ export default function NewReservation() {
     if (new Date(checkOut) <= new Date(checkIn)) return toast.error('Check-out must be after check-in.');
     setSearched(true);
   }
-
-  // Step 3 — guest search
-  useEffect(() => {
-    if (!guestQ.trim()) {
-      setGuestResults([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      try {
-        const { data } = await api.get(`/api/guests/search?q=${encodeURIComponent(guestQ)}`);
-        setGuestResults(data || []);
-      } catch {
-        /* */
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [guestQ]);
 
   function next() {
     if (step === 1 && picks.length === 0) return toast.error('Select at least one accommodation.');
@@ -377,10 +362,10 @@ export default function NewReservation() {
                   <thead>
                     <tr>
                       <th>Room Type</th>
-                      <th>Max Occupancy</th>
-                      <th>Available</th>
-                      <th>Rate / night</th>
-                      <th></th>
+                      <th className="t-c">Max Occupancy</th>
+                      <th className="t-c">Available</th>
+                      <th className="t-n">Rate / night</th>
+                      <th className="t-c"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -389,10 +374,10 @@ export default function NewReservation() {
                         <td>
                           <strong>{t.name}</strong> <span className="muted">({t.code})</span>
                         </td>
-                        <td>{t.maxOccupancy}</td>
-                        <td>{t.totalInventory}</td>
-                        <td>{formatPeso(t.baseRate)}</td>
-                        <td>
+                        <td className="t-c">{t.maxOccupancy}</td>
+                        <td className="t-c">{t.totalInventory}</td>
+                        <td className="t-n">{formatPeso(t.baseRate)}</td>
+                        <td className="t-actions">
                           <button className="btn-primary small" onClick={() => addPick(t)}>
                             <Icon name="plus" size={12} style={{ marginRight: 4 }} />
                             Add
@@ -435,24 +420,24 @@ export default function NewReservation() {
             <thead>
               <tr>
                 <th>Room Type</th>
-                <th>Quantity</th>
-                <th>Room</th>
-                <th>Nights</th>
-                <th>Total</th>
+                <th className="t-c">Quantity</th>
+                <th className="t-c">Room</th>
+                <th className="t-c">Nights</th>
+                <th className="t-n">Total</th>
               </tr>
             </thead>
             <tbody>
               {picks.map((p, i) => (
                 <tr key={i}>
                   <td>{p.name}</td>
-                  <td>{p.qty}</td>
-                  <td>
+                  <td className="t-c">{p.qty}</td>
+                  <td className="t-c">
                     {p.assignedRoomId
                       ? `Room ${allRooms.find((r) => r.id === p.assignedRoomId)?.number}`
                       : 'Auto'}
                   </td>
-                  <td>{nights}</td>
-                  <td>{formatPeso(p.ratePerNightCents * p.qty * nights)}</td>
+                  <td className="t-c">{nights}</td>
+                  <td className="t-n">{formatPeso(p.ratePerNightCents * p.qty * nights)}</td>
                 </tr>
               ))}
             </tbody>
@@ -489,33 +474,17 @@ export default function NewReservation() {
           ) : (
             <>
               <label>Search existing guest</label>
-              <input
+              {/* Was an always-open results box pushed below the field; now the
+                  shared overlay panel, so it matches every other search in the
+                  app and supports arrow-key selection. */}
+              <Autocomplete
                 value={guestQ}
-                onChange={(e) => setGuestQ(e.target.value)}
+                onChange={setGuestQ}
                 placeholder="Search by name, email, phone…"
+                endpoint={(term) => `/api/guests/search?q=${encodeURIComponent(term)}`}
+                mapItem={(g) => ({ id: g.id, title: g.displayName, meta: g.email || '' })}
+                onPick={(g) => setPickedGuest(g)}
               />
-              {guestResults.length > 0 && (
-                <div
-                  style={{
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    marginTop: 6,
-                    maxHeight: 180,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {guestResults.map((g) => (
-                    <button
-                      key={g.id}
-                      className="actions-item"
-                      style={{ width: '100%', textAlign: 'left' }}
-                      onClick={() => setPickedGuest(g)}
-                    >
-                      <strong>{g.displayName}</strong> <span className="muted">— {g.email || '—'}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
               <h3 style={{ marginTop: 22 }}>Or create new guest</h3>
               <div className="row">
                 <div>
@@ -735,8 +704,15 @@ export default function NewReservation() {
         <div style={{ display: 'flex', gap: 10 }}>
           <button
             className="btn-ghost"
-            onClick={() => {
-              if (dirty && !confirm('You have unsaved changes. Discard?')) return;
+            onClick={async () => {
+              if (dirty) {
+                const ok = await confirm({
+                  title: 'Discard changes',
+                  message: 'You have unsaved changes. Discard them?',
+                  confirmLabel: 'Discard',
+                });
+                if (!ok) return;
+              }
               navigate('/reservations');
             }}
           >

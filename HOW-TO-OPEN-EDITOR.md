@@ -54,9 +54,22 @@ bash scripts/db-seed.sh
 Then:
 
 6. Browser → **http://localhost:8080** → sign in as `admin`
-   - Current password: `InnSightPhase4Verify!2026`
-   - On a brand-new database it's the `ADMIN_INITIAL_PASSWORD` that step 3 printed,
-     and you'll be **forced to change it** on first sign-in.
+
+   | | |
+   |---|---|
+   | Username | `admin` |
+   | Password | `***REMOVED-SEE-UNLOCK-ADMIN-SCRIPT***` |
+
+   - **On THIS machine's current database**, that is the working password and
+     there is no forced password change — it has already been done.
+   - **On a brand-new database** (a fresh clone, or after
+     `docker compose down -v`) it is instead the `ADMIN_INITIAL_PASSWORD` that
+     step 3 printed, and you are **forced to change it** on first sign-in. Read
+     it back with `grep ADMIN_INITIAL_PASSWORD .env`.
+   - If neither works, somebody changed it. Do NOT keep guessing: five wrong
+     attempts **permanently lock the account**, with no timer. Issue a fresh one
+     with `bash scripts/unlock-admin.sh admin --reset-password`, which unlocks
+     the account and prints a new password.
    - It must be `admin`, or another account holding **ADMIN**. The editor is not
      visible to any other role.
 7. **☰** → **Room Layouts (3D)** → **"✏️ Edit layout"** on a tier
