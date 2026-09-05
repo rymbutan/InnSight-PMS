@@ -178,6 +178,83 @@ const LIVE_CHANNELS = [
   'facility:booked',
 ];
 
+// ── Who may receive which channel ───────────────────────────────────────────
+// Every authenticated client used to receive all of LIVE_CHANNELS regardless of
+// role, because sseStream captured the principal and then threw it away. A
+// housekeeper's browser was therefore fed guest names, folio charges, payment
+// amounts and night-audit results — data no housekeeping screen renders and the
+// HOUSEKEEPING role holds no permission for. The stream was the one authorised
+// surface in the system with no authorisation on its payload.
+//
+// The lists below are derived from the role→permission map in
+// services/auth/src/seed.js, NOT invented here, so a role receives exactly the
+// domains it can already read through the REST API:
+//
+//   room.read      → every role, so room status is universal
+//   reservation.*  → ADMIN, MANAGER, FRONT_DESK
+//   folio.read     → ADMIN, MANAGER, FRONT_DESK, AUDITOR  (front desk POSTS the
+//                    charges and takes the payments — folio.charge/folio.payment)
+//   maintenance.*  → ADMIN, MANAGER, MAINTENANCE
+//   audit.run      → ADMIN, MANAGER, AUDITOR
+//
+// Deriving it this way matters for more than tidiness: these channels also drive
+// each page's live refresh, so a role that can open a screen must keep receiving
+// the events that screen renders or it silently goes stale.
+const CHANNEL_AUDIENCE = {
+  rooms: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'MAINTENANCE', 'AUDITOR'],
+  reservations: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
+  stays: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
+  folio: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR'],
+  guests: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
+  maintenance: ['ADMIN', 'MANAGER', 'MAINTENANCE'],
+  audit: ['ADMIN', 'MANAGER', 'AUDITOR'],
+  facilities: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
+};
+
+const CHANNEL_DOMAIN = {
+  'room:status_changed': 'rooms',
+  'room:maintenance': 'rooms',
+  'reservation:created': 'reservations',
+  'reservation:updated': 'reservations',
+  'reservation:confirmed': 'reservations',
+  'reservation:cancelled': 'reservations',
+  'room:checkin': 'stays',
+  'room:checkout': 'stays',
+  'stay:no_show': 'stays',
+  'stay:extended': 'stays',
+  'stay:room_changed': 'stays',
+  'stay:early_departure': 'stays',
+  'folio:opened': 'folio',
+  'folio:charge_posted': 'folio',
+  'folio:payment_received': 'folio',
+  'folio:settled': 'folio',
+  'folio:closed': 'folio',
+  'folio:deposit_received': 'folio',
+  'folio:refund_posted': 'folio',
+  'folio:early_departure_adjusted': 'folio',
+  'guest:profile_created': 'guests',
+  'guest:profile_updated': 'guests',
+  'guest:flagged': 'guests',
+  'maintenance:work_order_created': 'maintenance',
+  'maintenance:room_out_of_service': 'maintenance',
+  'maintenance:room_restored': 'maintenance',
+  'audit:day_opened': 'audit',
+  'audit:day_closed': 'audit',
+  'facility:changed': 'facilities',
+  'facility:booked': 'facilities',
+};
+
+// An unmapped channel is CLOSED, not open. Adding a channel to LIVE_CHANNELS and
+// forgetting CHANNEL_DOMAIN should make it reach nobody rather than everybody —
+// a missing entry must not be the permissive case.
+function mayReceive(roles, channel) {
+  const domain = CHANNEL_DOMAIN[channel];
+  if (!domain) return false;
+  const audience = CHANNEL_AUDIENCE[domain];
+  if (!audience) return false;
+  return roles.some((r) => audience.includes(r));
+}
+
 // ── ONE Redis subscriber for the whole process ───────────────────────────────
 //
 // This used to be `new Redis(...)` INSIDE the request handler, so every browser
@@ -247,8 +324,11 @@ liveSub.on('message', (channel, message) => {
   // Serialise the frame once, not once per client.
   const frame = `event: ${channel}\ndata: ${message}\n\n`;
   for (const client of sseClients) {
-    // Each stream declares the channels it wants; /api/rooms/events only takes
-    // room status, so a folio charge is not written to the housekeeping map.
+    // `client.channels` is the intersection of what the stream offers and what
+    // the connecting role is allowed (see mayReceive), so this single check is
+    // both the routing rule — /api/rooms/events only takes room status, so a
+    // folio charge is never written to the housekeeping map — and the
+    // authorisation boundary on the payload.
     if (client.channels.has(channel)) sendTo(client, frame);
   }
 });
@@ -339,7 +419,15 @@ function sseStream(channels) {
     // out from under a legitimately idle stream.
     req.socket?.setTimeout?.(0);
 
-    const client = { res, channels: wanted };
+    // Intersect what the stream offers with what this role may receive, ONCE at
+    // connect time, so the hot fanout path stays a Set lookup. A client that asks
+    // for channels it is not entitled to simply never sees them — the request is
+    // not rejected, because a front desk agent opening a page that subscribes to
+    // a broad group is normal, not an attack.
+    const roles = Array.isArray(principal.roles) ? principal.roles : [];
+    const allowed = new Set([...wanted].filter((c) => mayReceive(roles, c)));
+
+    const client = { res, channels: allowed };
     sseClients.add(client);
 
     // Listen on BOTH req and res, and on 'error' as well as 'close'. The old code

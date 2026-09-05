@@ -2,6 +2,7 @@ const express = require('express');
 const authRoutes = require('./routes/auth.routes');
 const usersRoutes = require('./routes/users.routes');
 const layoutsRoutes = require('./routes/layouts.routes');
+const assetsRoutes = require('./routes/assets.routes');
 const trainingRoutes = require('./routes/training.routes');
 const { verifyToken, requireRole } = require('./middleware/auth');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
@@ -151,6 +152,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api', trainingRoutes);
 app.use('/api', usersRoutes);
 app.use('/api', layoutsRoutes);
+app.use('/api', assetsRoutes);
 
 const subscriber = startSubscriber();
 

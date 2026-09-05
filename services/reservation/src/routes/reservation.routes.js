@@ -724,4 +724,74 @@ router.put('/settings/addon-fee-percent', requireRole(...ROLE_GROUPS.MGMT), asyn
   }
 });
 
+// ── System accent theme ─────────────────────────────────────────────────────
+// Stored in AppSetting, the same key/value table the add-on surcharge uses, so
+// this needs no migration. It lives HERE rather than in browser storage because
+// it is a property of the hotel, not of a device: an admin sets the accent once
+// and every terminal picks it up. Per-browser storage would have meant the front
+// desk and the back office disagreeing about what the system looks like.
+const THEME_KEY = 'accent_theme';
+
+// The shipped palette, returned when nobody has customised anything. Kept in
+// sync with :root in web/src/styles.css.
+const THEME_DEFAULT = { primary: '#0a6b3d', secondary: '#22c55e', hover: '#075130' };
+
+// Exactly `#rrggbb`. These values are interpolated into a CSS custom property in
+// the browser, so anything that is not a plain hex colour is refused here rather
+// than being allowed to carry arbitrary CSS into every page.
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+// GET /api/settings/theme — every role, because every page renders the accent.
+router.get('/settings/theme', async (_req, res) => {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: THEME_KEY } });
+    if (!row?.value) return res.json(THEME_DEFAULT);
+    const saved = JSON.parse(row.value);
+    // Fall back per FIELD, so a partially written row still yields a usable
+    // palette instead of an undefined colour.
+    res.json({
+      primary: HEX_RE.test(saved.primary) ? saved.primary : THEME_DEFAULT.primary,
+      secondary: HEX_RE.test(saved.secondary) ? saved.secondary : THEME_DEFAULT.secondary,
+      hover: HEX_RE.test(saved.hover) ? saved.hover : THEME_DEFAULT.hover,
+    });
+  } catch (err) {
+    console.error('[Reservation] Get theme error:', err.message);
+    // A corrupt row must not take the whole UI's colours down with it.
+    res.json(THEME_DEFAULT);
+  }
+});
+
+// PUT /api/settings/theme — admin/manager only; this changes what everyone sees.
+router.put('/settings/theme', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const { primary, secondary, hover } = req.body || {};
+    for (const [name, v] of Object.entries({ primary, secondary, hover })) {
+      if (!HEX_RE.test(String(v || ''))) {
+        return res.status(400).json({ error: `${name} must be a hex colour like #0a6b3d.` });
+      }
+    }
+    const value = JSON.stringify({ primary, secondary, hover });
+    await prisma.appSetting.upsert({
+      where: { key: THEME_KEY },
+      create: { key: THEME_KEY, value },
+      update: { value },
+    });
+    res.json({ primary, secondary, hover });
+  } catch (err) {
+    console.error('[Reservation] Set theme error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/theme/reset — back to the shipped palette.
+router.put('/settings/theme/reset', requireRole(...ROLE_GROUPS.MGMT), async (_req, res) => {
+  try {
+    await prisma.appSetting.deleteMany({ where: { key: THEME_KEY } });
+    res.json(THEME_DEFAULT);
+  } catch (err) {
+    console.error('[Reservation] Reset theme error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 module.exports = router;

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 
 import { RoomShell, Player } from '../RoomFreeRoam';
 import { getRoomPlan } from '../roomLayouts';
+import { stageColor } from '../stageColor';
 import Assessment from '../Assessment';
 import api from '../../api';
 import { makeCaseFile } from './caseFile';
@@ -338,7 +339,7 @@ export default function InspectionShift({
             dpr={[1, 2]}
             camera={{ fov: 58, near: 0.1, far: 120 }}
             gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-            onCreated={({ gl }) => gl.setClearColor('#d8cdb8')}
+            onCreated={({ gl }) => gl.setClearColor(stageColor())}
           >
             <RoomShell layout={shellLayout} />
             {[...prims, ...stockProps].map((p, i) => (

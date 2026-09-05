@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
@@ -19,7 +20,32 @@ const ScenarioEditor = lazy(() => import('../sim/inspection/ScenarioEditor'));
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function InspectionScenarios() {
-  const [open, setOpen] = useState(false);
+  // Whether the editor is open lives in the URL, not in component state. As
+  // state it was lost on every reload — and this editor does not autosave, so
+  // refreshing while authoring dropped you back to the launcher with the
+  // scenario gone. In the URL it survives refresh and Back.
+  //
+  // `?scenario=<id>` carries WHICH saved scenario was open, so a reload comes
+  // back to the same one rather than to an empty editor. Unsaved changes are
+  // still lost — a refresh discards the page — but a saved scenario reopens
+  // where you left it.
+  const [params, setParams] = useSearchParams();
+  const open = params.get('editor') === 'scenarios';
+  const openScenarioId = params.get('scenario') || null;
+  // `replace` on close so opening and shutting the editor does not stack a
+  // history entry per visit; Back still leaves the page.
+  const setOpen = (next, scenarioId) => {
+    const p = new URLSearchParams(params);
+    if (next) {
+      p.set('editor', 'scenarios');
+      if (scenarioId) p.set('scenario', scenarioId);
+      else p.delete('scenario');
+    } else {
+      p.delete('editor');
+      p.delete('scenario');
+    }
+    setParams(p, { replace: !next });
+  };
   const [scenarios, setScenarios] = useState([]);
   const toast = useToast();
 
@@ -70,9 +96,9 @@ export default function InspectionScenarios() {
               <tr>
                 <th>Tier</th>
                 <th>Scenario</th>
-                <th>Faults</th>
-                <th>Decoys</th>
-                <th>Shown to students</th>
+                <th className="t-c">Faults</th>
+                <th className="t-c">Decoys</th>
+                <th className="t-c">Shown to students</th>
               </tr>
             </thead>
             <tbody>
@@ -87,8 +113,8 @@ export default function InspectionScenarios() {
                       <tr key={s.id} style={{ opacity: s.active ? 1 : 0.55 }}>
                         <td>{t}</td>
                         <td>{s.name}</td>
-                        <td>{faults}</td>
-                        <td>
+                        <td className="t-c">{faults}</td>
+                        <td className="t-c">
                           {decoys === 0 ? (
                             <span title="With no clean decoys, every clickable item is a fault — students learn to flag whatever highlights.">
                               0 ⚠️
@@ -97,7 +123,7 @@ export default function InspectionScenarios() {
                             decoys
                           )}
                         </td>
-                        <td>{s.active ? 'Yes' : 'No'}</td>
+                        <td className="t-c">{s.active ? 'Yes' : 'No'}</td>
                       </tr>
                     );
                   })
@@ -117,7 +143,14 @@ export default function InspectionScenarios() {
             </div>
           }
         >
-          <ScenarioEditor onClose={() => setOpen(false)} />
+          <ScenarioEditor
+            onClose={() => setOpen(false)}
+            // Which scenario to reopen after a reload, and the callback that
+            // keeps the URL in step as you open or create one inside the
+            // editor — so the address bar always describes what is on screen.
+            initialScenarioId={openScenarioId}
+            onScenarioChange={(id) => setOpen(true, id)}
+          />
         </Suspense>
       )}
     </div>

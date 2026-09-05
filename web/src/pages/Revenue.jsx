@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
+import SectionSwitcher, { REPORTS_SECTIONS } from '../components/SectionSwitcher';
 import { formatPeso } from '../lib/money';
 import { SparkLine, BarChart, DonutChart } from '../components/Chart';
 import EmptyState from '../components/EmptyState';
@@ -117,7 +118,10 @@ export default function Revenue() {
   return (
     <div>
       <div className="page-head">
-        <h1>Revenue management</h1>
+        <div className="page-head-title">
+          <h1>Revenue</h1>
+          <SectionSwitcher options={REPORTS_SECTIONS} />
+        </div>
         <span className="muted">Trailing 30 days · forecast next 14</span>
       </div>
 
