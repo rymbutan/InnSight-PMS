@@ -31,7 +31,17 @@ const { auditRouter, listRoutes } = require('../lib/authzAudit');
 const router = require('./reservation.routes');
 
 // Deliberately open routes, as 'METHOD /path'.
-const OPEN = [];
+const OPEN = [
+  // The system accent colour: three hex values that every page renders, so every
+  // authenticated role needs them. Still behind verifyToken — this is "any signed-in
+  // account", not "the public". Listed here rather than guarded with ALL_STAFF so a
+  // role added later is not silently served the wrong palette, and because the
+  // values are already visible to anyone who can load the page.
+  //
+  // The WRITE side is guarded: PUT /settings/theme is MGMT only, because changing it
+  // changes what everyone sees.
+  'GET /settings/theme',
+];
 
 test('every route has an authorization guard', () => {
   const problems = auditRouter(router, { open: OPEN });
