@@ -808,6 +808,8 @@ npx prisma migrate dev --schema=src/prisma/schema.prisma --name add_tax_breakdow
 
 Expected: a migration containing `ALTER TABLE "FolioTransaction" ADD COLUMN "taxBreakdown" JSONB`. Confirm it is **nullable with no default** — a `NOT NULL` column here would fail against existing rows.
 
+**Then make it idempotent:** edit the generated SQL to `ADD COLUMN IF NOT EXISTS`. `scripts/db-init.sh:60-75` re-executes every non-baseline `migration.sql` on **every container start** — its own header states "Every one of those files is written to be idempotent (CREATE ... IF NOT EXISTS / DROP CONSTRAINT IF EXISTS)". A plain `ADD COLUMN` throws on the second start and crash-loops the folio service. This was confirmed empirically in Task 2, whose `CREATE TABLE` needed the same treatment.
+
 - [ ] **Step 2: Write the failing test for the compatibility invariant**
 
 Append to `services/folio/src/lib/folioSummary.test.js`. **Do not modify any existing test in this file** — they are the regression gate proving totals did not move:
