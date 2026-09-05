@@ -273,3 +273,135 @@ test('missing guest, stay and reservation degrade to dashes, never throw', () =>
   // Staff need folios to print during an audit even when an upstream is down.
   assert.equal(m.totals.balanceCents, 3092700n);
 });
+
+// ── Voided taxed charges ────────────────────────────────────────────────────
+//
+// THE BUG THESE GUARD
+// -------------------
+// POST /folios/:id/void-transaction writes a reversal row carrying
+// -taxAmountCents. It used to write NO taxBreakdown, so taxByComponent applied
+// its pre-migration fallback and put that whole NEGATIVE figure on VAT. A
+// voided 10,000.00 room night printed:
+//
+//   Add : Room Tax | VAT -1,000.00 | Service Charge +1,000.00 | subtotal 0.00
+//
+// No money moved — and that is precisely the trap. The reconciliation invariant
+// above sums SUBTOTALS, and this error nets to zero within one subtotal, so it
+// is structurally invisible there. These assert at COMPONENT level.
+
+const VOIDED_ROOM_NIGHT = [
+  {
+    id: 'tx1', type: 'CHARGE', chargeCode: 'RM', description: 'Room charge',
+    amountCents: 1000000n, taxAmountCents: 220000n,
+    taxBreakdown: [
+      { key: 'vat', label: 'VAT', rate: 12, amountCents: '120000' },
+      { key: 'serviceCharge', label: 'Service Charge', rate: 10, amountCents: '100000' },
+      { key: 'localTax', label: 'Local Tax', rate: 0, amountCents: '0' },
+      { key: 'realPropertyTax', label: 'Real Property Tax', rate: 0, amountCents: '0' },
+    ],
+  },
+];
+
+function componentAmounts(section) {
+  return Object.fromEntries(section.rows.map((r) => [r.label, r.amountCents]));
+}
+
+test('a void with NO breakdown on the reversal row zeroes every component, not just the subtotal', () => {
+  // The shape ALREADY IN THE DATABASE for every folio voided before the fix.
+  const m = build([
+    ...VOIDED_ROOM_NIGHT,
+    {
+      id: 'tx2', type: 'CHARGE', chargeCode: 'RM', description: 'REVERSAL of Room charge',
+      amountCents: -1000000n, taxAmountCents: -220000n,
+      taxBreakdown: null, reversalOf: 'tx1',
+    },
+  ]);
+  const roomTax = componentAmounts(sectionNamed(m, 'Add : Room Tax'));
+  assert.equal(roomTax.VAT, 0n, 'a voided night must not print negative VAT');
+  assert.equal(roomTax['Service Charge'], 0n, 'nor a service charge the guest never incurred');
+  assert.equal(roomTax['Local Tax'], 0n);
+  assert.equal(roomTax['Real Property Tax'], 0n);
+  assert.equal(sectionNamed(m, 'Add : Room Tax').subtotalCents, 0n);
+  // The subtotal was ALWAYS 0n here, even with the bug. That is the point.
+  assert.equal(m.totals.balanceCents, 0n, 'and no money may move either way');
+});
+
+test('a void whose reversal carries the negated breakdown zeroes every component too', () => {
+  // The shape the void route writes from now on.
+  const m = build([
+    ...VOIDED_ROOM_NIGHT,
+    {
+      id: 'tx2', type: 'CHARGE', chargeCode: 'RM', description: 'REVERSAL of Room charge',
+      amountCents: -1000000n, taxAmountCents: -220000n, reversalOf: 'tx1',
+      taxBreakdown: [
+        { key: 'vat', label: 'VAT', rate: 12, amountCents: '-120000' },
+        { key: 'serviceCharge', label: 'Service Charge', rate: 10, amountCents: '-100000' },
+        { key: 'localTax', label: 'Local Tax', rate: 0, amountCents: '0' },
+        { key: 'realPropertyTax', label: 'Real Property Tax', rate: 0, amountCents: '0' },
+      ],
+    },
+  ]);
+  const roomTax = componentAmounts(sectionNamed(m, 'Add : Room Tax'));
+  assert.equal(roomTax.VAT, 0n);
+  assert.equal(roomTax['Service Charge'], 0n);
+  assert.equal(m.totals.balanceCents, 0n);
+});
+
+test('voiding ONE of two taxed nights leaves the other night intact, component by component', () => {
+  const m = build([
+    ...VOIDED_ROOM_NIGHT,
+    {
+      id: 'tx2', type: 'CHARGE', chargeCode: 'RM', description: 'Room charge',
+      amountCents: 1000000n, taxAmountCents: 220000n,
+      taxBreakdown: VOIDED_ROOM_NIGHT[0].taxBreakdown,
+    },
+    {
+      id: 'tx3', type: 'CHARGE', chargeCode: 'RM', description: 'REVERSAL of Room charge',
+      amountCents: -1000000n, taxAmountCents: -220000n, taxBreakdown: null, reversalOf: 'tx1',
+    },
+  ]);
+  const roomTax = componentAmounts(sectionNamed(m, 'Add : Room Tax'));
+  assert.equal(roomTax.VAT, 120000n, 'exactly one night of VAT survives');
+  assert.equal(roomTax['Service Charge'], 100000n);
+  assert.equal(sectionNamed(m, 'Add : Room Tax').subtotalCents, 220000n);
+});
+
+test('a pre-migration pair — neither row has a breakdown — still nets to zero on VAT', () => {
+  // Both fall back to VAT, which is the RIGHT answer here: nothing is known
+  // about the split, and +x then -x on the same line is honest.
+  const m = build([
+    { id: 'tx1', type: 'CHARGE', chargeCode: 'RM', description: 'Room charge',
+      amountCents: 1000000n, taxAmountCents: 220000n, taxBreakdown: null },
+    { id: 'tx2', type: 'CHARGE', chargeCode: 'RM', description: 'REVERSAL of Room charge',
+      amountCents: -1000000n, taxAmountCents: -220000n, taxBreakdown: null, reversalOf: 'tx1' },
+  ]);
+  const roomTax = componentAmounts(sectionNamed(m, 'Add : Room Tax'));
+  assert.equal(roomTax.VAT, 0n);
+  assert.equal(roomTax['Service Charge'], 0n);
+});
+
+test('a voided EXTRA charge is mirrored in Tax On Charges, not Room Tax', () => {
+  const m = build([
+    { id: 'tx1', type: 'CHARGE', chargeCode: 'MB', description: 'Minibar',
+      amountCents: 50000n, taxAmountCents: 11000n,
+      taxBreakdown: [
+        { key: 'vat', label: 'VAT', rate: 12, amountCents: '6000' },
+        { key: 'serviceCharge', label: 'Service Charge', rate: 10, amountCents: '5000' },
+      ] },
+    { id: 'tx2', type: 'CHARGE', chargeCode: 'MB', description: 'REVERSAL of Minibar',
+      amountCents: -50000n, taxAmountCents: -11000n, taxBreakdown: null, reversalOf: 'tx1' },
+  ]);
+  const chargeTax = componentAmounts(sectionNamed(m, 'Add : Tax On Charges'));
+  assert.equal(chargeTax.VAT, 0n);
+  assert.equal(chargeTax['Service Charge'], 0n);
+  assert.equal(componentAmounts(sectionNamed(m, 'Add : Room Tax')).VAT, 0n, 'and nothing leaks into room tax');
+});
+
+test('an orphaned reversal — its original is not in the set — still falls back rather than throwing', () => {
+  const m = build([
+    { id: 'tx2', type: 'CHARGE', chargeCode: 'RM', description: 'REVERSAL of Room charge',
+      amountCents: -1000000n, taxAmountCents: -220000n, taxBreakdown: null, reversalOf: 'missing' },
+  ]);
+  assert.equal(componentAmounts(sectionNamed(m, 'Add : Room Tax')).VAT, -220000n);
+  assert.equal(sectionNamed(m, 'Add : Room Tax').subtotalCents, -220000n, 'the subtotal still equals the row tax');
+});
