@@ -28,7 +28,24 @@ const SPAN_DAYS = { today: 1, week: 7, month: 30 };
 // and lands the result one day early.
 const DAY_MS = 86400000;
 
+// WHY OVERDUE DEPENDS ON WHETHER `range` WAS ASKED FOR
+// ---------------------------------------------------
+// Overdue rows have no lower bound: they are every CONFIRMED reservation from
+// the beginning of time that never checked in, and they accumulate until a
+// night audit sweeps them into NO_SHOW. That is exactly right for the Arrivals
+// PAGE, which is a worklist and always sends a range. It is wrong for a caller
+// that just asks "/api/arrivals" and puts the count in a tile labelled
+// "Arrivals" next to a strictly-today "Departures" — that tile read 14 on a
+// day with no arrivals at all.
+//
+// So the two questions are separated by whether the caller named a range. No
+// range means "today", literally: the same answer that endpoint gave before
+// overdue rows existed. An explicitly requested range still carries them.
+//
+// An empty `?range=` is not a range: it names nothing, so it is treated as no
+// range at all rather than as a request for the worklist.
 function arrivalsWindow(range, now = new Date()) {
+  const asked = typeof range === 'string' && range.trim() !== '';
   const normalised = String(range || '').toLowerCase();
   const resolved = ARRIVAL_RANGES.includes(normalised) ? normalised : 'today';
 
@@ -42,6 +59,7 @@ function arrivalsWindow(range, now = new Date()) {
     // Anything due before today and still not arrived. Same for every range —
     // an overdue arrival is a problem the desk must see whichever view is open.
     overdueBefore: utcDayKey(start),
+    includeOverdue: asked,
   };
 }
 
