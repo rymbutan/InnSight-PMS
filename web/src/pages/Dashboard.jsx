@@ -58,7 +58,10 @@ export default function Dashboard() {
         api.get('/api/rooms').catch(() => ({ data: [] })),
       ]);
       setData({
-        arrivals: a.data,
+        // /api/arrivals returns { range, degraded, arrivals }. Tolerate a bare
+        // array too, so a stale cached bundle cannot blank the dashboard during
+        // a rolling deploy.
+        arrivals: Array.isArray(a.data) ? a.data : a.data?.arrivals || [],
         inHouse: h.data,
         departures: d.data,
         rooms: rs.data,
