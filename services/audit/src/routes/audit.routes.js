@@ -2,6 +2,7 @@ const express = require('express');
 const Redis = require('ioredis');
 const { requireRole, signServiceToken } = require('../middleware/auth');
 const { localDay, startOfLocalDay, parseLocalDay, endOfLocalDay } = require('../lib/date');
+const { movementCount } = require('../lib/movements');
 
 const AUDIT_ROLES = ['ADMIN', 'MANAGER', 'AUDITOR'];
 
@@ -257,7 +258,7 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
         callService(`${STAY_URL}/api/arrivals?date=${dateStr}`).catch(() => []),
         callService(`${STAY_URL}/api/departures?date=${dateStr}`).catch(() => []),
       ]);
-      return { arrivals: arrivals.length, departures: departures.length };
+      return { arrivals: movementCount(arrivals), departures: movementCount(departures) };
     });
 
     // Step 6 — folio revenue aggregation
