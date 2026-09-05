@@ -13,6 +13,7 @@ const { newToken, intentState, INTENT_TTL_MS } = require('../lib/paymentIntent')
 const { publicUrl } = require('../lib/publicUrl');
 const { validateTaxRates, validateHotel } = require('../lib/settings');
 const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
+const { computeTax } = require('../lib/policies');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -655,18 +656,47 @@ router.post('/folios/:id/charges', requireRole(...CASHIER), async (req, res) => 
     } = req.body;
     if ((await requireOpenFolio(req.params.id, res)) === null) return;
     const baseCents = parseCents(amountCents);
-    const taxCents = taxAmountCents === undefined ? 0n : parseCents(taxAmountCents);
-    if (baseCents === null || taxCents === null) {
-      return res.status(400).json({ error: 'amountCents and taxAmountCents must be non-negative integers.' });
+    if (baseCents === null) {
+      return res.status(400).json({ error: 'amountCents must be a non-negative integer.' });
     }
     const qty = Number.isInteger(quantity) && quantity > 0 ? quantity : 1;
     const totalCents = baseCents * BigInt(qty);
-    const totalTaxCents = taxCents * BigInt(qty);
+
     let resolvedDesc = description;
-    if (!resolvedDesc && chargeCode) {
-      const cc = await prisma.chargeCode.findUnique({ where: { code: chargeCode } });
-      resolvedDesc = cc?.name || chargeCode;
+    const cc = chargeCode ? await prisma.chargeCode.findUnique({ where: { code: chargeCode } }) : null;
+    if (!resolvedDesc && chargeCode) resolvedDesc = cc?.name || chargeCode;
+
+    // Tax. An explicit taxAmountCents from the caller still WINS — the night
+    // audit and other programmatic posters supply their own figure and must keep
+    // their current behaviour. Only when none is supplied is tax computed here.
+    //
+    // This is the wiring that was missing: computeTax existed but nothing called
+    // it, and the UI never sent taxAmountCents, so every folio in the system
+    // carried zero tax.
+    let totalTaxCents;
+    let taxBreakdown = null;
+    if (taxAmountCents !== undefined) {
+      const taxCents = parseCents(taxAmountCents);
+      if (taxCents === null) {
+        return res.status(400).json({ error: 'taxAmountCents must be a non-negative integer.' });
+      }
+      totalTaxCents = taxCents * BigInt(qty);
+    } else if (cc && cc.taxable === false) {
+      // A charge code explicitly marked non-taxable attracts no tax.
+      totalTaxCents = 0n;
+    } else {
+      const rates = await getTaxRates();
+      const { taxCents, breakdown } = computeTax({
+        subtotalCents: totalCents,
+        category: cc?.category || 'OTHER',
+        rates,
+      });
+      totalTaxCents = taxCents;
+      // BigInt cannot be JSON-serialised, so amounts are stored as decimal
+      // strings. Readers parse them back with BigInt().
+      taxBreakdown = breakdown.map((b) => ({ ...b, amountCents: b.amountCents.toString() }));
     }
+
     const tx = await prisma.folioTransaction.create({
       data: {
         folioId: req.params.id,
@@ -675,6 +705,7 @@ router.post('/folios/:id/charges', requireRole(...CASHIER), async (req, res) => 
         description: resolvedDesc || 'Charge',
         amountCents: totalCents,
         taxAmountCents: totalTaxCents,
+        taxBreakdown,
         quantity: qty,
         note,
         postedBy: postedBy || req.user?.username || req.user?.sub,
