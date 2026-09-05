@@ -6500,6 +6500,10 @@ html[data-theme='dark'] .hk-tooltip {
   border-radius: 8px;
   overflow: hidden;
   background: var(--surface);
+  /* .panel-head has no justify-content; every other right-aligned panel-head
+     control (see .filter-bar, used by Rooms.jsx and Amenities.jsx) pushes
+     itself right the same way. */
+  margin-left: auto;
 }
 .seg-btn {
   appearance: none;

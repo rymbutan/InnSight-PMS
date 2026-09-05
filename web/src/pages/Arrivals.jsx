@@ -5,6 +5,7 @@ import Modal from '../components/Modal';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents } from '../lib/money';
+import { localDay } from '../lib/date';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
 import Avatar from '../components/Avatar';
@@ -81,7 +82,10 @@ export default function Arrivals() {
     // and common thing to do, so this asks rather than refuses — but it names
     // the date, so it is a deliberate act rather than a misclick on the wrong row.
     const due = stay.expectedCheckIn ? new Date(stay.expectedCheckIn) : null;
-    const todayKey = new Date().toISOString().slice(0, 10);
+    // localDay(), not toISOString().slice(0,10): the latter converts to UTC
+    // first, so in Asia/Manila (UTC+8) it silently returns yesterday for the
+    // first ~8 hours of every local day. See lib/date.js.
+    const todayKey = localDay(new Date());
     if (due && due.toISOString().slice(0, 10) > todayKey) {
       const ok = await confirm({
         title: 'Early check-in',
