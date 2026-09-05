@@ -892,9 +892,15 @@ router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) =
             checkInTo: window.checkInTo,
           })}`
         ),
-        // Skipped entirely for ?date=, where overdueBefore equals checkInFrom and
-        // an overdue query would just re-fetch rows the caller must not see.
-        window.overdueBefore > window.checkInFrom
+        // Skipped entirely for ?date= (range === null there): overdueBefore
+        // equals checkInFrom on that branch, so an overdue query would just
+        // re-fetch rows the audit must not see.
+        //
+        // Keyed on `range`, NOT on comparing the two dates: arrivalsWindow()
+        // sets overdueBefore === checkInFrom for EVERY range, so a date
+        // comparison is always false and would disable overdue arrivals
+        // everywhere.
+        window.range !== null
           ? reservationCall.call(
               `${RESERVATION_URL}/api/reservations?${qs({ checkInTo: window.overdueBefore })}`
             )
