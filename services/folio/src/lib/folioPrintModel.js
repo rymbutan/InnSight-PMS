@@ -116,19 +116,49 @@ function folioPrintModel({
   }));
 
   const nights = reservation?.nights || 1;
-  const tariffCents = summary.roomChargeCents / BigInt(nights || 1);
+  const tariffCents = summary.roomChargeCents / BigInt(nights);
 
   const guestName = stay?.guestName || reservation?.guestName || DASH;
+
+  // classifyTransactions folds TRANSFER into roomChargeCents / facilityChargeCents
+  // / extraChargeCents exactly like CHARGE (see folioSummary.js) — a transferred
+  // charge keeps its original chargeCode, so it is room- or non-room-tagged like
+  // any other charge. But this document ALSO gives transfer principal its own
+  // "Transferred From/To Folio" sections (the reference invoice has them, and the
+  // panel asked for that layout). If the Room/Extra Charges sections kept using
+  // summary.roomChargeCents / extraChargeCents+facilityChargeCents directly, a
+  // transfer's principal would be printed twice: once folded into its charge
+  // bucket, once again in its own section. So here it is backed OUT of the charge
+  // buckets — each transfer's principal then appears in exactly one place.
+  //
+  // Tax is NOT adjusted this way: taxByComponent below still runs over the full
+  // roomCharges/otherCharges (transfers included), because a transferred charge's
+  // tax rides with it (see transfer.js) and has no section of its own — it must
+  // stay wherever the charge's room/non-room split puts it, or Room Tax + Tax On
+  // Charges would stop summing to the folio's real tax.
+  const roomChargeOnly = roomCharges.filter((t) => t.type === 'CHARGE');
+  const roomTransferCents = roomCharges
+    .filter((t) => t.type === 'TRANSFER')
+    .reduce((a, t) => a + BigInt(t.amountCents), 0n);
+  const roomChargeCentsExclTransfers = summary.roomChargeCents - roomTransferCents;
+
+  const otherTransferCents = otherCharges
+    .filter((t) => t.type === 'TRANSFER')
+    .reduce((a, t) => a + BigInt(t.amountCents), 0n);
+  const extraChargeCentsExclTransfers =
+    summary.extraChargeCents + summary.facilityChargeCents - otherTransferCents;
 
   // The reference shows Room Charges GROSS with a Less Discount line beneath,
   // netting to the subtotal. classifyTransactions already nets a negative room
   // charge into roomChargeCents, so the gross figure is recovered by adding the
-  // discounts back — printing summary.roomChargeCents as "Room Charges" AND the
-  // discounts again would deduct them twice.
-  const roomDiscountCents = roomCharges
+  // discounts back — printing the net figure as "Room Charges" AND the discounts
+  // again would deduct them twice. Discounts are read off CHARGE-type rows only
+  // (roomChargeOnly), never TRANSFER: a transfer-out's negative amount belongs in
+  // "Transferred To Folio", not "Less Discount".
+  const roomDiscountCents = roomChargeOnly
     .filter((t) => BigInt(t.amountCents) < 0n)
     .reduce((a, t) => a - BigInt(t.amountCents), 0n);
-  const roomGrossCents = summary.roomChargeCents + roomDiscountCents;
+  const roomGrossCents = roomChargeCentsExclTransfers + roomDiscountCents;
 
   const sections = [
     {
@@ -137,8 +167,11 @@ function folioPrintModel({
         { label: 'Room Charges', amountCents: roomGrossCents },
         { label: 'Less Discount', amountCents: roomDiscountCents },
       ],
-      // Gross minus discount — identical to what the classifier billed.
-      subtotalCents: summary.roomChargeCents,
+      // Gross minus discount, transfer principal excluded (it is booked in its
+      // own Transferred From/To sections instead). Equal to summary.roomChargeCents
+      // only when no transfer is tagged room; classifyTransactions folds transfer
+      // principal into that figure too, but this section must not repeat it.
+      subtotalCents: roomChargeCentsExclTransfers,
     },
     { title: 'Add : Room Tax', rows: roomTaxRows, subtotalCents: sumRows(roomTaxRows) },
     {
@@ -146,10 +179,10 @@ function folioPrintModel({
       rows: [
         {
           label: 'Extra Charges',
-          amountCents: summary.extraChargeCents + summary.facilityChargeCents,
+          amountCents: extraChargeCentsExclTransfers,
         },
       ],
-      subtotalCents: summary.extraChargeCents + summary.facilityChargeCents,
+      subtotalCents: extraChargeCentsExclTransfers,
     },
     { title: 'Add : Tax On Charges', rows: chargeTaxRows, subtotalCents: sumRows(chargeTaxRows) },
     {
