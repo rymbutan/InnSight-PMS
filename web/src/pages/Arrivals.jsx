@@ -24,18 +24,27 @@ export default function Arrivals() {
   const [checkInModal, setCheckInModal] = useState({ open: false, stay: null, roomId: '' });
   const [earlyModal, setEarlyModal] = useState({ open: false, stayId: '', unusedNights: 1, nightlyRate: '' });
 
+  // Which arrival window the desk is looking at. Server-resolved, so the client
+  // never does date arithmetic on UTC-midnight reservation values.
+  const [range, setRange] = useState('today');
+  const [degraded, setDegraded] = useState(false);
+
   // `live` marks an SSE-triggered reload. Refresh in place rather than showing
   // the skeleton, so the list does not blank on every event from any module.
   async function load({ live = false } = {}) {
     if (!live) setLoading(true);
     try {
       const [a, h, d, r] = await Promise.all([
-        api.get('/api/arrivals'),
+        api.get(`/api/arrivals?range=${encodeURIComponent(range)}`),
         api.get('/api/in-house'),
         api.get('/api/departures'),
         api.get('/api/rooms'),
       ]);
-      setArrivals(a.data);
+      // /api/arrivals returns { range, degraded, arrivals } — it used to return
+      // a bare array. Tolerate both so a stale cached bundle cannot blank the
+      // list during a rolling deploy.
+      setArrivals(Array.isArray(a.data) ? a.data : a.data.arrivals || []);
+      setDegraded(Array.isArray(a.data) ? false : Boolean(a.data.degraded));
       setInHouse(h.data);
       setDepartures(d.data);
       setRooms(r.data);
@@ -47,7 +56,8 @@ export default function Arrivals() {
   }
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range]);
   // Live: keep the front-desk arrivals/in-house/departures lists current.
   // Live scope — today's expected arrivals (reservation state) and who has actually
   // checked in or been marked no-show (stay state).
@@ -67,7 +77,29 @@ export default function Arrivals() {
       toast.error('Select a room.');
       return;
     }
+    // Week and Month show guests who are not due today. Early check-in is a real
+    // and common thing to do, so this asks rather than refuses — but it names
+    // the date, so it is a deliberate act rather than a misclick on the wrong row.
+    const due = stay.expectedCheckIn ? new Date(stay.expectedCheckIn) : null;
+    const todayKey = new Date().toISOString().slice(0, 10);
+    if (due && due.toISOString().slice(0, 10) > todayKey) {
+      const ok = await confirm({
+        title: 'Early check-in',
+        message: `${stay.guestName || 'This guest'} is not due until ${due.toLocaleDateString([], {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })}.`,
+        detail: 'Checking them in now starts the stay today.',
+        confirmLabel: 'Check in anyway',
+      });
+      if (!ok) return;
+    }
     try {
+      // reservationId/guestId/guestName are all a reservation carries, and
+      // POST /api/check-in creates the Stay row when none exists — which is why
+      // a guest with no stay row can be checked in from here with no backend
+      // change at all.
       await api.post('/api/check-in', {
         reservationId: stay.reservationId,
         guestId: stay.guestId,
@@ -148,12 +180,48 @@ export default function Arrivals() {
       <h2>Arrivals &amp; Departures</h2>
 
       <div className="panel">
-        <h3>Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}</h3>
+        <div className="panel-head">
+          <h3>
+            Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}
+          </h3>
+          {/* The range switcher sits in the panel header, top right. */}
+          <div className="seg" role="group" aria-label="Arrival window">
+            {[
+              ['today', 'Today'],
+              ['week', 'Week'],
+              ['month', 'Month'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`seg-btn${range === value ? ' is-active' : ''}`}
+                aria-pressed={range === value}
+                onClick={() => setRange(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* A partial list must say so. Silently showing fewer arrivals than
+            exist is the exact failure this screen was rebuilt to remove. */}
+        {degraded && (
+          <p className="error" style={{ marginTop: 0 }}>
+            Showing locally-known arrivals only — the reservation service is
+            unreachable, so this list may be incomplete.
+          </p>
+        )}
+
         {arrivals.length === 0 && !loading ? (
           <EmptyState
             kind="inbox"
             title="No expected arrivals"
-            hint="Confirmed reservations for today will appear here."
+            hint={
+              range === 'today'
+                ? 'Confirmed reservations arriving today will appear here. Try Week or Month for later arrivals.'
+                : `No confirmed reservations arriving in the next ${range === 'week' ? '7' : '30'} days.`
+            }
           />
         ) : (
           <table>
@@ -163,6 +231,8 @@ export default function Arrivals() {
                 <th>Confirmation</th>
                 <th>Guest</th>
                 <th>Expected in</th>
+                <th className="t-c">Nights</th>
+                <th className="t-c">Pax</th>
                 <th className="t-c">Actions</th>
               </tr>
             </thead>
@@ -172,9 +242,31 @@ export default function Arrivals() {
                   <td className="t-c" style={{ width: 40 }}>
                     <Avatar name={s.guestName || 'Guest'} size={30} />
                   </td>
-                  <td>{s.reservationId?.slice(0, 8) || '—'}</td>
+                  <td>
+                    {s.confirmationNumber || s.reservationId?.slice(0, 8) || '—'}
+                    {s.overdue && (
+                      <>
+                        {' '}
+                        <span className="badge cancelled" title="Due before today and not yet arrived">
+                          Overdue
+                        </span>
+                      </>
+                    )}
+                  </td>
                   <td>{s.guestName || <span className="muted">—</span>}</td>
-                  <td>{s.expectedCheckIn ? new Date(s.expectedCheckIn).toLocaleString() : '—'}</td>
+                  <td>
+                    {s.expectedCheckIn
+                      ? new Date(s.expectedCheckIn).toLocaleDateString([], {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—'}
+                  </td>
+                  <td className="t-c">{s.nights ?? '—'}</td>
+                  <td className="t-c">
+                    {s.adults == null ? '—' : s.adults + (s.children || 0)}
+                  </td>
                   <td className="t-actions">
                     <button
                       className="small"
