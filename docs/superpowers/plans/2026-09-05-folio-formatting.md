@@ -305,7 +305,8 @@ EOF
 **Files:**
 - Modify: `services/folio/src/prisma/schema.prisma`
 - Create: `services/folio/src/prisma/migrations/<timestamp>_add_app_setting/migration.sql` (generated)
-- Create: `services/folio/src/lib/settings.js`
+- Create: `services/folio/src/lib/settings.js` (**pure** — no Prisma)
+- Create: `services/folio/src/lib/settingsStore.js` (Prisma-backed readers/writers)
 - Modify: `services/folio/src/routes/folio.routes.js` (add four routes)
 - Modify: `services/gateway/nginx.conf` (two locations)
 - Test: `services/folio/src/lib/settings.test.js` (create)
@@ -316,8 +317,11 @@ EOF
   - `parseTaxRates(rows)` → a complete rates object, defaults filling any gap.
   - `validateTaxRates(body)` → `{ ok: true, rates }` or `{ ok: false, error }`.
   - `parseHotel(rows)` → `{ name, address, phone, fax, email, url }` with InnSight defaults.
+  - `validateHotel(body)` → `{ ok: true, hotel }` or `{ ok: false, error }`.
+  - From `settingsStore.js`: `getTaxRates()`, `getHotel()`, `saveTaxRates(rates)`, `saveHotel(hotel)`. Tasks 3 and 5 consume these.
   - `GET`/`PUT /api/settings/tax-rates` and `GET`/`PUT /api/settings/hotel`.
-  - `getTaxRates()` / `getHotel()` async helpers reading `prisma.appSetting`. Tasks 3 and 4 consume these.
+
+  **`settings.js` must not require Prisma.** `lib/prisma.js` calls `new PrismaClient()` at module load, so a `settings.js` that required it would drag a database client into what is meant to be a pure unit test — the same hazard `authz.test.js` works around by stubbing `require.cache`. The parsers and validators live in `settings.js` with no I/O; everything that touches `prisma.appSetting` lives in `settingsStore.js`, which the route file imports.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -430,9 +434,11 @@ Create `services/folio/src/lib/settings.js`:
 // everything under that prefix to the reservation service, so these routes are
 // only reachable via the longer-prefix locations added to nginx.conf.
 
-const { DEFAULT_TAX_RATES } = require('./policies');
+// PURE — no Prisma, no I/O. Everything that touches the database lives in
+// settingsStore.js. lib/prisma.js constructs a PrismaClient at module load, so
+// requiring it here would make this file's unit tests need a database.
 
-const prisma = require('./prisma');
+const { DEFAULT_TAX_RATES } = require('./policies');
 
 // Component key → AppSetting key.
 const TAX_RATE_KEYS = {
@@ -516,11 +522,33 @@ function validateHotel(body = {}) {
   return { ok: true, hotel };
 }
 
-// ── Database-backed readers ─────────────────────────────────────────────────
-// Both fall back to defaults on ANY read failure. A folio must still print when
-// the settings table is unreachable; refusing to print a guest's bill because a
-// tax rate could not be read is a worse outcome than printing it at the
-// shipped defaults.
+module.exports = {
+  TAX_RATE_KEYS,
+  HOTEL_KEYS,
+  HOTEL_DEFAULTS,
+  parseTaxRates,
+  validateTaxRates,
+  parseHotel,
+  validateHotel,
+};
+```
+
+Then create `services/folio/src/lib/settingsStore.js` — everything that touches the database:
+
+```js
+// Database-backed settings access. Kept apart from settings.js so the parsers
+// and validators stay unit-testable without a Prisma client.
+//
+// Both readers fall back to defaults on ANY failure. A folio must still print
+// when the settings table is unreachable; refusing to print a guest's bill
+// because a tax rate could not be read is a worse outcome than printing it at
+// the shipped defaults.
+
+const prisma = require('./prisma');
+const { DEFAULT_TAX_RATES } = require('./policies');
+const {
+  TAX_RATE_KEYS, HOTEL_KEYS, HOTEL_DEFAULTS, parseTaxRates, parseHotel,
+} = require('./settings');
 
 async function getTaxRates() {
   try {
@@ -568,19 +596,7 @@ async function saveHotel(hotel) {
   return hotel;
 }
 
-module.exports = {
-  TAX_RATE_KEYS,
-  HOTEL_KEYS,
-  HOTEL_DEFAULTS,
-  parseTaxRates,
-  validateTaxRates,
-  parseHotel,
-  validateHotel,
-  getTaxRates,
-  getHotel,
-  saveTaxRates,
-  saveHotel,
-};
+module.exports = { getTaxRates, getHotel, saveTaxRates, saveHotel };
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -591,7 +607,7 @@ Run:
 cd "/Users/arymsr.vendiola/Documents/InnSight PMS/services/folio" && node --test src/lib/settings.test.js
 ```
 
-Expected: all tests PASS. The `getTaxRates`/`getHotel`/`save*` helpers are not exercised here — they touch Prisma and are covered by manual verification.
+Expected: all tests PASS, and the run must not need a database — that is the point of keeping `settings.js` free of Prisma. The `settingsStore.js` helpers are covered by manual verification.
 
 - [ ] **Step 5: Add the `AppSetting` model and migrate**
 
@@ -623,9 +639,8 @@ Expected: a new directory under `src/prisma/migrations/` containing a `CREATE TA
 In `services/folio/src/routes/folio.routes.js`, add the import beside the other `lib/` requires at the top:
 
 ```js
-const {
-  getTaxRates, getHotel, saveTaxRates, saveHotel, validateTaxRates, validateHotel,
-} = require('../lib/settings');
+const { validateTaxRates, validateHotel } = require('../lib/settings');
+const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
 ```
 
 Then add the routes near the other top-level routes (placement is not load-bearing — none of these paths collide with a `:id` param route):
@@ -732,7 +747,8 @@ Expected: `syntax is ok` / `test is successful`. `nginx.conf` is baked into the 
 ```bash
 cd "/Users/arymsr.vendiola/Documents/InnSight PMS"
 git add services/folio/src/prisma/schema.prisma services/folio/src/prisma/migrations \
-        services/folio/src/lib/settings.js services/folio/src/lib/settings.test.js \
+        services/folio/src/lib/settings.js services/folio/src/lib/settingsStore.js \
+        services/folio/src/lib/settings.test.js \
         services/folio/src/routes/folio.routes.js services/gateway/nginx.conf
 git commit -m "$(cat <<'EOF'
 feat: folio-service settings for tax rates and hotel identity
@@ -1001,10 +1017,13 @@ const { classifyTransactions } = require('./folioSummary');
 const ROOM_CODES = { roomCodes: new Set(['RM']), facilityCodes: new Set(['POOL']) };
 
 function build(transactions, extra = {}) {
-  const summary = classifyTransactions(transactions, ROOM_CODES);
+  // The route tags each charge with whether it is room revenue; the model relies
+  // on that flag rather than re-deriving the classification.
+  const tagged = transactions.map((t) => ({ ...t, __isRoom: ROOM_CODES.roomCodes.has(t.chargeCode) }));
+  const summary = classifyTransactions(tagged, ROOM_CODES);
   return folioPrintModel({
     folio: { folioNumber: '11', currency: 'PHP' },
-    transactions,
+    transactions: tagged,
     summary,
     guest: { nationality: 'Filipino' },
     stay: { actualCheckInAt: '2025-05-21T03:58:19.000Z' },
@@ -1429,21 +1448,7 @@ module.exports = { folioPrintModel, taxByComponent };
 
 The model expects each charge transaction to carry a boolean `__isRoom`, set by the caller that knows the charge-code categories. Task 5 sets it.
 
-- [ ] **Step 4: Set `__isRoom` in the test helper**
-
-The tests above pass raw transactions. Update `build()` in the test file to tag them the way the route will, inserting this immediately before the `const summary = ...` line:
-
-```js
-function build(transactions, extra = {}) {
-  const tagged = transactions.map((t) => ({ ...t, __isRoom: ROOM_CODES.roomCodes.has(t.chargeCode) }));
-  const summary = classifyTransactions(tagged, ROOM_CODES);
-  return folioPrintModel({
-    folio: { folioNumber: '11', currency: 'PHP' },
-    transactions: tagged,
-    // ...the rest is unchanged
-```
-
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 4: Run the tests to verify they pass**
 
 Run:
 
@@ -1453,7 +1458,7 @@ cd "/Users/arymsr.vendiola/Documents/InnSight PMS/services/folio" && node --test
 
 Expected: all tests PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 cd "/Users/arymsr.vendiola/Documents/InnSight PMS"
