@@ -4,6 +4,7 @@ const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/auth');
 const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
+const { folioListRow } = require('../lib/folioList');
 const { folioPrintModel } = require('../lib/folioPrintModel');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
@@ -399,16 +400,66 @@ router.put('/settings/hotel', requireRole(...ROLE_GROUPS.MGMT), async (req, res)
   }
 });
 
-// GET /api/folios?stayId=&guestId=&status=
+// GET /api/folios?q=&status=&stayId=&guestId=
+//
+// `q` matches two ways, unioned: the folio number in this service's own
+// database, and any folio whose guest the guest service matches by name. The
+// Folios screen used to demand a raw UUID, so a folio could not be found
+// without already knowing its id.
 router.get('/folios', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
   try {
-    const { stayId, guestId, status } = req.query;
+    const { stayId, guestId, status, q } = req.query;
     const where = {};
     if (stayId) where.stayId = stayId;
     if (guestId) where.guestId = guestId;
     if (status) where.status = status;
-    const folios = await prisma.folio.findMany({ where, orderBy: { openedAt: 'desc' }, take: 100 });
-    res.json(folios);
+
+    const term = String(q || '').trim();
+    if (term) {
+      // Guest-name matches come from the guest service; a failure there narrows
+      // the search to folio numbers rather than failing it.
+      const matches = await fetchJsonOrNull(
+        `${GUEST_URL}/api/guests/search?q=${encodeURIComponent(term)}`
+      );
+      const guestIds = (matches || []).map((g) => g.id).filter(Boolean);
+      where.OR = [
+        { folioNumber: { contains: term, mode: 'insensitive' } },
+        ...(guestIds.length ? [{ guestId: { in: guestIds } }] : []),
+      ];
+    }
+
+    const folios = await prisma.folio.findMany({
+      where,
+      orderBy: { openedAt: 'desc' },
+      take: 100,
+      include: { transactions: true },
+    });
+
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const codes = {
+      roomCodes: new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code)),
+      facilityCodes: new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code)),
+    };
+
+    // One batched lookup for every name on the page, not one per row. If the
+    // guest service is unreachable the rows still render with a null name --
+    // failing the whole list because a NAME could not be fetched would be worse
+    // than the missing search this replaces.
+    const ids = [...new Set(folios.map((f) => f.guestId).filter(Boolean))];
+    const names = new Map();
+    if (ids.length) {
+      // fetchJsonOrNull returns null rather than throwing on any failure, which
+      // is exactly the degradation this list wants.
+      const guests = await fetchJsonOrNull(
+        `${GUEST_URL}/api/guests/batch?ids=${encodeURIComponent(ids.join(','))}`
+      );
+      for (const g of guests || []) names.set(g.id, g.displayName);
+    }
+
+    res.json(folios.map((f) => folioListRow(f, codes, names.get(f.guestId))));
   } catch (err) {
     console.error('[Folio] List folios error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
