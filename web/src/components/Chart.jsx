@@ -98,13 +98,7 @@ export function BarChart({
               </text>
             )}
             {labels && (
-              <text
-                x={x + w / 2}
-                y={height + 14}
-                fontSize="10"
-                textAnchor="middle"
-                fill="var(--muted)"
-              >
+              <text x={x + w / 2} y={height + 14} fontSize="10" textAnchor="middle" fill="var(--muted)">
                 {labels[i]}
               </text>
             )}
@@ -124,7 +118,14 @@ export function DonutChart({ segments, size = 120, thickness = 18 }) {
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e2e8f0" strokeWidth={thickness} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="var(--neutral-soft)"
+          strokeWidth={thickness}
+        />
         {segments.map((s, i) => {
           const len = (s.value / total) * c;
           const el = (
