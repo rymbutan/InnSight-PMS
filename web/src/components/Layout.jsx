@@ -41,7 +41,9 @@ const NAV_SECTIONS = [
       {
         to: '/reservations',
         label: 'Booking & Reservations',
-        icon: 'calendar',
+        // NOT 'calendar' — that is the top bar's own button, and the two sat
+        // close enough that the rail entry looked like a second copy of it.
+        icon: 'book-marked',
         roles: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
       },
       {
@@ -57,13 +59,13 @@ const NAV_SECTIONS = [
     items: [
       {
         to: '/housekeeping',
-        label: 'Hotel Map',
+        label: 'Map & Housekeeping',
         icon: 'map',
         roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
       },
       {
         to: '/rooms',
-        label: 'Rooms & Housekeeping',
+        label: 'Rooms',
         icon: 'bed',
         roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
       },
@@ -100,17 +102,21 @@ const NAV_SECTIONS = [
         matchPaths: ['/revenue'],
         roles: ['ADMIN', 'MANAGER', 'AUDITOR'],
       },
-      { to: '/audit', label: 'Night Audit', icon: 'moon', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
+      { to: '/audit', label: 'Night Audit', icon: 'sunrise', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
     ],
   },
   {
     label: 'Design & Layout',
     items: [
-      { to: '/room-layouts', label: 'Room Layout (3D)', icon: 'box', roles: ['ADMIN'] },
+      // ONE rail entry for both editors. Scenarios is no longer listed: the two
+      // are tabs of a single page now (Rooms authors the room as it should be,
+      // Scenarios authors it as it should not), and /inspection-scenarios still
+      // resolves for anything already bookmarked.
       {
-        to: '/inspection-scenarios',
-        label: 'Inspection Scenarios (3D)',
-        icon: 'clipboard-check',
+        to: '/room-layouts',
+        label: 'Room & Scenario Editor',
+        icon: 'box',
+        matchPaths: ['/inspection-scenarios'],
         roles: ['ADMIN'],
       },
     ],
@@ -143,23 +149,84 @@ export default function Layout() {
     }
   });
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [acctMenuOpen, setAcctMenuOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const createMenuRef = useRef(null);
+  const acctMenuRef = useRef(null);
+  const acctTriggerRef = useRef(null);
   const searchRef = useRef(null);
   const searchTimer = useRef();
   const searchSeq = useRef(0);
 
   useEffect(() => {
     const onClick = (e) => {
-      if (createMenuRef.current && !createMenuRef.current.contains(e.target))
-        setCreateMenuOpen(false);
+      if (createMenuRef.current && !createMenuRef.current.contains(e.target)) setCreateMenuOpen(false);
+      if (acctMenuRef.current && !acctMenuRef.current.contains(e.target)) setAcctMenuOpen(false);
       if (searchRef.current && !searchRef.current.contains(e.target)) setSearchOpen(false);
     };
+    // Escape closes the account menu wherever focus is. A menu opened from a
+    // pill in the corner is easy to open by accident and, without this, can only
+    // be dismissed by clicking away — which on a table row means also firing
+    // whatever that row does.
+    const onKey = (e) => {
+      if (e.key === 'Escape') setAcctMenuOpen(false);
+    };
     window.addEventListener('mousedown', onClick);
-    return () => window.removeEventListener('mousedown', onClick);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onClick);
+      window.removeEventListener('keydown', onKey);
+    };
   }, []);
+
+  // Close the account menu on navigation — every item in it navigates, and a
+  // menu still hanging open over the page you just moved to reads as a bug.
+  useEffect(() => {
+    setAcctMenuOpen(false);
+  }, [location.pathname]);
+
+  // ── Account menu keyboard handling ──────────────────────────────────────
+  // Roving focus over the menu's own buttons rather than a tracked active
+  // index: the DOM already knows what the items are and which one has focus, so
+  // there is no second copy of that state to fall out of sync with the markup.
+  // `index` is signed — -1 is the last item, which is what ArrowUp on the
+  // trigger should land on.
+  function focusItem(index) {
+    // The menu is rendered by the state change that has not painted yet when
+    // this runs from the trigger, so defer to the frame that has it.
+    requestAnimationFrame(() => {
+      const items = acctMenuRef.current?.querySelectorAll('[role="menuitem"]');
+      if (!items?.length) return;
+      items[(index + items.length) % items.length]?.focus();
+    });
+  }
+
+  function onAcctMenuKeyDown(e) {
+    const items = [...(acctMenuRef.current?.querySelectorAll('[role="menuitem"]') || [])];
+    if (!items.length) return;
+    const at = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(at + 1) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(at - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      // Escape returns focus to the trigger — closing a menu and dropping focus
+      // to the top of the document is how a keyboard user loses their place.
+      // Tab closes but lets focus move on naturally.
+      setAcctMenuOpen(false);
+      if (e.key === 'Escape') acctTriggerRef.current?.focus();
+    }
+  }
 
   useEffect(() => {
     try {
@@ -222,12 +289,7 @@ export default function Layout() {
       <div className="side-head">
         <div className="side-brand">
           <img className="side-brand-mark" src="/brand/innsight-mark.png" alt="InnSight" />
-          <img
-            className="side-brand-wordmark"
-            src="/brand/innsight-wordmark.png"
-            alt=""
-            aria-hidden="true"
-          />
+          <img className="side-brand-wordmark" src="/brand/innsight-wordmark.png" alt="" aria-hidden="true" />
         </div>
         {/* Desktop: collapse to an icon rail. Mobile: close the drawer. */}
         <button
@@ -277,9 +339,7 @@ export default function Layout() {
                 // while you are on /revenue.
                 className={({ isActive }) =>
                   `side-link${
-                    isActive || n.matchPaths?.some((p) => location.pathname.startsWith(p))
-                      ? ' active'
-                      : ''
+                    isActive || n.matchPaths?.some((p) => location.pathname.startsWith(p)) ? ' active' : ''
                   }`
                 }
                 onClick={() => setDrawerOpen(false)}
@@ -344,7 +404,11 @@ export default function Layout() {
       <div
         className="cb-content"
         onClick={(e) => {
-          if (!collapsed && !drawerOpen && !e.target.closest('a, button, input, select, textarea, label, [role="button"], [contenteditable]'))
+          if (
+            !collapsed &&
+            !drawerOpen &&
+            !e.target.closest('a, button, input, select, textarea, label, [role="button"], [contenteditable]')
+          )
             setCollapsed(true);
         }}
       >
@@ -454,6 +518,20 @@ export default function Layout() {
                   >
                     New guest
                   </button>
+                  {/* Booking a hall or meeting room is a "create" in the same
+                      sense as a reservation, and it was the one create with no
+                      way in from here. `?book=1` opens the page with the desk
+                      focused rather than dropping you at the top of it. */}
+                  <button
+                    type="button"
+                    className="cb-popmenu-item"
+                    onClick={() => {
+                      setCreateMenuOpen(false);
+                      navigate('/amenities?book=1');
+                    }}
+                  >
+                    Book a facility
+                  </button>
                 </div>
               )}
             </div>
@@ -479,8 +557,79 @@ export default function Layout() {
                 with "A" in it identifies nobody and says nothing about what the
                 person signed in can do. An account with several roles shows its
                 highest-privilege one; see primaryRole for why the array's own
-                order cannot be used. */}
-            <RoleBadge upper code={primaryRole(user?.roles)} title={user?.roles?.join(', ')} />
+                order cannot be used.
+
+                It is a BUTTON, not a label. The pill is the only piece of the top
+                bar that identifies the account, so it is where people go looking
+                for "who am I / sign out" — and on mobile, where the rail is a
+                drawer, the rail's own user block is behind a hamburger tap. The
+                menu shows the full role list too, which the pill alone cannot:
+                it can only display the highest-privilege one. */}
+            <div className="cb-acct" ref={acctMenuRef}>
+              <button
+                type="button"
+                ref={acctTriggerRef}
+                className="cb-acct-trigger"
+                onClick={() => setAcctMenuOpen((v) => !v)}
+                // ArrowDown/Up opens the menu straight onto the first/last item,
+                // which is the behaviour a menu button is expected to have — a
+                // keyboard user should not have to open and then re-aim.
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setAcctMenuOpen(true);
+                    focusItem(e.key === 'ArrowDown' ? 0 : -1);
+                  }
+                }}
+                aria-haspopup="menu"
+                aria-expanded={acctMenuOpen}
+                aria-controls="cb-acct-menu"
+                title={`${user?.displayName || 'Account'} — ${user?.roles?.join(', ') || ''}`}
+              >
+                <RoleBadge upper code={primaryRole(user?.roles)} />
+                <Icon name="chevron-down" size={14} className="cb-acct-caret" />
+              </button>
+              {acctMenuOpen && (
+                <div
+                  className="cb-popmenu cb-acct-menu"
+                  id="cb-acct-menu"
+                  role="menu"
+                  aria-label="Account"
+                  onKeyDown={onAcctMenuKeyDown}
+                >
+                  <div className="cb-acct-head">
+                    <span className="cb-acct-name">{user?.displayName || user?.username}</span>
+                    {user?.username && user?.displayName && (
+                      <span className="cb-acct-sub">@{user.username}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cb-popmenu-item"
+                    onClick={() => {
+                      setAcctMenuOpen(false);
+                      navigate('/settings');
+                    }}
+                  >
+                    <Icon name="settings" size={15} />
+                    Settings
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cb-popmenu-item is-danger"
+                    onClick={() => {
+                      setAcctMenuOpen(false);
+                      logout();
+                    }}
+                  >
+                    <Icon name="log-out" size={15} />
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
