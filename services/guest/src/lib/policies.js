@@ -45,31 +45,74 @@ function depositCents({ grandTotalCents, source = 'DIRECT' }) {
 }
 
 // ── Tax engine (Philippines defaults) ──────────────────────────────
-// Returns { taxCents, breakdown: [{ name, rate, amountCents }] }.
-// 12% VAT applies to most charges. 10% service charge is *not* a tax in PH
-// (it's a service fee tracked separately). Local government tax varies.
-const TAX_RULES = {
-  ROOM: [{ name: 'VAT (12%)', rate: 0.12 }],
-  FNB: [{ name: 'VAT (12%)', rate: 0.12 }],
-  SERVICE: [{ name: 'VAT (12%)', rate: 0.12 }],
-  TAX: [],
-  OTHER: [{ name: 'VAT (12%)', rate: 0.12 }],
-  // Non-taxable categories
-  PAYMENT: [],
-  REFUND: [],
-  ADJUSTMENT: [],
-};
+// Returns { taxCents, breakdown: [{ key, label, rate, amountCents }] }, all
+// amounts as BigInt cents.
+//
+// FOUR COMPONENTS, NOT ONE COMBINED FIGURE
+// ----------------------------------------
+// The guest folio this system prints itemises tax the way the reference invoice
+// does: VAT, service charge, local tax and real property tax on their own lines.
+// A single combined number cannot be decomposed back into those rows, so the
+// components are computed separately and persisted per transaction.
+//
+// Note this function was previously dead code — nothing called it, which is why
+// every folio in the system carried zero tax until the charge route was wired up
+// to it.
+//
+// RATES ARE PASSED IN, NEVER READ FROM A DATABASE
+// -----------------------------------------------
+// Keeps this pure and unit-testable. The folio service reads them from its
+// AppSetting table and hands them over.
+//
+// VAT 12% and service charge 10% are the Philippine standards. Local tax and RPT
+// default to ZERO deliberately: they vary by locality, and inventing a plausible
+// rate would put fabricated tax on a guest's bill. An operator sets them.
+const TAX_COMPONENTS = [
+  { key: 'vat', label: 'VAT' },
+  { key: 'serviceCharge', label: 'Service Charge' },
+  { key: 'localTax', label: 'Local Tax' },
+  { key: 'realPropertyTax', label: 'Real Property Tax' },
+];
 
-function computeTax({ subtotalCents, category = 'ROOM' }) {
-  const rules = TAX_RULES[category] || TAX_RULES.OTHER;
-  let total = 0;
+const DEFAULT_TAX_RATES = { vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 };
+
+// Categories that are never taxed. An unknown category IS taxed — the safer
+// direction of failure for a billing system is to compute tax and have someone
+// remove it, not to silently omit it.
+const UNTAXED_CATEGORIES = new Set(['PAYMENT', 'REFUND', 'ADJUSTMENT', 'TAX']);
+
+function computeTax({ subtotalCents, category = 'ROOM', rates } = {}) {
+  if (UNTAXED_CATEGORIES.has(category)) return { taxCents: 0n, breakdown: [] };
+
+  const effective = { ...DEFAULT_TAX_RATES, ...(rates || {}) };
+  const base = BigInt(subtotalCents ?? 0);
+
+  let taxCents = 0n;
   const breakdown = [];
-  for (const rule of rules) {
-    const amt = Math.round(Number(subtotalCents) * rule.rate);
-    total += amt;
-    breakdown.push({ name: rule.name, rate: rule.rate, amountCents: amt });
+  for (const { key, label } of TAX_COMPONENTS) {
+    const rate = Number(effective[key]) || 0;
+    // Percent × cents in integer space: multiply by the rate scaled to four
+    // decimal places, then divide out. Doing this in floating point loses
+    // centavos on large folios, and money must never round through a float.
+    //
+    // The +500000n/1000000n step is round-half-up, which only works for a
+    // non-negative dividend: BigInt division truncates toward zero, and
+    // truncation toward zero equals floor only when the value is >= 0. For a
+    // negative subtotal (discounts, charge reversals), truncation toward zero
+    // acts as a ceiling instead, so adding the same positive offset pushes the
+    // result toward zero and silently drops up to a full cent -- even on an
+    // exact multiple that needs no rounding at all. Rounding the magnitude and
+    // re-applying the sign keeps this "round half away from zero" for every
+    // sign of subtotal, which is the trap the next reader should not re-add.
+    const scaled = BigInt(Math.round(rate * 10000));
+    const negative = base < 0n;
+    const magnitude = negative ? -base : base;
+    const rounded = (magnitude * scaled + 500000n) / 1000000n;
+    const amountCents = negative ? -rounded : rounded;
+    taxCents += amountCents;
+    breakdown.push({ key, label, rate, amountCents });
   }
-  return { taxCents: total, breakdown };
+  return { taxCents, breakdown };
 }
 
 // ── Late checkout / early arrival fees ─────────────────────────────
@@ -112,6 +155,7 @@ module.exports = {
   lateCheckoutFeeCents,
   earlyArrivalFeeCents,
   commissionCents,
-  TAX_RULES,
+  TAX_COMPONENTS,
+  DEFAULT_TAX_RATES,
   CHANNEL_COMMISSION,
 };

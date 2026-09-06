@@ -4,6 +4,8 @@ const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/auth');
 const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
+const { folioListRow } = require('../lib/folioList');
+const { folioPrintModel } = require('../lib/folioPrintModel');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
 const { receiptModel } = require('../lib/receipt');
@@ -11,6 +13,9 @@ const { send: sendMail } = require('../lib/notifier');
 const { qrPngBuffer, qrDataUrl } = require('../lib/qr');
 const { newToken, intentState, INTENT_TTL_MS } = require('../lib/paymentIntent');
 const { publicUrl } = require('../lib/publicUrl');
+const { validateTaxRates, validateHotel } = require('../lib/settings');
+const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
+const { computeTax } = require('../lib/policies');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -344,16 +349,117 @@ router.post('/folios/laundry-sale', requireRole(...CASHIER), async (req, res) =>
   }
 });
 
-// GET /api/folios?stayId=&guestId=&status=
+// ── Folio configuration ─────────────────────────────────────────────────────
+// Reachable only through the longer-prefix gateway locations for
+// /api/settings/tax-rates and /api/settings/hotel; the bare /api/settings prefix
+// still proxies to the reservation service.
+
+// GET /api/settings/tax-rates — every desk role, because the folio screen shows
+// the rates a charge will attract.
+router.get('/settings/tax-rates', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (_req, res) => {
+  try {
+    res.json(await getTaxRates());
+  } catch (err) {
+    console.error('[Folio] Get tax rates error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/tax-rates — management only. These change what guests are
+// billed.
+router.put('/settings/tax-rates', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const result = validateTaxRates(req.body || {});
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json(await saveTaxRates(result.rates));
+  } catch (err) {
+    console.error('[Folio] Set tax rates error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/settings/hotel — the identity block printed on a folio.
+router.get('/settings/hotel', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (_req, res) => {
+  try {
+    res.json(await getHotel());
+  } catch (err) {
+    console.error('[Folio] Get hotel error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/hotel — management only.
+router.put('/settings/hotel', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const result = validateHotel(req.body || {});
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json(await saveHotel(result.hotel));
+  } catch (err) {
+    console.error('[Folio] Set hotel error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/folios?q=&status=&stayId=&guestId=
+//
+// `q` matches two ways, unioned: the folio number in this service's own
+// database, and any folio whose guest the guest service matches by name. The
+// Folios screen used to demand a raw UUID, so a folio could not be found
+// without already knowing its id.
 router.get('/folios', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
   try {
-    const { stayId, guestId, status } = req.query;
+    const { stayId, guestId, status, q } = req.query;
     const where = {};
     if (stayId) where.stayId = stayId;
     if (guestId) where.guestId = guestId;
     if (status) where.status = status;
-    const folios = await prisma.folio.findMany({ where, orderBy: { openedAt: 'desc' }, take: 100 });
-    res.json(folios);
+
+    const term = String(q || '').trim();
+    if (term) {
+      // Guest-name matches come from the guest service; a failure there narrows
+      // the search to folio numbers rather than failing it.
+      const matches = await fetchJsonOrNull(
+        `${GUEST_URL}/api/guests/search?q=${encodeURIComponent(term)}`
+      );
+      const guestIds = (matches || []).map((g) => g.id).filter(Boolean);
+      where.OR = [
+        { folioNumber: { contains: term, mode: 'insensitive' } },
+        ...(guestIds.length ? [{ guestId: { in: guestIds } }] : []),
+      ];
+    }
+
+    const folios = await prisma.folio.findMany({
+      where,
+      orderBy: { openedAt: 'desc' },
+      take: 100,
+      include: { transactions: true },
+    });
+
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const codes = {
+      roomCodes: new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code)),
+      facilityCodes: new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code)),
+    };
+
+    // One batched lookup for every name on the page, not one per row. If the
+    // guest service is unreachable the rows still render with a null name --
+    // failing the whole list because a NAME could not be fetched would be worse
+    // than the missing search this replaces.
+    const ids = [...new Set(folios.map((f) => f.guestId).filter(Boolean))];
+    const names = new Map();
+    if (ids.length) {
+      // fetchJsonOrNull returns null rather than throwing on any failure, which
+      // is exactly the degradation this list wants.
+      const guests = await fetchJsonOrNull(
+        `${GUEST_URL}/api/guests/batch?ids=${encodeURIComponent(ids.join(','))}`
+      );
+      for (const g of guests || []) names.set(g.id, g.displayName);
+    }
+
+    res.json(folios.map((f) => folioListRow(f, codes, names.get(f.guestId))));
   } catch (err) {
     console.error('[Folio] List folios error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -602,18 +708,47 @@ router.post('/folios/:id/charges', requireRole(...CASHIER), async (req, res) => 
     } = req.body;
     if ((await requireOpenFolio(req.params.id, res)) === null) return;
     const baseCents = parseCents(amountCents);
-    const taxCents = taxAmountCents === undefined ? 0n : parseCents(taxAmountCents);
-    if (baseCents === null || taxCents === null) {
-      return res.status(400).json({ error: 'amountCents and taxAmountCents must be non-negative integers.' });
+    if (baseCents === null) {
+      return res.status(400).json({ error: 'amountCents must be a non-negative integer.' });
     }
     const qty = Number.isInteger(quantity) && quantity > 0 ? quantity : 1;
     const totalCents = baseCents * BigInt(qty);
-    const totalTaxCents = taxCents * BigInt(qty);
+
     let resolvedDesc = description;
-    if (!resolvedDesc && chargeCode) {
-      const cc = await prisma.chargeCode.findUnique({ where: { code: chargeCode } });
-      resolvedDesc = cc?.name || chargeCode;
+    const cc = chargeCode ? await prisma.chargeCode.findUnique({ where: { code: chargeCode } }) : null;
+    if (!resolvedDesc && chargeCode) resolvedDesc = cc?.name || chargeCode;
+
+    // Tax. An explicit taxAmountCents from the caller still WINS — the night
+    // audit and other programmatic posters supply their own figure and must keep
+    // their current behaviour. Only when none is supplied is tax computed here.
+    //
+    // This is the wiring that was missing: computeTax existed but nothing called
+    // it, and the UI never sent taxAmountCents, so every folio in the system
+    // carried zero tax.
+    let totalTaxCents;
+    let taxBreakdown = null;
+    if (taxAmountCents !== undefined) {
+      const taxCents = parseCents(taxAmountCents);
+      if (taxCents === null) {
+        return res.status(400).json({ error: 'taxAmountCents must be a non-negative integer.' });
+      }
+      totalTaxCents = taxCents * BigInt(qty);
+    } else if (cc && cc.taxable === false) {
+      // A charge code explicitly marked non-taxable attracts no tax.
+      totalTaxCents = 0n;
+    } else {
+      const rates = await getTaxRates();
+      const { taxCents, breakdown } = computeTax({
+        subtotalCents: totalCents,
+        category: cc?.category || 'OTHER',
+        rates,
+      });
+      totalTaxCents = taxCents;
+      // BigInt cannot be JSON-serialised, so amounts are stored as decimal
+      // strings. Readers parse them back with BigInt().
+      taxBreakdown = breakdown.map((b) => ({ ...b, amountCents: b.amountCents.toString() }));
     }
+
     const tx = await prisma.folioTransaction.create({
       data: {
         folioId: req.params.id,
@@ -622,6 +757,7 @@ router.post('/folios/:id/charges', requireRole(...CASHIER), async (req, res) => 
         description: resolvedDesc || 'Charge',
         amountCents: totalCents,
         taxAmountCents: totalTaxCents,
+        taxBreakdown,
         quantity: qty,
         note,
         postedBy: postedBy || req.user?.username || req.user?.sub,
@@ -811,6 +947,22 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
       return res.status(409).json({ error: 'Transaction has already been voided.' });
     }
 
+    // The reversal carries the NEGATED breakdown of the row it reverses, not a
+    // null. taxAmountCents remains the single source of truth for the totals —
+    // this only decides which component lines the reversed tax is shown
+    // against. Left null, the print model's pre-migration fallback attributed
+    // the whole negative figure to VAT, so a voided taxed charge printed a
+    // fabricated "VAT -1,000.00 / Service Charge +1,000.00" pair that nets to
+    // zero (which is why no subtotal check ever caught it).
+    const originalBreakdown = Array.isArray(original.taxBreakdown) ? original.taxBreakdown : null;
+    const reversalBreakdown = originalBreakdown?.length
+      ? originalBreakdown.map((b) => ({
+          ...b,
+          // Stored as decimal STRINGS: BigInt has no JSON representation.
+          amountCents: (-BigInt(b.amountCents || 0)).toString(),
+        }))
+      : null;
+
     const reversal = await prisma.folioTransaction.create({
       data: {
         folioId: req.params.id,
@@ -819,6 +971,7 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
         description: `REVERSAL of ${original.description}`,
         amountCents: -original.amountCents,
         taxAmountCents: -original.taxAmountCents,
+        taxBreakdown: reversalBreakdown,
         reversalOf: original.id,
       },
     });
@@ -1397,8 +1550,11 @@ router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASH
   }
 });
 
-// GET /api/folios/:id/print — renders a guest folio/receipt as PDF, formatted
-// to match the panel's reference invoice (Changes-to-be-made doc, item 2).
+// GET /api/folios/:id/print — the guest folio as a PDF, laid out to match the
+// panel's reference invoice: a bordered grid with every section always present.
+//
+// The arithmetic lives in lib/folioPrintModel.js so it can be unit tested; this
+// route is rendering only.
 router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
   try {
     const folio = await prisma.folio.findUnique({
@@ -1407,13 +1563,24 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
-    const roomCodes = new Set(
-      (await prisma.chargeCode.findMany({ where: { category: 'ROOM' }, select: { code: true } })).map(
-        (c) => c.code
-      )
-    );
-    const summary = classifyTransactions(folio.transactions, roomCodes);
+    const codeRows = await prisma.chargeCode.findMany({
+      where: { category: { in: ['ROOM', 'FACILITY'] } },
+      select: { code: true, category: true },
+    });
+    const roomCodes = new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code));
+    const facilityCodes = new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code));
 
+    // Tag each transaction with whether it is room revenue, so the print model
+    // can split room tax from tax on other charges without re-deriving the
+    // classification.
+    const transactions = folio.transactions.map((t) => ({
+      ...t,
+      __isRoom: roomCodes.has(t.chargeCode),
+    }));
+    const summary = classifyTransactions(transactions, { roomCodes, facilityCodes });
+
+    // Upstream failures degrade to a dash rather than failing the print: staff
+    // need folios to print during an audit even when a service is down.
     const guest = folio.guestId
       ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
       : null;
@@ -1424,92 +1591,250 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
       ? await fetchJsonOrNull(`${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`)
       : null;
 
-    const nights = reservation?.nights || 1;
-    const tariffCents = summary.roomChargeCents / BigInt(nights);
-    const guestName = stay?.guestName || reservation?.guestName || '—';
-    const money = (cents) => `${folio.currency} ${(Number(cents) / 100).toFixed(2)}`;
-    const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '—');
-    const fmtTime = (d) => (d ? new Date(d).toISOString().slice(11, 16) : '—');
-    const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
+    const model = folioPrintModel({
+      folio, transactions, summary,
+      guest, stay, reservation, hotel: await getHotel(),
+    });
 
-    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    // The reference prints amounts as "25,350.00 P".
+    const money = (cents) =>
+      `${(Number(cents) / 100).toLocaleString('en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      })} P`;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 36 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="folio-${folio.folioNumber}.pdf"`);
     doc.pipe(res);
 
-    // ── Header ──
-    doc.fontSize(18).text('InnSight PMS', { align: 'center' });
-    doc.fontSize(11).fillColor('#555').text('Guest Folio', { align: 'center' });
-    doc.moveDown(0.8).fillColor('black');
+    const L = 36;                       // left margin
+    const R = doc.page.width - 36;      // right margin
+    const W = R - L;
+    const SPLIT = L + W * 0.72;         // where the Particular column ends
+    const TOP = 36;                     // where a continuation page starts
+    // The lowest y a block may occupy. Everything below is drawn at ABSOLUTE
+    // coordinates while this route advances its own `y`, so pdfkit's automatic
+    // pagination must never be allowed to fire: it starts a page and resets
+    // only ITS cursor, leaving `y` still climbing, so every subsequent draw
+    // spilled again and each extra row cost several pages. Every block asks
+    // reserve() first instead.
+    const BOTTOM = doc.page.height - 36;
+
+    const rowH = 16;
+    const lineH = 13;
+    const AMOUNT_COL = SPLIT - 130;
+
+    // ── Hotel header ──
+    doc.font('Helvetica-Bold').fontSize(15).text(model.hotel.name, L, 40, { width: W, align: 'center' });
+    doc.font('Helvetica').fontSize(8);
+    for (const line of [
+      model.hotel.address,
+      [model.hotel.phone && `Phone: ${model.hotel.phone}`,
+       model.hotel.fax && `Fax: ${model.hotel.fax}`,
+       model.hotel.email && `E-Mail: ${model.hotel.email}`].filter(Boolean).join(' ; '),
+      model.hotel.url && `URL: ${model.hotel.url}`,
+    ].filter(Boolean)) {
+      doc.text(line, L, doc.y, { width: W, align: 'center' });
+    }
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').fontSize(10).text('Invoice', L, doc.y, { width: W, align: 'center' });
+    doc.moveDown(0.5);
+
+    // ── Boxed helpers ──
+    const cell = (x, y, w, h, text, opts = {}) => {
+      doc.rect(x, y, w, h).stroke();
+      if (text == null || text === '') return;
+      doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 8);
+      doc.text(String(text), x + 4, y + (opts.dy ?? 4), {
+        width: w - 8, align: opts.align || 'left', lineBreak: false,
+      });
+    };
+
+    let y = doc.y;
+
+    // ── Pagination helpers ────────────────────────────────────────────────
+    // `bodyTop` is the top of the CURRENT page's Particular/Total grid. That
+    // grid is bounded by two full-height column rules, so they have to be
+    // closed off at the foot of the page being left and reopened underneath
+    // the repeated column header on the next one — hence the `inBody` flag
+    // rather than a bare addPage().
+    let bodyTop = null;
+
+    const closeBodyRules = () => {
+      if (bodyTop === null || y <= bodyTop) return;
+      doc.rect(L, bodyTop, SPLIT - L, y - bodyTop).stroke();
+      doc.rect(SPLIT, bodyTop, R - SPLIT, y - bodyTop).stroke();
+    };
+
+    const columnHeader = () => {
+      cell(L, y, SPLIT - L, rowH + 2, 'Particular', { bold: true, size: 10, dy: 5 });
+      cell(SPLIT, y, R - SPLIT, rowH + 2, 'Total', { bold: true, size: 10, dy: 5, align: 'right' });
+      y += rowH + 2;
+    };
+
+    // Every continuation page names its folio and says it is a continuation:
+    // loose sheets of one guest's bill are otherwise indistinguishable from
+    // another guest's.
+    const newPage = ({ inBody = false } = {}) => {
+      if (inBody) closeBodyRules();
+      doc.addPage();
+      y = TOP;
+      doc.font('Helvetica-Bold').fontSize(9).text(
+        `${model.hotel.name} — Folio No. ${model.meta.folioNumber} — continued`,
+        L, y, { width: W, align: 'center', lineBreak: false }
+      );
+      y += 16;
+      bodyTop = null;
+      if (inBody) {
+        columnHeader();
+        bodyTop = y;
+      }
+    };
+
+    // Claim `h` points for the block about to be drawn, starting a new page if
+    // it will not fit. A block that must not be split passes its WHOLE height.
+    const reserve = (h, opts) => {
+      if (y + h > BOTTOM) newPage(opts);
+    };
 
     // ── Guest / stay grid ──
-    // No "G.R. Card No." row: InnSight has no physical registration-card
-    // concept, so the confirmation number stands in for it. No guest address
-    // line: not a field this system captures.
-    const row = (label, value) => {
-      doc.font('Helvetica-Bold').fontSize(9).text(label, { continued: true, width: 150 });
-      doc.font('Helvetica').text(`  ${value ?? '—'}`);
-    };
-    row('Folio No.:', folio.folioNumber);
-    row('Date:', fmtDate(new Date()));
-    row('Guest Name:', guestName);
-    row('Nationality:', guest?.nationality || '—');
-    row('No. of Pax:', reservation ? reservation.adults + reservation.children : '—');
-    row('Adult / Child:', reservation ? `${reservation.adults} / ${reservation.children}` : '—');
-    row('Confirmation No.:', reservation?.confirmationNumber || '—');
-    row('Date of Arrival:', fmtDate(stay?.actualCheckInAt || reservation?.checkIn));
-    row('Date of Departure:', fmtDate(stay?.actualCheckOutAt || reservation?.checkOut));
-    row('Time of Arrival:', fmtTime(stay?.actualCheckInAt));
-    row('Tariff:', money(tariffCents));
-    doc.moveDown();
+    cell(L, y, W * 0.55, rowH, 'Folio No.', { bold: true });
+    cell(L + W * 0.55, y, W * 0.45, rowH, `Date  :  ${model.meta.date}`, { bold: true });
+    doc.font('Helvetica').fontSize(8).text(`:  ${model.meta.folioNumber}`, L + 90, y + 4, { lineBreak: false });
+    y += rowH;
 
-    // ── Particulars ──
-    // No Tax1-4 slots: InnSight tracks one combined taxAmountCents per charge
-    // rather than a decomposed VAT/service-charge/local-tax breakdown — an honest
-    // deviation from the literal reference template, documented in the design spec.
-    //
-    // Transfers ARE supported now (POST /folios/:id/transfer, added for bill
-    // splitting). They need no section of their own: a transfer posts a matched
-    // pair of TRANSFER rows that name the other folio in their description, so
-    // they read in line with the rest of the particulars.
-    doc.fontSize(11).text('Particulars', { underline: true });
-    doc.moveDown(0.3);
-    const line = (label, value, opts = {}) => {
-      doc.fontSize(9).font(opts.bold ? 'Helvetica-Bold' : 'Helvetica');
-      doc.text(label, 60, doc.y, { continued: true, width: 380 });
-      doc.text(value, { align: 'right' });
-    };
-    line('Room Charges', money(summary.roomChargeCents));
-    line('Add: Taxes', money(summary.taxCents));
-    line('Add: Extra Charges', money(summary.extraChargeCents));
-    doc.moveDown(0.3);
-    line('Total Charges', money(summary.totalChargesCents), { bold: true });
-    doc.moveDown(0.3);
-    line('Less: Payments', money(summary.paymentsCents));
-    if (summary.refundsCents > 0n) line('Less: Refunds', `-${money(summary.refundsCents)}`);
-    line('Adjustments', money(summary.adjustmentsCents));
-    doc.moveDown(0.3);
-    doc.moveTo(48, doc.y).lineTo(547, doc.y).stroke();
-    doc.moveDown(0.3);
-    line('Balance', money(summary.balanceCents), { bold: true });
-    doc.moveDown();
+    cell(L, y, W, rowH, 'Guest Name', { bold: true });
+    doc.font('Helvetica').fontSize(8).text(`:  ${model.meta.guestName}`, L + 90, y + 4, { lineBreak: false });
+    y += rowH;
 
-    doc.fontSize(9).font('Helvetica-Bold').text(`This Folio is in: ${folio.currency}`);
-    doc.font('Helvetica').text(`Amount in Words: ${centsToWords(summary.balanceCents)}`);
-    doc.moveDown();
+    const q = W / 4;
+    for (const [i, [label, value]] of [
+      ['Nationality', model.meta.nationality],
+      ['No. of Pax', model.meta.pax],
+      ['Adult Child', `${model.meta.adults} / ${model.meta.children}`],
+      ['G.R. Card No', model.meta.grCardNo],
+    ].entries()) {
+      cell(L + q * i, y, q, rowH, label, { bold: true, align: i === 0 ? 'left' : 'center' });
+      cell(L + q * i, y + rowH, q, rowH, value, { align: i === 0 ? 'left' : 'center' });
+    }
+    y += rowH * 2;
 
-    doc
-      .fontSize(8)
-      .fillColor('#555')
-      .text(
-        'NOTICE TO GUESTS: This property is privately owned and the management reserves the right to ' +
-          'refuse service to anyone. Management will not be responsible for accidents or injury to guests ' +
-          'or for loss of money, jewelry or valuables of any kind. Management will not be responsible for ' +
-          'any item left in the room.',
-        { align: 'justify' }
-      );
-    doc.moveDown(0.5);
-    doc.fillColor('#888').text(`Printed ${fmtDateTime(new Date())} — InnSight PMS`, { align: 'center' });
+    const t = W / 3;
+    cell(L, y, t, rowH, 'Date of Arrival', { bold: true });
+    cell(L + t, y, t, rowH, model.meta.arrival);
+    cell(L + t * 2, y, t, rowH, `Tariff   ${money(model.meta.tariffCents)}`, { bold: true });
+    y += rowH;
+    cell(L, y, t, rowH, 'Date of Departure', { bold: true });
+    cell(L + t, y, t, rowH, model.meta.departure);
+    cell(L + t * 2, y, t, rowH, '');
+    y += rowH;
+    cell(L, y, t, rowH, 'Time of Arrival', { bold: true });
+    cell(L + t, y, t, rowH, model.meta.arrivalTime);
+    cell(L + t * 2, y, t, rowH, '');
+    y += rowH + 4;
+
+    // ── Particular / Total grid ──
+    // The column header only earns its place if a heading and a row can follow
+    // it on the same page.
+    reserve(rowH + 2 + lineH * 2);
+    columnHeader();
+    bodyTop = y;
+
+    for (const section of model.sections) {
+      // A section heading is never the last thing on a page: it is drawn only
+      // where its first row fits underneath it.
+      reserve(lineH * 2, { inBody: true });
+      doc.font('Helvetica-Bold').fontSize(8.5).text(section.title, L + 4, y + 2, { lineBreak: false });
+      y += lineH;
+      for (const row of section.rows) {
+        if (y + lineH > BOTTOM) {
+          newPage({ inBody: true });
+          // A section long enough to run over repeats its own heading, so no
+          // row is ever orphaned from the section it belongs to.
+          doc.font('Helvetica-Bold').fontSize(8.5)
+            .text(`${section.title} (continued)`, L + 4, y + 2, { lineBreak: false });
+          y += lineH;
+        }
+        doc.font('Helvetica').fontSize(8);
+        doc.text(row.label, L + 20, y + 2, { width: 200, lineBreak: false });
+        doc.text(money(row.amountCents), AMOUNT_COL, y + 2, { width: 110, align: 'right', lineBreak: false });
+        y += lineH;
+      }
+      // The section subtotal sits in the right-hand rail, as in the reference.
+      // It is drawn level with the section's LAST row, so it is on that row's
+      // page by construction and cannot be stranded by itself.
+      doc.font('Helvetica').fontSize(8);
+      doc.text(money(section.subtotalCents), SPLIT + 4, y - lineH + 2, {
+        width: R - SPLIT - 8, align: 'right', lineBreak: false,
+      });
+      y += 3;
+    }
+
+    // Column rules for the final page's body block.
+    closeBodyRules();
+    bodyTop = null;
+
+    // ── Totals rail ──
+    // Reserved as ONE block: Total Charges / Total Payment / Balance split
+    // over a page boundary reads as two different bills.
+    reserve(rowH * 3);
+    for (const [label, value] of [
+      ['Total Charges', model.totals.totalChargesCents],
+      ['Total Payment', model.totals.totalPaymentCents],
+      ['Balance', model.totals.balanceCents],
+    ]) {
+      cell(SPLIT - 130, y, 130, rowH, label, { bold: true });
+      cell(SPLIT, y, R - SPLIT, rowH, money(value), { bold: true, align: 'right' });
+      y += rowH;
+    }
+    y += 4;
+
+    // ── Footer block ──
+    const noticeText =
+      'NOTICE TO GUESTS: This property is privately owned and the management reserves the right to refuse ' +
+      'service to anyone. Management will not be responsible for accidents or injury to guests or for loss ' +
+      'of money, jewelry or valuables of any kind. Management will not be responsible for any item left in ' +
+      'the room.';
+    const checkoutText = 'CHECKOUT TIME: 11:00 AM        SELF REGISTRATION ONLY';
+    const agreeText =
+      'I AGREE that my liability for this bill is not waived and agree to be held personally liable in the ' +
+      'event that the indicated person or company failed to pay for any part or full amount of these ' +
+      'charges. I agree that if an attorney is retained to collect these charges, I will pay all reasonable ' +
+      "attorney's fees and costs incurred. I agree that the sole purpose of renting this room is for my own " +
+      'residency only.';
+
+    // Measured, not guessed. Two reservations, not one: the five boxed lines
+    // (Remark / currency / Bill To / Address / amount in words) are the part
+    // that must not be split, and they are claimed as a block. The notice and
+    // terms paragraphs below them are static boilerplate — reserving them
+    // TOGETHER with the boxed lines would cost ~110pt of the first page for
+    // text nobody reads against a figure, and this document already fills
+    // nearly a page at zero transactions.
+    doc.font('Helvetica').fontSize(7);
+    const termsH =
+      doc.heightOfString(noticeText, { width: W }) +
+      doc.heightOfString(checkoutText, { width: W }) +
+      doc.heightOfString(agreeText, { width: W }) +
+      16;
+    reserve(rowH * 5 + 8);
+
+    cell(L, y, W, rowH, `Remark        :  ${model.footer.remark}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `This Folio is in   :  ${model.footer.currency}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `Bill To               :  ${model.footer.billTo}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `Address             :  ${model.footer.address}`, { bold: true });
+    y += rowH;
+    cell(L, y, W, rowH, `${model.footer.currency} ${model.footer.amountInWords.toUpperCase()}`);
+    y += rowH + 8;
+
+    reserve(termsH);
+    doc.font('Helvetica').fontSize(7).fillColor('#000');
+    doc.text(noticeText, L, y, { width: W, align: 'left' });
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').text(checkoutText, { width: W });
+    doc.font('Helvetica').text(agreeText, { width: W, align: 'justify' });
 
     doc.end();
   } catch (err) {
