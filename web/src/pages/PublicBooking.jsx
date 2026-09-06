@@ -195,7 +195,7 @@ export default function PublicBooking() {
                   <div style={{ textAlign: 'right', minWidth: 160 }}>
                     <div style={{ fontSize: 22, fontWeight: 700 }}>{formatPeso(t.baseRate)}</div>
                     <div className="muted" style={{ fontSize: 12 }}>
-                      per night · {formatPeso((t.baseRate || 0) * nights)} total
+                      per night · {formatPeso((t.baseRate || 0) * nights)} total before taxes
                     </div>
                   </div>
                   <button className="btn-cta" onClick={() => pickType(t)} disabled={t.available <= 0}>
@@ -258,7 +258,11 @@ export default function PublicBooking() {
                 {checkIn} → {checkOut} · {nights} night{nights !== 1 ? 's' : ''}
               </span>
               <br />
-              <strong style={{ fontSize: 18 }}>{formatPeso((picked.baseRate || 0) * nights)} total</strong>
+              <strong style={{ fontSize: 18 }}>{formatPeso((picked.baseRate || 0) * nights)} total before taxes</strong>
+              <br />
+              <span className="muted" style={{ fontSize: 12 }}>
+                Taxes are calculated when your booking is confirmed.
+              </span>
             </div>
             {err && (
               <div className="error" role="alert" style={{ marginTop: 10 }}>

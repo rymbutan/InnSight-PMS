@@ -65,7 +65,7 @@ const NAV_SECTIONS = [
       },
       {
         to: '/rooms',
-        label: 'Rooms',
+        label: 'Hotel Room Information Editor',
         icon: 'bed',
         roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
       },

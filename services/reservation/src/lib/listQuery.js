@@ -53,9 +53,18 @@ function parseBound(value, label) {
 
 /**
  * Build the Prisma `where` for the reservation list.
- * @throws {BadWindowError} on an unparseable `from`/`to`
+ * @throws {BadWindowError} on an unparseable `from`/`to`/`checkInFrom`/`checkInTo`
  */
-function reservationListWhere({ status, guestId, assignedRoomId, from, to, q } = {}) {
+function reservationListWhere({
+  status,
+  guestId,
+  assignedRoomId,
+  from,
+  to,
+  checkInFrom,
+  checkInTo,
+  q,
+} = {}) {
   const where = {};
   if (status) where.status = status;
   if (guestId) where.guestId = guestId;
@@ -63,7 +72,28 @@ function reservationListWhere({ status, guestId, assignedRoomId, from, to, q } =
   // so "which booking is in room 412?" was answered with every booking in the
   // hotel and the caller picked the first plausible-looking one.
   if (assignedRoomId) where.assignedRoomId = assignedRoomId;
-  if (to) where.checkIn = { lt: parseBound(to, 'to') };
+
+  // THREE params write to `where.checkIn`, so they must MERGE into one object.
+  // `to` used to assign it outright; a second writer added naively would have
+  // silently dropped a bound, and the caller would get a WIDER result set than
+  // it asked for with nothing reporting it.
+  //
+  // `from`/`to` are the overlap window (see the header comment).
+  // `checkInFrom`/`checkInTo` are the arrivals window — "which bookings START
+  // here" — deliberately separate so the audit's no-show sweep and the calendar
+  // keep the overlap semantics they depend on.
+  const checkIn = {};
+  if (to) checkIn.lt = parseBound(to, 'to');
+  if (checkInFrom) checkIn.gte = parseBound(checkInFrom, 'checkInFrom');
+  if (checkInTo) {
+    const bound = parseBound(checkInTo, 'checkInTo');
+    // The TIGHTER upper bound wins, so combining the two windows narrows the
+    // result rather than widening it. A filter that widens when you add a
+    // constraint is the kind of bug nobody reads back off a screen.
+    checkIn.lt = checkIn.lt && checkIn.lt < bound ? checkIn.lt : bound;
+  }
+  if (Object.keys(checkIn).length > 0) where.checkIn = checkIn;
+
   if (from) where.checkOut = { gt: parseBound(from, 'from') };
   if (q) {
     where.OR = [
