@@ -45,8 +45,11 @@ const publicRedis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379')
 publicRedis.on('error', (e) => console.error('[Reservation] public redis error:', e.message));
 const INVENTORY_URL = process.env.INVENTORY_URL || 'http://inventory-service:3005';
 const { makeInventoryClient, NoInventoryError } = require('./lib/inventoryClient');
+const { makeFolioClient } = require('./lib/folioClient');
+const { quotePublicTotal } = require('./lib/publicQuote');
 const { JWT_SECRET } = require('./middleware/auth');
 const inventory = makeInventoryClient({ name: 'reservation', secret: JWT_SECRET });
+const folio = makeFolioClient({ name: 'reservation' });
 app.post('/api/public/reservations', async (req, res) => {
   try {
     // Pricing is computed server-side from the room type's published rate —
@@ -115,7 +118,12 @@ app.post('/api/public/reservations', async (req, res) => {
         /* ignore promo lookup failure — book at full price */
       }
     }
-    const totalEstimateCents = BigInt(grossCents);
+    // Tax-inclusive: computed at folio's configured rates so this quote
+    // matches what the guest actually owes at checkout (see lib/publicQuote.js).
+    const { totalEstimateCents } = await quotePublicTotal({
+      grossCents,
+      getFolioTaxRates: () => folio.getTaxRates(),
+    });
 
     // ── PHASE 1: claim capacity transactionally in inventory ─────────────────
     // Two guests racing for the last room both used to pass the `available <= 0`

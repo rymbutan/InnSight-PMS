@@ -7876,124 +7876,44 @@ html[data-theme='dark'] .hk-tooltip {
   overflow-wrap: anywhere;
 }
 
-/* ==========================================================================
-   Narrow viewports — the app-wide backstop
-   ==========================================================================
-   Individual components carry their own breakpoints throughout this file; this
-   section is only for the things that break the PAGE rather than a component,
-   and it deliberately lives last so it wins over the per-component rules it
-   has to correct.
-
-   Everything here is inside a max-width query. Nothing below this line can
-   affect the desktop layout, which is the one people actually work in.
-   ========================================================================== */
-
-/* ── Tables ───────────────────────────────────────────────────────────────
-   A PMS table is 5 to 11 columns of data that cannot usefully be truncated —
-   Audit and the reservation folio are 11 each. Below about a laptop there is
-   no width at which those fit, and with nothing containing them the overflow
-   went to the PAGE: a horizontal scrollbar on <body>, the sticky top bar
-   sliding away from the content under it, and every panel on the page dragged
-   wider than the viewport by one wide table.
-
-   Making the table its own scroll container keeps the overflow local. The
-   table element becomes a block, and its row groups generate one anonymous
-   table box inside it — one box for all of thead/tbody/tfoot, so the columns
-   still line up. `border-collapse` and `font-size` are inherited properties,
-   so the anonymous box keeps them.
-
-   This is scoped to narrow viewports because changing a table's `display` can
-   cost its semantics in the accessibility tree on some engines. That is a real
-   trade, made knowingly: a page whose every layout is broken by horizontal
-   overflow is worse for a screen-reader user than one whose table is exposed
-   as a group. Above 1023px the tables are untouched, semantics included.
-
-   Three tables already wrap themselves in an overflow div (Reservations,
-   Rooms, and one on Guests); this is harmless on those — the inner table
-   simply never has anything to scroll. */
-@media (max-width: 1023px) {
-  .cb-main table {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    /* Momentum scrolling on iOS; ignored everywhere else. */
-    -webkit-overflow-scrolling: touch;
-  }
+/* Segmented range switcher — used in the Arrivals panel header. Sized to sit
+   level with an <h3> in .panel-head without stretching it.
+   Token substitutions (verified against the definitions in this file — the
+   brief's names don't all exist): --surface-hover -> --row-hover,
+   --text-muted -> --muted, --primary/--primary-hover -> --accent/--accent-hover. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  /* .panel-head has no justify-content; every other right-aligned panel-head
+     control (see .filter-bar, used by Rooms.jsx and Amenities.jsx) pushes
+     itself right the same way. */
+  margin-left: auto;
 }
-
-/* ── Page gutters ─────────────────────────────────────────────────────────
-   32px each side is right on a monitor and absurd on a phone: on a 360px
-   screen the fixed gutters were taking 18% of the width away from content
-   that is already tight. */
-@media (max-width: 1023px) {
-  .cb-main {
-    padding: 20px 20px;
-  }
+.seg-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
 }
-@media (max-width: 620px) {
-  .cb-main {
-    padding: 16px 12px;
-  }
-  .cb-topbar {
-    padding: 0 12px;
-    gap: 10px;
-  }
-  /* The head stacks rather than splitting title and actions across a line
-     that is too narrow to hold both. */
-  .page-head {
-    gap: 12px;
-    margin-bottom: 16px;
-  }
+.seg-btn:last-child {
+  border-right: 0;
 }
-
-/* ── Two-column layouts that had no single-column form ────────────────────
-   Most of the app's grids are already mobile-first — they declare one column
-   and add the second at a min-width. These two were written the other way
-   round and so had no narrow form at all. */
-@media (max-width: 820px) {
-  /* A fixed 200px rail against 1fr leaves 140px of folio on a phone. */
-  .folio-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.seg-btn:hover {
+  background: var(--row-hover);
+  color: var(--text);
 }
-
-/* ── Full-screen editors ──────────────────────────────────────────────────
-   The 3D room and scenario editors are desk tools and are not claimed to be
-   usable on a phone — a floor plan you drag furniture around needs a pointer
-   and a canvas. What this does is stop the side panel eating the entire
-   viewport so the stage behind it is still reachable and the panel can be
-   closed. */
-@media (max-width: 720px) {
-  .se-side {
-    width: min(320px, 78vw);
-    flex-basis: min(320px, 78vw);
-  }
-  /* An absolutely-positioned overlay on the canvas, 300px wide with a 12px
-     offset — 312px against a 360px screen, with no guard if it is narrower. */
-  .insp-clipboard {
-    width: auto;
-    max-width: calc(100vw - 24px);
-  }
+.seg-btn.is-active {
+  background: var(--accent);
+  color: var(--on-accent);
 }
-
-/* ── Top bar ──────────────────────────────────────────────────────────────
-   Five controls plus a search field and an account button. Their widths are
-   all fixed (`flex-shrink: 0` on the icon buttons, `white-space: nowrap` on
-   the role badge), so below roughly 620px there is no arrangement that fits
-   and something has to yield.
-
-   The search field is what gives. It is the only item here that is a
-   convenience rather than a destination — every page it can reach is in the
-   sidebar drawer behind the hamburger, whereas the create menu, the calendar,
-   notifications and the account button have no other entry point. A 40px
-   search box that fits nothing would be worse than none.
-
-   This is a judgement call, and the obvious upgrade is to collapse it to a
-   magnifier that expands on tap. That needs component state rather than a
-   media query, so it is deliberately not done here. */
-@media (max-width: 620px) {
-  .cb-search-wrap {
-    display: none;
-  }
+.seg-btn.is-active:hover {
+  background: var(--accent-hover);
 }

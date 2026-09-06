@@ -308,6 +308,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
+      FOLIO_URL: http://folio-service:3007
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
