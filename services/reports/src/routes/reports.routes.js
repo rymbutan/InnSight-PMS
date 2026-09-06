@@ -129,7 +129,14 @@ router.get('/reports/revenue', requireRole(...REPORT_ROLES), async (req, res) =>
 router.get('/reports/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) => {
   try {
     const { date } = req.query;
-    const data = await callService(`${STAY_URL}/api/arrivals${date ? `?date=${date}` : ''}`);
+    // With no `date`, this asks /api/arrivals with no parameters at all, which
+    // is a today question and gets a today answer. Sending `range` instead
+    // would pull in the desk's unbounded overdue backlog and put it in a
+    // report row labelled with a single date.
+    const payload = await callService(`${STAY_URL}/api/arrivals${date ? `?date=${date}` : ''}`);
+    // /api/arrivals returns { range, degraded, arrivals }; departures still
+    // returns a bare array. Tolerate both so this keeps working either way.
+    const data = Array.isArray(payload) ? payload : payload?.arrivals || [];
     const summary = { date, count: data.length, rows: data };
     await saveRun({ type: 'arrivals', params: { date }, result: summary, runBy: req.user?.sub });
     res.json(summary);

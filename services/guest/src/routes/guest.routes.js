@@ -78,6 +78,35 @@ router.get('/guests/search', requireRole(...ROLE_GROUPS.DESK), async (req, res) 
   }
 });
 
+// GET /api/guests/batch?ids=a,b,c — resolve many guests' display names in one
+// call. The folio list renders a guest name per row and would otherwise issue
+// one request per row.
+//
+// MUST be declared BEFORE /guests/:id. Express matches in declaration order, so
+// registering it after would make this path match as a guest whose id is the
+// literal string 'batch' — the same trap /folios/outstanding documents in the
+// folio service.
+router.get('/guests/batch', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
+  try {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // No ids means no guests. Falling through to "every guest" would turn a
+    // missing query param into a full PII dump.
+    if (ids.length === 0) return res.json([]);
+    // Bounded so one caller cannot ask for the whole table in a single request.
+    const guests = await prisma.guest.findMany({
+      where: { id: { in: ids.slice(0, 200) } },
+      select: { id: true, displayName: true, profileNumber: true, nationality: true },
+    });
+    res.json(guests);
+  } catch (err) {
+    console.error('[Guest] Batch lookup error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/guests/:id
 router.get('/guests/:id', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
   try {

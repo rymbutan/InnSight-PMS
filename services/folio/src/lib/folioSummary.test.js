@@ -153,3 +153,42 @@ test('a transferred facility charge stays facility revenue', () => {
   );
   assert.equal(result.facilityChargeCents, 20000n);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// taxBreakdown is presentation detail. classifyTransactions must keep reading
+// taxAmountCents ALONE, so a row written before the breakdown column existed
+// produces exactly the same totals as one written after it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a transaction with a breakdown totals identically to one without', () => {
+  const withBreakdown = classifyTransactions(
+    [
+      {
+        type: 'CHARGE', chargeCode: 'RM', amountCents: 2535000n, taxAmountCents: 557700n,
+        taxBreakdown: [
+          { key: 'vat', label: 'VAT', rate: 12, amountCents: '304200' },
+          { key: 'serviceCharge', label: 'Service Charge', rate: 10, amountCents: '253500' },
+          { key: 'localTax', label: 'Local Tax', rate: 0, amountCents: '0' },
+          { key: 'realPropertyTax', label: 'Real Property Tax', rate: 0, amountCents: '0' },
+        ],
+      },
+    ],
+    ROOM_CODES
+  );
+  const without = classifyTransactions(
+    [{ type: 'CHARGE', chargeCode: 'RM', amountCents: 2535000n, taxAmountCents: 557700n }],
+    ROOM_CODES
+  );
+  assert.deepEqual(withBreakdown, without, 'the breakdown must not affect any total');
+  assert.equal(withBreakdown.taxCents, 557700n);
+  assert.equal(withBreakdown.totalChargesCents, 3092700n);
+});
+
+test('a null breakdown is ignored entirely', () => {
+  const result = classifyTransactions(
+    [{ type: 'CHARGE', chargeCode: 'RM', amountCents: 100000n, taxAmountCents: 12000n, taxBreakdown: null }],
+    ROOM_CODES
+  );
+  assert.equal(result.taxCents, 12000n);
+  assert.equal(result.balanceCents, 112000n);
+});
