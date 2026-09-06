@@ -147,7 +147,7 @@ export default function Rooms() {
 
   return (
     <div>
-      <h2>Rooms &amp; Housekeeping</h2>
+      <h2>Hotel Room Information Editor</h2>
 
       {!isAdmin && (
         <p className="muted" style={{ marginTop: 0 }}>

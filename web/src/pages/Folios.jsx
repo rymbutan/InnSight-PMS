@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
+import EmptyState from '../components/EmptyState';
+import Avatar from '../components/Avatar';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents, formatPeso } from '../lib/money';
@@ -18,7 +20,6 @@ export default function Folios() {
   const [payment, setPayment] = useState({ method: 'CASH', amount: '' });
   const [deposit, setDeposit] = useState({ method: 'CASH', amount: '' });
   const [codes, setCodes] = useState([]);
-  const [loading, setLoading] = useState(false);
   // Bill splitting: the other open folios on the same stay, and which transaction
   // the user is currently moving. A stay can carry several folios when different
   // people are settling different parts of the bill.
@@ -27,6 +28,20 @@ export default function Folios() {
   // The QR payment code currently on screen, if any.
   const [qr, setQr] = useState(null);
 
+  // The folio list, mirroring the Guest Profiles pattern:
+  //   browse      resting state — the most recent folios
+  //   suggesting  live matches for what is being typed, still as table rows
+  //   selected    a folio was chosen: the list is GONE, not narrowed to one row
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [listMode, setListMode] = useState('browse');
+  const [searching, setSearching] = useState(false);
+  // Debounce timer plus a monotonic request id: without the id a slow response
+  // for "F-1" can land after a fast one for "F-11" and repopulate the table with
+  // the wider result.
+  const suggestTimer = useRef(null);
+  const suggestSeq = useRef(0);
+
   useEffect(() => {
     api
       .get('/api/charge-codes')
@@ -34,12 +49,9 @@ export default function Folios() {
       .catch(() => {});
   }, []);
 
-  // `live` marks an SSE-triggered reload. Refresh in place rather than showing
-  // the skeleton, so the list does not blank on every event from any module.
-  async function load(id, { live = false } = {}) {
+  async function load(id) {
     const target = id || folioId;
     if (!target) return;
-    if (!live) setLoading(true);
     try {
       const [f, s] = await Promise.all([
         api.get(`/api/folios/${target}`),
@@ -50,15 +62,104 @@ export default function Folios() {
       setFolioId(target);
     } catch (e) {
       toast.error(errMsg(e));
-    } finally {
-      setLoading(false);
     }
   }
 
   useEffect(() => {
     const qid = searchParams.get('id');
-    if (qid) load(qid);
+    if (qid) {
+      load(qid);
+      setListMode('selected');
+    }
   }, [searchParams]);
+
+  useEffect(() => () => clearTimeout(suggestTimer.current), []);
+
+  // `term` is passed explicitly rather than read from `q`: state here reads one
+  // render stale, which is what makes a just-created row fail to appear.
+  async function searchFolios(term = q, mode) {
+    const mine = ++suggestSeq.current;
+    setSearching(true);
+    try {
+      const { data } = await api.get(`/api/folios?q=${encodeURIComponent(term ?? '')}`);
+      if (mine !== suggestSeq.current) return;
+      setResults(Array.isArray(data) ? data : []);
+      if (mode) setListMode(mode);
+    } catch (e) {
+      if (mine === suggestSeq.current) toast.error(errMsg(e));
+    } finally {
+      if (mine === suggestSeq.current) setSearching(false);
+    }
+  }
+
+  function onQueryChange(v) {
+    setQ(v);
+    clearTimeout(suggestTimer.current);
+    const term = v.trim();
+    if (!term) {
+      setListMode('browse');
+      searchFolios('', 'browse');
+      return;
+    }
+    setListMode('suggesting');
+    suggestTimer.current = setTimeout(() => searchFolios(term, 'suggesting'), 220);
+  }
+
+  // A single match IS the answer, so it opens straight through rather than
+  // making you click the one row it just found.
+  async function onSearchSubmit(e) {
+    e?.preventDefault();
+    clearTimeout(suggestTimer.current);
+    const term = q.trim();
+    if (!term) return searchFolios('', 'browse');
+    const mine = ++suggestSeq.current;
+    setSearching(true);
+    try {
+      const { data } = await api.get(`/api/folios?q=${encodeURIComponent(term)}`);
+      if (mine !== suggestSeq.current) return;
+      setSearching(false);
+      const rows = Array.isArray(data) ? data : [];
+      setResults(rows);
+      if (rows.length === 1) pickFolio(rows[0]);
+      else setListMode('suggesting');
+    } catch (e) {
+      if (mine !== suggestSeq.current) return;
+      setSearching(false);
+      toast.error(errMsg(e));
+    }
+  }
+
+  function pickFolio(f) {
+    clearTimeout(suggestTimer.current);
+    // Bump the sequence so a debounced response still in flight cannot land
+    // afterwards and put the list back over the selection.
+    suggestSeq.current++;
+    setQ(f.folioNumber || '');
+    setResults([f]);
+    setListMode('selected');
+    load(f.id);
+  }
+
+  function clearFolioSearch() {
+    clearTimeout(suggestTimer.current);
+    setQ('');
+    setListMode('browse');
+    searchFolios('', 'browse');
+  }
+
+  // Populate the list on first render. Ordering hazard: the `?id=` effect
+  // above runs first on mount and sets listMode to 'selected' SYNCHRONOUSLY
+  // (before this effect's fetch even starts). This effect's `searchFolios`
+  // call is async, so its `setListMode('browse')` lands a network round trip
+  // later — after 'selected' has already been set — and would otherwise
+  // stomp it back to 'browse', popping the list open above the already-loaded
+  // folio card. So: only force 'browse' when there is no `?id=` waiting to
+  // claim 'selected'. The fetch still runs either way, so `results` holds the
+  // recent-folios list and "Show all" works immediately after a deep link.
+  useEffect(() => {
+    searchFolios('', searchParams.get('id') ? undefined : 'browse');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Live: a charge, payment, refund, deposit or settlement posted from another
   // screen (or by the night audit) refreshes the open folio automatically.
@@ -231,47 +332,145 @@ export default function Folios() {
       <h2>Folios</h2>
 
       <div className="panel">
-        <h3>Open a folio</h3>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input placeholder="Folio id" value={folioId} onChange={(e) => setFolioId(e.target.value)} />
-          <button onClick={() => load()} disabled={loading}>
-            {loading ? <span className="spinner" /> : 'Open'}
+        {/* No heading once a folio is chosen — a label over a lone search box,
+            with the answer in a card below, would be labelling a list that is
+            no longer there. */}
+        {listMode !== 'selected' && (
+          <div className="panel-head" style={{ marginBottom: 12 }}>
+            <h3>{listMode === 'browse' ? 'Recent folios' : 'Matching folios'}</h3>
+            {searching && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                <span className="spinner" /> Searching…
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="guest-search-bar">
+          <input
+            className="guest-search-input"
+            value={q}
+            placeholder="Folio number or guest name"
+            onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onSearchSubmit(e);
+              if (e.key === 'Escape') clearFolioSearch();
+            }}
+            autoComplete="off"
+            aria-label="Search folios by number or guest name"
+          />
+          <button type="button" onClick={onSearchSubmit}>
+            Search
           </button>
-          {folio && (
-            <button className="secondary" onClick={printPdf}>
-              Print PDF
-            </button>
-          )}
-          {folio && folio.status === 'OPEN' && (
-            <button className="danger" onClick={closeFolio}>
-              Close folio
-            </button>
-          )}
-          {folio && folio.stayId && folio.status === 'OPEN' && (
-            <button className="secondary" onClick={addFolio}>
-              Split bill — add folio
+          {(q || listMode !== 'browse') && (
+            <button type="button" className="secondary" onClick={clearFolioSearch}>
+              Show all
             </button>
           )}
         </div>
-        {folio && folio.stayId && siblings.length > 0 && (
-          <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
-            This stay has {siblings.length + 1} open folios:{' '}
-            {[folio, ...siblings].map((f) => f.folioNumber).join(', ')}. Use <strong>Move</strong> on a
-            charge to put it on another folio. Every folio must be settled before the guest can check out.
-          </p>
+
+        {listMode === 'selected' ? null : results.length === 0 ? (
+          <EmptyState
+            kind="search"
+            title="No folios found"
+            hint={
+              q
+                ? `No matches for "${q}". Try a folio number or the guest's name.`
+                : 'Folios open automatically when a guest checks in.'
+            }
+          />
+        ) : (
+          <>
+            {listMode !== 'browse' && (
+              <div className="guest-isolated-bar">
+                <span>
+                  {results.length === 1 ? '1 match' : `${results.length} matches`} for “{q}” — choose
+                  one, or press Enter.
+                </span>
+                <button type="button" className="small secondary" onClick={clearFolioSearch}>
+                  Show all folios
+                </button>
+              </div>
+            )}
+            <table className="table-clickable">
+              <thead>
+                <tr>
+                  <th className="t-c"></th>
+                  <th>Folio #</th>
+                  <th>Guest</th>
+                  <th className="t-c">Status</th>
+                  <th style={{ textAlign: 'right' }}>Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* The whole row is the control. role/tabIndex/onKeyDown are what
+                    keep it usable without a mouse — a bare onClick on a <tr> is
+                    invisible to the keyboard and to a screen reader. */}
+                {results.map((f) => (
+                  <tr
+                    key={f.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open folio ${f.folioNumber}`}
+                    onClick={() => pickFolio(f)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        pickFolio(f);
+                      }
+                    }}
+                  >
+                    <td className="t-c" style={{ width: 40 }}>
+                      <Avatar name={f.guestName || 'Folio'} size={32} />
+                    </td>
+                    <td>{f.folioNumber}</td>
+                    <td>{f.guestName || <span className="muted">—</span>}</td>
+                    <td className="t-c">
+                      <span className={`badge ${String(f.status).toLowerCase()}`}>{f.status}</span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {formatPeso(f.balanceCents, { currency: f.currency })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
-        <p className="muted" style={{ marginTop: 8 }}>
-          Tip: open a folio from the Arrivals page's "Folio" button to skip typing the id.
-        </p>
       </div>
 
       {folio && (
         <>
           <div className="panel">
-            <h3>
-              Folio {folio.folioNumber} ·{' '}
-              <span className={`badge ${folio.status.toLowerCase()}`}>{folio.status}</span>
-            </h3>
+            <div className="panel-head">
+              <h3 style={{ margin: 0 }}>
+                Folio {folio.folioNumber} ·{' '}
+                <span className={`badge ${folio.status.toLowerCase()}`}>{folio.status}</span>
+              </h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="secondary" onClick={printPdf}>
+                  Print PDF
+                </button>
+                {folio.status === 'OPEN' && folio.stayId && (
+                  <button className="secondary" onClick={addFolio}>
+                    Split bill — add folio
+                  </button>
+                )}
+                {folio.status === 'OPEN' && (
+                  <button className="danger" onClick={closeFolio}>
+                    Close folio
+                  </button>
+                )}
+              </div>
+            </div>
+            {folio.stayId && siblings.length > 0 && (
+              <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+                This stay has {siblings.length + 1} open folios:{' '}
+                {[folio, ...siblings].map((f) => f.folioNumber).join(', ')}. Use <strong>Move</strong> on a
+                charge to put it on another folio. Every folio must be settled before the guest can check
+                out.
+              </p>
+            )}
             <div className="metrics">
               <div className="metric">
                 <div className="label">Balance</div>
@@ -296,6 +495,12 @@ export default function Folios() {
                   <th>Code</th>
                   <th>Description</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
+                  {/* Tax was invisible here while every charge carried zero of
+                      it. Now that charges attract VAT and service charge, a
+                      cashier posting 1,000.00 watched Balance move 1,220.00
+                      with nothing on screen accounting for the 220.00. The
+                      ledger has to add up on its face. */}
+                  <th style={{ textAlign: 'right' }}>Tax</th>
                   {siblings.length > 0 && <th />}
                 </tr>
               </thead>
@@ -309,6 +514,17 @@ export default function Folios() {
                     <td>{t.chargeCode || '—'}</td>
                     <td>{t.description}</td>
                     <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                    {/* taxAmountCents arrives as a decimal STRING (BigInt has no
+                        JSON form); formatPeso takes either. Compared as a
+                        string rather than parsed — there is no arithmetic to do
+                        here, and money must never touch a float. A row with no
+                        tax shows a dash rather than 0.00, so a genuinely
+                        untaxed line reads as untaxed at a glance. */}
+                    <td style={{ textAlign: 'right' }}>
+                      {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
+                        ? '—'
+                        : formatPeso(t.taxAmountCents)}
+                    </td>
                     {siblings.length > 0 && (
                       <td style={{ textAlign: 'right' }}>
                         {/* Payments stay where they were taken, and a transfer cannot

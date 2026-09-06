@@ -6488,3 +6488,45 @@ html[data-theme='dark'] .hk-tooltip {
   font-family: ui-monospace, Menlo, monospace;
   overflow-wrap: anywhere;
 }
+
+/* Segmented range switcher — used in the Arrivals panel header. Sized to sit
+   level with an <h3> in .panel-head without stretching it.
+   Token substitutions (verified against the definitions in this file — the
+   brief's names don't all exist): --surface-hover -> --row-hover,
+   --text-muted -> --muted, --primary/--primary-hover -> --accent/--accent-hover. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  /* .panel-head has no justify-content; every other right-aligned panel-head
+     control (see .filter-bar, used by Rooms.jsx and Amenities.jsx) pushes
+     itself right the same way. */
+  margin-left: auto;
+}
+.seg-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.seg-btn:last-child {
+  border-right: 0;
+}
+.seg-btn:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.seg-btn.is-active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.seg-btn.is-active:hover {
+  background: var(--accent-hover);
+}
