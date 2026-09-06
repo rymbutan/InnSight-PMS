@@ -283,7 +283,7 @@ export default function PublicBooking() {
 
         {step === 3 && confirmed && (
           <div className="panel" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-            <div style={{ color: 'var(--green)', marginBottom: 12 }}>
+            <div style={{ color: 'var(--text-success)', marginBottom: 12 }}>
               <Icon name="check-circle" size={48} />
             </div>
             <h2 style={{ margin: '0 0 12px' }}>Booking confirmed!</h2>

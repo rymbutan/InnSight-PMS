@@ -1,6 +1,17 @@
 // Housekeeping status metadata — maps the PMS RoomStatus enum to the
 // industry-standard codes taught in the SLSU Fundamentals of Lodging syllabus
 // (VC, VCI, VD, OCC, OOO, OOS) plus the colors used on the hotel map.
+// Ink for text drawn ON a `fill` below.
+//
+// Every fill in this table is a light pastel and is the SAME value in both
+// themes — a vacant-clean room is mint whether the app is light or dark. So the
+// text on it can never be a theme token: the hotel map drew the room number in
+// var(--text) and the room type in var(--muted), which are near-white under
+// data-theme="dark", i.e. white on mint. Both are fixed dark values here,
+// beside the fills they have to work against.
+export const ON_FILL_INK = '#0f172a'; // room number — 15:1 on the lightest fill
+export const ON_FILL_INK_SOFT = '#475569'; // room type — 6.0:1 on the darkest fill
+
 export const STATUS_META = {
   CLEAN: {
     code: 'VC',
