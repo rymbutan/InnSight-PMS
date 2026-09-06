@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { LAYOUTS, getRoomPlan, setRoomLayouts, hasServerLayouts, storedLayoutFor } from './roomLayouts.js';
+import {
+  LAYOUTS,
+  getRoomPlan,
+  setRoomLayouts,
+  hasServerLayouts,
+  storedLayoutFor,
+  customLayoutKeys,
+} from './roomLayouts.js';
 
 // The shared store replaced per-browser localStorage. These pin the two things
 // that made that change worth doing: the code layout is the default, and one
@@ -72,11 +79,64 @@ test('a malformed row is ignored rather than breaking the room', () => {
   reset();
   setRoomLayouts([
     { roomTier: 'Standard', room: null, furniture: null },
-    { roomTier: 'NotATier', room: { w: 1, l: 1 }, furniture: [] },
+    // Unusable custom keys: one with characters the server would never accept,
+    // one with no dimensions. A custom layout has no committed base to fall back
+    // on, so a row without w/l would render a room with no floor.
+    { roomTier: 'Not/A/Tier', room: { w: 1, l: 1 }, furniture: [] },
+    { roomTier: 'Cabana', room: { spawn: [0, 0] }, furniture: [] },
     null,
   ]);
   assert.equal(getRoomPlan('Standard').furniture.length, LAYOUTS.Standard.furniture.length);
   assert.equal(hasServerLayouts(), false);
+});
+
+// ── Custom layouts ──────────────────────────────────────────────────────────
+// A layout authored for a room type the property invented. These used to be
+// dropped on hydrate, which is what capped the feature at the four tiers that
+// ship in the code.
+
+test('a custom layout key survives hydration and is served by exact name', () => {
+  reset();
+  setRoomLayouts([
+    {
+      roomTier: 'Cabana',
+      room: { w: 7, l: 4, spawn: [0, 0] },
+      furniture: [{ model: 'armchair', pos: [1, 1] }],
+      walls: [],
+      stations: [],
+    },
+  ]);
+  assert.equal(hasServerLayouts(), true);
+  assert.deepEqual(customLayoutKeys(), ['Cabana']);
+  const plan = getRoomPlan('Cabana');
+  assert.equal(plan.w, 7);
+  assert.equal(plan.l, 4);
+  assert.equal(plan.furniture.length, 1);
+});
+
+test('a custom layout does not leak into the tier it would canonicalise to', () => {
+  // canonicalTier('Cabana') is 'Standard'. Before the exact-key lookup, storing
+  // a custom layout under its own name and then asking for Standard could only
+  // ever return one of the two — this pins that they stay separate.
+  reset();
+  setRoomLayouts([
+    { roomTier: 'Cabana', room: { w: 7, l: 4, spawn: [0, 0] }, furniture: [], walls: [], stations: [] },
+  ]);
+  assert.equal(getRoomPlan('Standard').w, LAYOUTS.Standard.w);
+  assert.equal(getRoomPlan('Cabana').w, 7);
+  assert.equal(storedLayoutFor('Standard'), null);
+  assert.ok(storedLayoutFor('Cabana'));
+});
+
+test('a built-in tier still resolves through the canonical fold', () => {
+  // "Deluxe King" is a room-type name, not a tier. It must keep folding to
+  // Deluxe rather than being treated as a missing custom key.
+  reset();
+  setRoomLayouts([
+    { roomTier: 'Deluxe', room: { w: 9, l: 9, spawn: [0, 0] }, furniture: [], walls: [], stations: [] },
+  ]);
+  assert.equal(getRoomPlan('Deluxe King').w, 9);
+  assert.deepEqual(customLayoutKeys(), []);
 });
 
 test('re-hydrating replaces rather than merges', () => {

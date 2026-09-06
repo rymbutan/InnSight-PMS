@@ -5,7 +5,10 @@ import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { pesosToCents, centsToPesos, formatPeso } from '../lib/money';
 import EmptyState from '../components/EmptyState';
+import { localDay } from '../lib/date';
+import { labelize } from '../lib/labels';
 import { useConfirm } from '../components/ConfirmDialog';
+import Icon from '../components/Icon';
 
 const CATEGORIES = [
   'EVENT_HALL',
@@ -41,6 +44,18 @@ function total(f, { units = 1, persons = 1, startAt, endAt } = {}) {
   if (f.pricingModel === 'PER_PERSON') return p * Math.max(1, persons || units);
   return p * Math.max(1, units);
 }
+// A date plus two clock times → the two ISO instants the API wants. Built from
+// the LOCAL date string rather than parsed out of a UTC stamp: `2026-09-06` +
+// `09:00` has to mean nine in the morning at the hotel, whatever offset the
+// browser is on.
+function bookWindow({ date, start, end }) {
+  if (!date || !start || !end) return { startAt: null, endAt: null };
+  return {
+    startAt: new Date(`${date}T${start}`).toISOString(),
+    endAt: new Date(`${date}T${end}`).toISOString(),
+  };
+}
+
 const blank = {
   code: '',
   name: '',
@@ -64,17 +79,48 @@ export default function Amenities() {
   const [activeFilter, setActiveFilter] = useState('');
   const [form, setForm] = useState(blank);
   const [edit, setEdit] = useState({}); // { [code]: pesos }
-  const [sel, setSel] = useState(null); // selected facility code for POS
-  const [pos, setPos] = useState({
-    guestName: '',
-    units: 1,
-    persons: 1,
-    startAt: '',
-    endAt: '',
-    method: 'CASH',
+  // Which reading of the catalogue is on screen, and whether the add form has
+  // replaced it. A string, not two booleans — 'open but no tab' is not a state
+  // that should be expressible.
+  const [amTab, setAmTab] = useState('catalog');
+  const [addOpen, setAddOpen] = useState(false);
+  // The catalogue and laundry are reference, not the day's work, so the panel
+  // starts closed and the row is the booking desk until you ask for it.
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  // Booking desk state. `bookMode` decides which fields show AND how the charge
+  // settles, so it is one value rather than a pair of flags.
+  const [bookMode, setBookMode] = useState('hotel');
+  const [bookBusy, setBookBusy] = useState(false);
+  const [inHouse, setInHouse] = useState([]);
+  const [bookForm, setBookForm] = useState(() => {
+    // The facility calendar links here with the cell the user clicked already
+    // chosen. Read once, at mount, into the initial state — setting it from an
+    // effect afterwards would flash the empty form and then overwrite anything
+    // typed in that first frame.
+    const q = new URLSearchParams(window.location.search);
+    const date = q.get('date');
+    return {
+      facilityCode: q.get('facility') || '',
+      stayId: '',
+      guestName: '',
+      guestPhone: '',
+      // Only a real YYYY-MM-DD is honoured; a junk param must not put the desk
+      // on an invalid date that the server then rejects.
+      date: /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : localDay(new Date()),
+      start: '09:00',
+      end: '11:00',
+      persons: 1,
+      method: 'CASH',
+    };
   });
-  const today = new Date().toISOString().slice(0, 10);
-  const [schedDate, setSchedDate] = useState(today);
+  // Follows the booking form's date, which is localDay(new Date()) unless the
+  // facility calendar linked here with one — arriving to book Saturday and
+  // being shown Wednesday's schedule reads as the link having failed.
+  //
+  // localDay throughout, NOT toISOString().slice(0,10): at UTC+8 that returns
+  // yesterday for the whole morning, so the schedule opened on the wrong day
+  // until 08:00.
+  const [schedDate, setSchedDate] = useState(() => bookForm.date);
   const [bookings, setBookings] = useState([]);
 
   // Laundry ticket — several garment lines charged as one folio line.
@@ -98,8 +144,24 @@ export default function Amenities() {
       toast.error(errMsg(e));
     }
   }
+
   useEffect(() => {
     load();
+    // Who is checked in, for the hotel-guest branch of the booking form. Fails
+    // quietly: a desk clerk taking a walk-in booking should not be blocked by
+    // the stay service being down.
+    api
+      .get('/api/in-house')
+      .then(({ data }) => setInHouse(data || []))
+      .catch(() => setInHouse([]));
+    // Arriving from the top bar's "Book a facility": put the desk in view. The
+    // panel is already the first thing in row 1, so this only matters on a
+    // short window where the overview strip fills the fold.
+    if (new URLSearchParams(window.location.search).get('book') === '1') {
+      requestAnimationFrame(() =>
+        document.querySelector('.bf-head')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      );
+    }
   }, []);
   useEffect(() => {
     loadBookings();
@@ -130,7 +192,95 @@ export default function Amenities() {
     }
   }
 
-  const selected = useMemo(() => facilities.find((f) => f.code === sel) || null, [facilities, sel]);
+  // ── Booking a facility ────────────────────────────────────────────────────
+  // Only reservable, active spaces can be booked by time slot — the server
+  // rejects anything else with "walk-in only", so offering it here would be
+  // offering a guaranteed error.
+  const bookable = useMemo(() => facilities.filter((f) => f.reservable && f.active), [facilities]);
+  const bookFacility = useMemo(
+    () => bookable.find((f) => f.code === bookForm.facilityCode) || null,
+    [bookable, bookForm.facilityCode]
+  );
+  // Advisory only. `total()` mirrors the server's pricing so the desk can quote
+  // before committing, but the booking endpoint prices the slot itself and is
+  // the authority — this number is never sent.
+  const bookPreview = useMemo(() => {
+    if (!bookFacility) return 0;
+    const { startAt, endAt } = bookWindow(bookForm);
+    return total(bookFacility, { persons: Number(bookForm.persons) || 1, startAt, endAt });
+  }, [bookFacility, bookForm]);
+
+  async function submitBooking(e) {
+    e.preventDefault();
+    if (!bookFacility) return toast.error('Pick a facility.');
+    const { startAt, endAt } = bookWindow(bookForm);
+    if (!startAt || !endAt) return toast.error('Pick a date and a time range.');
+    if (new Date(endAt) <= new Date(startAt)) return toast.error('The end time must be after the start.');
+
+    const stay = bookMode === 'hotel' ? inHouse.find((s) => s.id === bookForm.stayId) : null;
+    if (bookMode === 'hotel' && !stay) return toast.error('Pick the in-house guest.');
+
+    setBookBusy(true);
+    try {
+      // Step 1 — the slot. Same call for both guest types: a booking is a
+      // booking, and it is what holds the room against a double-sale.
+      const { data: booking } = await api.post('/api/facility-bookings', {
+        facilityCode: bookFacility.code,
+        guestName: bookMode === 'hotel' ? stay.guestName : bookForm.guestName || 'Walk-in',
+        guestPhone: bookMode === 'walkin' ? bookForm.guestPhone || undefined : undefined,
+        startAt,
+        endAt,
+        persons: Number(bookForm.persons) || 1,
+      });
+
+      if (bookMode === 'hotel') {
+        // Step 2a — post to the stay's OPEN folio. No money moves now; it
+        // settles at check-out with everything else on the room.
+        const { data: folios } = await api.get(`/api/folios?stayId=${stay.id}`);
+        const open = (folios || []).find((f) => f.status !== 'CLOSED');
+        if (!open) {
+          // The slot is held but nothing can be charged, and a silent unpaid
+          // booking is worse than a loud one — say exactly what is missing.
+          toast.error(`Booked, but ${stay.guestName} has no open folio to charge. Post it manually.`);
+        } else {
+          await api.post(`/api/folios/${open.id}/charges`, {
+            description: `${bookFacility.name} — facility booking`,
+            amountCents: booking.priceCents,
+            quantity: 1,
+            reference: booking.id,
+            sourceSystem: 'AMENITIES',
+          });
+          await api.patch(`/api/facility-bookings/${booking.id}`, { folioId: open.id });
+          toast.success(`${bookFacility.name} booked for ${stay.guestName} — posted to their folio.`);
+        }
+      } else {
+        // Step 2b — charge and collect now, on its own visitor folio. The sale
+        // endpoint re-prices from inventory, so the amount cannot be forged.
+        const { data } = await api.post('/api/folios/amenity-sale', {
+          facilityCode: bookFacility.code,
+          guestName: bookForm.guestName || 'Walk-in',
+          persons: Number(bookForm.persons) || 1,
+          startAt,
+          endAt,
+          method: bookForm.method,
+          facilityBookingId: booking.id,
+        });
+        toast.success(
+          `${bookFacility.name} booked — ${formatPeso(Number(data.amountCents))} · folio ${data.folioNumber}`
+        );
+      }
+
+      setBookForm((b) => ({ ...b, guestName: '', guestPhone: '', stayId: '', persons: 1 }));
+      // The day and the month both changed; the calendar count is what tells
+      // the next person the slot has gone.
+      setSchedDate(bookForm.date);
+      loadBookings(bookForm.date);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBookBusy(false);
+    }
+  }
 
   // Divisible spaces list under their parent, so the hall's sections read as
   // part of it rather than as three unrelated rooms.
@@ -152,6 +302,31 @@ export default function Amenities() {
   const catalogCategories = useMemo(
     () => [...new Set(facilities.map((f) => f.category).filter(Boolean))].sort(),
     [facilities]
+  );
+
+  // One chip per category the property actually has, with how many amenities
+  // sit in it and how many of those can be booked. Derived from the data, like
+  // catalogCategories above — a category added on the server appears here with
+  // no frontend change.
+  //
+  // The colour is a stable hash of the category name rather than a lookup
+  // table: a table would need editing every time someone invents a category,
+  // and the chip would silently fall back to grey until they did.
+  const categoryChips = useMemo(
+    () =>
+      catalogCategories.map((key) => {
+        const inCat = facilities.filter((f) => f.category === key);
+        let h = 0;
+        for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) % 360;
+        return {
+          key,
+          label: labelize(key),
+          count: inCat.length,
+          reservable: inCat.filter((f) => f.reservable && f.active).length,
+          color: `hsl(${h} 55% 45%)`,
+        };
+      }),
+    [catalogCategories, facilities]
   );
 
   const visibleFacilities = useMemo(
@@ -248,488 +423,618 @@ export default function Amenities() {
     });
   }
 
-  async function sell() {
-    if (!selected) return;
-    try {
-      const body = { facilityCode: selected.code, guestName: pos.guestName || undefined, method: pos.method };
-      if (selected.pricingModel === 'PER_PERSON') body.persons = Number(pos.persons) || 1;
-      else if (selected.reservable) {
-        body.startAt = pos.startAt;
-        body.endAt = pos.endAt;
-      } else body.units = Number(pos.units) || 1;
-
-      let bookingId;
-      if (selected.reservable) {
-        if (!pos.startAt || !pos.endAt)
-          return toast.error('Pick start and end time for a reservable facility.');
-        const { data: bk } = await api.post('/api/facility-bookings', {
-          facilityCode: selected.code,
-          guestName: pos.guestName || 'Walk-in',
-          startAt: pos.startAt,
-          endAt: pos.endAt,
-          persons: Number(pos.persons) || 1,
-        });
-        bookingId = bk.id;
-        body.facilityBookingId = bookingId;
-      }
-      const { data } = await api.post('/api/folios/amenity-sale', body);
-      toast.success(
-        `Sold ${data.facility} — ${formatPeso(Number(data.amountCents))} · folio ${data.folioNumber}`
-      );
-      setPos({ guestName: '', units: 1, persons: 1, startAt: '', endAt: '', method: 'CASH' });
-      setSel(null);
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  }
-
-  const preview = selected
-    ? total(selected, {
-        units: Number(pos.units),
-        persons: Number(pos.persons),
-        startAt: pos.startAt,
-        endAt: pos.endAt,
-      })
-    : 0;
-
   return (
     <div>
-      <h2>Amenities &amp; Facilities</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Amenities &amp; Facilities</h1>
+        </div>
+      </div>
 
-      {/* Walk-in POS / booking */}
-      {canSell && (
-        <div className="panel">
-          <h3>Visitor sale (non-hotel guest)</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Charge a visitor — someone using an amenity without staying at the hotel. No room assignment is
-            needed; the sale is tracked on its own visitor folio.
-          </p>
-          <div className="row">
-            <div>
-              <label>Amenity</label>
-              <select value={sel || ''} onChange={(e) => setSel(e.target.value || null)}>
-                <option value="">— select —</option>
-                {facilities
-                  .filter((f) => f.active)
-                  .map((f) => (
-                    <option key={f.code} value={f.code}>
-                      {f.name} · {formatPeso(f.priceCents)} {f.unit || ''}
-                      {f.reservable ? ' · bookable' : ''}
-                    </option>
-                  ))}
-              </select>
+      {/* OVERVIEW — what the property has, and the catalogue filter, in one
+          full-width strip above everything that uses it. */}
+      <div className="panel">
+        <div className="panel-head">
+          <h3>Overview</h3>
+        </div>
+        <div className="filter-board" role="group" aria-label="Filter the catalogue by category">
+          {categoryChips.map((c) => {
+            const on = catFilter === c.key;
+            return (
+              <button
+                key={c.key}
+                type="button"
+                className={`filter-chip${on ? ' is-on' : ''}`}
+                aria-pressed={on}
+                onClick={() => setCatFilter(on ? '' : c.key)}
+                title={`${c.count} ${c.label.toLowerCase()}`}
+              >
+                <span className="filter-chip-dot" style={{ background: c.color }} />
+                <span className="filter-chip-num">{c.count}</span>
+                <span className="filter-chip-label">{c.label}</span>
+                {c.reservable > 0 && <span className="filter-chip-code">{c.reservable} bookable</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Row 1 — the day's bookings beside the booking desk.
+          The month calendar that used to sit here is gone: it cost the whole
+          right column, which is where the booking form belongs. `am-row-stretch`
+          makes the two columns equal height, so the bookings table grows to
+          meet the form instead of ending halfway up it. */}
+      <div className="am-row am-row-stretch">
+        <div className="am-col-main">
+          {canSell && (
+            <div className="panel">
+              <div className="panel-head">
+                <h3>Facility bookings</h3>
+                <input
+                  type="date"
+                  value={schedDate}
+                  onChange={(e) => setSchedDate(e.target.value)}
+                  style={{ marginLeft: 'auto' }}
+                />
+              </div>
+              {bookings.length === 0 ? (
+                <EmptyState
+                  kind="inbox"
+                  title="No bookings for this date"
+                  hint="Reservable amenities (halls, meeting rooms) booked for this day appear here."
+                />
+              ) : (
+                <table style={{ marginTop: 10 }}>
+                  <thead>
+                    <tr>
+                      <th>Facility</th>
+                      <th>Time</th>
+                      <th>Guest</th>
+                      <th className="t-c">Persons</th>
+                      <th className="t-n">Charge</th>
+                      <th className="t-c">Status</th>
+                      <th className="t-c">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bookings.map((b) => (
+                      <tr key={b.id} style={{ opacity: b.status === 'CANCELLED' ? 0.5 : 1 }}>
+                        <td>{b.facility?.name || b.facilityId}</td>
+                        <td>
+                          {new Date(b.startAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                          –
+                          {new Date(b.endAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </td>
+                        <td>{b.guestName}</td>
+                        <td className="t-c">{b.persons}</td>
+                        <td className="t-n">
+                          {formatPeso(b.priceCents)}
+                          {b.folioId ? ' · paid' : ''}
+                        </td>
+                        <td className="t-c">
+                          <span className={`badge ${b.status === 'CANCELLED' ? 'out' : 'clean'}`}>
+                            {b.status}
+                          </span>
+                        </td>
+                        <td className="t-actions">
+                          {b.status === 'CONFIRMED' && (
+                            <button className="small secondary" onClick={() => cancelBooking(b.id)}>
+                              Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
-            {selected && (
-              <>
-                <div>
-                  <label>Visitor name (optional)</label>
+          )}
+        </div>
+        <div className="am-col-side">
+          {/* Book a facility. This replaced "Visitor sale", which could only
+              ever charge a walk-in: it opened a WALKIN folio and collected in
+              full, so a guest already staying here had to be rung up as a
+              stranger and pay twice at the desk. The booking is the same either
+              way; only where the money lands differs. */}
+          {canSell && (
+            <div className="panel bf-panel">
+              <div className="bf-head">
+                <h3>Book a facility</h3>
+                <span className="muted bf-sub">
+                  {bookable.length} bookable space{bookable.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              {bookable.length === 0 ? (
+                <p className="muted se-note">
+                  No reservable spaces yet. Mark an amenity <strong>Reservable</strong> in the catalogue to
+                  book it by time slot.
+                </p>
+              ) : (
+                <form className="bf-form" onSubmit={submitBooking}>
+                  {/* Who it is for. The two branches take different fields and
+                      settle differently, so the choice comes first rather than
+                      being inferred from whichever box got filled in. */}
+                  <div className="seg" role="tablist" aria-label="Guest type">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={bookMode === 'hotel'}
+                      className={bookMode === 'hotel' ? 'is-on' : ''}
+                      onClick={() => setBookMode('hotel')}
+                    >
+                      Hotel guest
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={bookMode === 'walkin'}
+                      className={bookMode === 'walkin' ? 'is-on' : ''}
+                      onClick={() => setBookMode('walkin')}
+                    >
+                      Non-hotel
+                    </button>
+                  </div>
+
+                  <label>Facility</label>
+                  <select
+                    required
+                    value={bookForm.facilityCode}
+                    onChange={(e) => setBookForm((b) => ({ ...b, facilityCode: e.target.value }))}
+                  >
+                    <option value="">—</option>
+                    {bookable.map((f) => (
+                      <option key={f.code} value={f.code}>
+                        {f.name} · {formatPeso(f.priceCents)} {labelize(f.pricingModel).toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+
+                  {bookMode === 'hotel' ? (
+                    <>
+                      <label>In-house guest</label>
+                      <select
+                        required
+                        value={bookForm.stayId}
+                        onChange={(e) => setBookForm((b) => ({ ...b, stayId: e.target.value }))}
+                      >
+                        <option value="">—</option>
+                        {inHouse.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.guestName}
+                            {s.roomNumber ? ' · room ' + s.roomNumber : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {inHouse.length === 0 && (
+                        <p className="muted se-note">Nobody is checked in right now.</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="row row-split">
+                        <div>
+                          <label>Guest name</label>
+                          <input
+                            required
+                            value={bookForm.guestName}
+                            onChange={(e) => setBookForm((b) => ({ ...b, guestName: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label>Phone</label>
+                          <input
+                            value={bookForm.guestPhone}
+                            onChange={(e) => setBookForm((b) => ({ ...b, guestPhone: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <label>Payment</label>
+                      <select
+                        value={bookForm.method}
+                        onChange={(e) => setBookForm((b) => ({ ...b, method: e.target.value }))}
+                      >
+                        {METHODS.map((m) => (
+                          <option key={m}>{m}</option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+
+                  <label>Date</label>
                   <input
-                    value={pos.guestName}
-                    onChange={(e) => setPos({ ...pos, guestName: e.target.value })}
+                    required
+                    type="date"
+                    value={bookForm.date}
+                    onChange={(e) => setBookForm((b) => ({ ...b, date: e.target.value }))}
+                  />
+                  <div className="row row-split">
+                    <div>
+                      <label>From</label>
+                      <input
+                        required
+                        type="time"
+                        value={bookForm.start}
+                        onChange={(e) => setBookForm((b) => ({ ...b, start: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label>To</label>
+                      <input
+                        required
+                        type="time"
+                        value={bookForm.end}
+                        onChange={(e) => setBookForm((b) => ({ ...b, end: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <label>Persons{bookFacility?.capacity ? ' (max ' + bookFacility.capacity + ')' : ''}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={bookFacility?.capacity || undefined}
+                    value={bookForm.persons}
+                    onChange={(e) => setBookForm((b) => ({ ...b, persons: e.target.value }))}
+                  />
+
+                  {/* The price the server will compute, shown before you commit
+                      to it. Advisory only — the booking endpoint prices the slot
+                      itself and is the authority. */}
+                  {bookFacility && (
+                    <div className="bf-total">
+                      <span>Total</span>
+                      <strong>{formatPeso(bookPreview)}</strong>
+                    </div>
+                  )}
+                  <p className="muted se-note">
+                    {bookMode === 'hotel'
+                      ? 'Posted to the guest’s open folio — settled at check-out.'
+                      : 'Charged and collected now on its own visitor folio.'}
+                  </p>
+
+                  <button className="btn-cta" disabled={bookBusy}>
+                    {bookBusy ? 'Booking…' : bookMode === 'hotel' ? 'Book & post to folio' : 'Book & charge'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* The catalogue, full width UNDER both — it is reference you open when
+          setting a price, not something the desk needs beside it. */}
+      {!catalogOpen ? (
+        <button type="button" className="am-catalog-toggle" onClick={() => setCatalogOpen(true)}>
+          <Icon name="box" size={15} strokeWidth={2} />
+          View catalog &amp; laundry
+          <span className="muted">{facilities.length} amenities</span>
+          <Icon name="chevron-down" size={15} strokeWidth={2} />
+        </button>
+      ) : (
+        <div className="panel">
+          <div className="panel-head">
+            {/* Catalogue and laundry are two readings of the same list — the
+                  laundry ticket prices straight off the LAUNDRY rows — so they
+                  are tabs of one panel rather than two panels repeating it. */}
+            <button
+              type="button"
+              className="rt-add am-catalog-close"
+              onClick={() => setCatalogOpen(false)}
+              aria-label="Hide the catalogue"
+              title="Hide"
+            >
+              <Icon name="chevron-up" size={15} strokeWidth={2.6} />
+            </button>
+            <div className="seg" role="tablist" aria-label="Catalogue view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={amTab === 'catalog'}
+                className={amTab === 'catalog' ? 'is-on' : ''}
+                onClick={() => {
+                  setAmTab('catalog');
+                  setAddOpen(false);
+                }}
+              >
+                Catalog
+              </button>
+              {canSell && laundryItems.length > 0 && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={amTab === 'laundry'}
+                  className={amTab === 'laundry' ? 'is-on' : ''}
+                  onClick={() => {
+                    setAmTab('laundry');
+                    setAddOpen(false);
+                  }}
+                >
+                  Laundry
+                </button>
+              )}
+            </div>
+            {!addOpen && amTab === 'catalog' && (
+              <div className="filter-bar">
+                <label className="filter-inline">
+                  <span>Category</span>
+                  <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+                    <option value="">All categories</option>
+                    {catalogCategories.map((c) => (
+                      <option key={c} value={c}>
+                        {c.replace(/_/g, ' ')}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="filter-inline">
+                  <span>Show</span>
+                  <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
+                    <option value="">All</option>
+                    <option value="active">Active only</option>
+                    <option value="inactive">Inactive only</option>
+                  </select>
+                </label>
+                <span className="filter-count">
+                  {visibleFacilities.length} of {orderedFacilities.length}
+                </span>
+              </div>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                className="rt-add"
+                style={{ marginLeft: 'auto' }}
+                onClick={() => setAddOpen((v) => !v)}
+                aria-expanded={addOpen}
+                aria-label={addOpen ? 'Close the add-amenity form' : 'Add an amenity'}
+                title={addOpen ? 'Close' : 'Add amenity'}
+              >
+                <Icon name={addOpen ? 'x' : 'plus'} size={15} strokeWidth={2.6} />
+              </button>
+            )}
+          </div>
+
+          {addOpen ? (
+            <form onSubmit={createFacility}>
+              <div className="row">
+                <div>
+                  <label>Code</label>
+                  <input
+                    required
+                    value={form.code}
+                    onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
                   />
                 </div>
-                {selected.pricingModel === 'PER_PERSON' && (
-                  <div>
-                    <label>Persons</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={pos.persons}
-                      onChange={(e) => setPos({ ...pos, persons: e.target.value })}
-                    />
-                  </div>
-                )}
-                {!selected.reservable && selected.pricingModel !== 'PER_PERSON' && (
-                  <div>
-                    <label>Quantity</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={pos.units}
-                      onChange={(e) => setPos({ ...pos, units: e.target.value })}
-                    />
-                  </div>
-                )}
-                {selected.reservable && (
-                  <>
-                    <div>
-                      <label>Start</label>
-                      <input
-                        type="datetime-local"
-                        value={pos.startAt}
-                        onChange={(e) => setPos({ ...pos, startAt: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label>End</label>
-                      <input
-                        type="datetime-local"
-                        value={pos.endAt}
-                        onChange={(e) => setPos({ ...pos, endAt: e.target.value })}
-                      />
-                    </div>
-                    {selected.capacity && (
-                      <div>
-                        <label>Persons (max {selected.capacity})</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={selected.capacity}
-                          value={pos.persons}
-                          onChange={(e) => setPos({ ...pos, persons: e.target.value })}
-                        />
-                      </div>
-                    )}
-                  </>
-                )}
                 <div>
-                  <label>Payment</label>
-                  <select value={pos.method} onChange={(e) => setPos({ ...pos, method: e.target.value })}>
+                  <label>Name</label>
+                  <input
+                    required
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label>Category</label>
+                  <select
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  >
+                    {CATEGORIES.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Pricing model</label>
+                  <select
+                    value={form.pricingModel}
+                    onChange={(e) => setForm({ ...form, pricingModel: e.target.value })}
+                  >
+                    {MODELS.map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Price (₱)</label>
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.priceCents}
+                    onChange={(e) => setForm({ ...form, priceCents: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label>Unit label</label>
+                  <input
+                    value={form.unit}
+                    placeholder="e.g. day pass"
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label>Capacity</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.capacity}
+                    onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                  />
+                </div>
+                {/* `ed-check` gives this the same small box and inline label as
+                  the editor's toggles, instead of a 36px square from the global
+                  input rule with its caption wrapping beside it. */}
+                <div className="row-action">
+                  <label className="ed-check">
+                    <input
+                      type="checkbox"
+                      checked={form.reservable}
+                      onChange={(e) => setForm({ ...form, reservable: e.target.checked })}
+                    />
+                    <span>Reservable (time-slot)</span>
+                  </label>
+                </div>
+                {/* The action is the last cell of the field row, level with the
+                  inputs rather than a block underneath them. */}
+                <div className="row-action">
+                  <button>Create amenity</button>
+                </div>
+              </div>
+            </form>
+          ) : amTab === 'laundry' ? (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Priced per piece. Enter how many of each garment; the whole ticket posts as one charge.
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Garment</th>
+                    <th className="t-n">Price / piece</th>
+                    <th className="t-c">Pieces</th>
+                    <th className="t-n">Line total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laundryItems.map((f) => {
+                    const qty = Number(laundryQty[f.code] || 0);
+                    return (
+                      <tr key={f.code}>
+                        <td>{f.name.replace(/^Laundry\s*—\s*/, '')}</td>
+                        <td className="t-n">{formatPeso(f.priceCents)}</td>
+                        <td className="t-c">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            style={{ width: 80 }}
+                            value={laundryQty[f.code] ?? ''}
+                            onChange={(e) => setLaundryQty((p) => ({ ...p, [f.code]: e.target.value }))}
+                          />
+                        </td>
+                        <td className="t-n">
+                          {qty > 0 ? formatPeso(f.priceCents * qty) : <span className="muted">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+                <div>
+                  <label>Visitor name (optional)</label>
+                  <input value={laundryGuest} onChange={(e) => setLaundryGuest(e.target.value)} />
+                </div>
+                <div>
+                  <label>Payment method</label>
+                  <select value={laundryMethod} onChange={(e) => setLaundryMethod(e.target.value)}>
                     {METHODS.map((m) => (
                       <option key={m}>{m}</option>
                     ))}
                   </select>
                 </div>
-              </>
-            )}
-          </div>
-          {selected && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
-              <strong style={{ fontSize: 18 }}>Total: {formatPeso(preview)}</strong>
-              <button className="btn-cta" onClick={sell}>
-                {selected.reservable ? 'Book & charge' : 'Charge & print'}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Laundry ticket — per-piece pricing, posted as one charge */}
-      {canSell && laundryItems.length > 0 && (
-        <div className="panel">
-          <h3>Laundry ticket</h3>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Priced per piece. Enter how many of each garment; the whole ticket posts as one charge.
-          </p>
-          <table>
-            <thead>
-              <tr>
-                <th>Garment</th>
-                <th className="t-n">Price / piece</th>
-                <th className="t-c">Pieces</th>
-                <th className="t-n">Line total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {laundryItems.map((f) => {
-                const qty = Number(laundryQty[f.code] || 0);
-                return (
-                  <tr key={f.code}>
-                    <td>{f.name.replace(/^Laundry\s*—\s*/, '')}</td>
-                    <td className="t-n">{formatPeso(f.priceCents)}</td>
-                    <td className="t-c">
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        style={{ width: 80 }}
-                        value={laundryQty[f.code] ?? ''}
-                        onChange={(e) => setLaundryQty((p) => ({ ...p, [f.code]: e.target.value }))}
-                      />
-                    </td>
-                    <td className="t-n">
-                      {qty > 0 ? formatPeso(f.priceCents * qty) : <span className="muted">—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
-            <div>
-              <label>Visitor name (optional)</label>
-              <input value={laundryGuest} onChange={(e) => setLaundryGuest(e.target.value)} />
-            </div>
-            <div>
-              <label>Payment method</label>
-              <select value={laundryMethod} onChange={(e) => setLaundryMethod(e.target.value)}>
-                {METHODS.map((m) => (
-                  <option key={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ flex: 1, textAlign: 'right', fontWeight: 600 }}>
-              Ticket total: {formatPeso(laundryTotalCents)}
-            </div>
-            <div>
-              <button onClick={postLaundryTicket} disabled={laundryLines.length === 0}>
-                Post laundry ticket
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Daily bookings schedule (halls / meeting rooms) */}
-      {canSell && (
-        <div className="panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0 }}>Facility bookings — daily schedule</h3>
-            <input type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} />
-          </div>
-          {bookings.length === 0 ? (
-            <EmptyState
-              kind="inbox"
-              title="No bookings for this date"
-              hint="Reservable amenities (halls, meeting rooms) booked for this day appear here."
-            />
+                <div style={{ flex: 1, textAlign: 'right', fontWeight: 600 }}>
+                  Ticket total: {formatPeso(laundryTotalCents)}
+                </div>
+                <div>
+                  <button onClick={postLaundryTicket} disabled={laundryLines.length === 0}>
+                    Post laundry ticket
+                  </button>
+                </div>
+              </div>
+            </>
           ) : (
-            <table style={{ marginTop: 10 }}>
-              <thead>
-                <tr>
-                  <th>Facility</th>
-                  <th>Time</th>
-                  <th>Guest</th>
-                  <th className="t-c">Persons</th>
-                  <th className="t-n">Charge</th>
-                  <th className="t-c">Status</th>
-                  <th className="t-c">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bookings.map((b) => (
-                  <tr key={b.id} style={{ opacity: b.status === 'CANCELLED' ? 0.5 : 1 }}>
-                    <td>{b.facility?.name || b.facilityId}</td>
-                    <td>
-                      {new Date(b.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–
-                      {new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td>{b.guestName}</td>
-                    <td className="t-c">{b.persons}</td>
-                    <td className="t-n">
-                      {formatPeso(b.priceCents)}
-                      {b.folioId ? ' · paid' : ''}
-                    </td>
-                    <td className="t-c">
-                      <span className={`badge ${b.status === 'CANCELLED' ? 'out' : 'clean'}`}>
-                        {b.status}
-                      </span>
-                    </td>
-                    <td className="t-actions">
-                      {b.status === 'CONFIRMED' && (
-                        <button className="small secondary" onClick={() => cancelBooking(b.id)}>
-                          Cancel
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* Catalog */}
-      <div className="panel">
-        <div className="panel-head">
-          <h3>Amenity catalog</h3>
-          <div className="filter-bar">
-            <label className="filter-inline">
-              <span>Category</span>
-              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
-                <option value="">All categories</option>
-                {catalogCategories.map((c) => (
-                  <option key={c} value={c}>
-                    {c.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="filter-inline">
-              <span>Show</span>
-              <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
-                <option value="">All</option>
-                <option value="active">Active only</option>
-                <option value="inactive">Inactive only</option>
-              </select>
-            </label>
-            <span className="filter-count">
-              {visibleFacilities.length} of {orderedFacilities.length}
-            </span>
-          </div>
-        </div>
-        {facilities.length === 0 ? (
-          <EmptyState kind="inbox" title="No amenities yet" />
-        ) : visibleFacilities.length === 0 ? (
-          <EmptyState
-            kind="search"
-            title="No amenities match those filters"
-            hint="Clear the category or status filter to see more."
-          />
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Category</th>
-                <th>Pricing</th>
-                <th className="t-n">Price</th>
-                <th className="t-c">Bookable</th>
-                <th className="t-c">Active</th>
-                {isAdmin && <th className="t-c">Admin</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleFacilities.map((f) => (
-                <tr key={f.code} style={{ opacity: f.active ? 1 : 0.5 }}>
-                  <td>{f.code}</td>
-                  <td style={{ paddingLeft: f.parentCode ? 28 : undefined }}>
-                    {f.parentCode && <span className="muted">└ </span>}
-                    {f.name}
-                  </td>
-                  <td>{f.category.replace('_', ' ')}</td>
-                  <td>{f.pricingModel.replace('PER_', 'per ').toLowerCase()}</td>
-                  <td className="t-n">
-                    {formatPeso(f.priceCents)} {f.unit || ''}
-                  </td>
-                  <td className="t-c">{f.reservable ? '✓' : '—'}</td>
-                  <td className="t-c">{f.active ? '✓' : '✗'}</td>
-                  {isAdmin && (
-                    // The group is an inline-flex span INSIDE the cell, not a
-                    // flex `td`: `display:flex` on a table cell drops it out of
-                    // the table's own layout, so that column no longer shared
-                    // the row height or the column width with anything else.
-                    <td className="t-c">
-                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          style={{ width: 100 }}
-                          placeholder={centsToPesos(f.priceCents).toFixed(2)}
-                          value={edit[f.code] ?? ''}
-                          onChange={(e) => setEdit((p) => ({ ...p, [f.code]: e.target.value }))}
-                        />
-                        {/* `small secondary`, matching every other in-table action
+            <>
+              {facilities.length === 0 ? (
+                <EmptyState kind="inbox" title="No amenities yet" />
+              ) : visibleFacilities.length === 0 ? (
+                <EmptyState
+                  kind="search"
+                  title="No amenities match those filters"
+                  hint="Clear the category or status filter to see more."
+                />
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Category</th>
+                      <th>Pricing</th>
+                      <th className="t-n">Price</th>
+                      <th className="t-c">Bookable</th>
+                      <th className="t-c">Active</th>
+                      {isAdmin && <th className="t-c">Admin</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleFacilities.map((f) => (
+                      <tr key={f.code} style={{ opacity: f.active ? 1 : 0.5 }}>
+                        <td>{f.code}</td>
+                        <td style={{ paddingLeft: f.parentCode ? 28 : undefined }}>
+                          {f.parentCode && <span className="muted">└ </span>}
+                          {f.name}
+                        </td>
+                        <td>{f.category.replace('_', ' ')}</td>
+                        <td>{f.pricingModel.replace('PER_', 'per ').toLowerCase()}</td>
+                        <td className="t-n">
+                          {formatPeso(f.priceCents)} {f.unit || ''}
+                        </td>
+                        <td className="t-c">{f.reservable ? '✓' : '—'}</td>
+                        <td className="t-c">{f.active ? '✓' : '✗'}</td>
+                        {isAdmin && (
+                          // The group is an inline-flex span INSIDE the cell, not a
+                          // flex `td`: `display:flex` on a table cell drops it out of
+                          // the table's own layout, so that column no longer shared
+                          // the row height or the column width with anything else.
+                          <td className="t-c">
+                            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                style={{ width: 100 }}
+                                placeholder={centsToPesos(f.priceCents).toFixed(2)}
+                                value={edit[f.code] ?? ''}
+                                onChange={(e) => setEdit((p) => ({ ...p, [f.code]: e.target.value }))}
+                              />
+                              {/* `small secondary`, matching every other in-table action
                             in the app (Users, Rooms). Full-size buttons stood a
                             third taller than the rows they sat in. */}
-                        <button
-                          className="small secondary"
-                          disabled={edit[f.code] === undefined || edit[f.code] === ''}
-                          onClick={() => savePrice(f.code)}
-                        >
-                          Save Price
-                        </button>
-                        <button
-                          className={`small ${f.active ? 'danger' : 'secondary'}`}
-                          onClick={() => toggleFacility(f)}
-                        >
-                          {f.active ? 'Deactivate' : 'Activate'}
-                        </button>
-                      </span>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Admin: create new amenity */}
-      {isAdmin && (
-        <div className="panel">
-          <h3>Add amenity</h3>
-          <form onSubmit={createFacility}>
-            <div className="row">
-              <div>
-                <label>Code</label>
-                <input
-                  required
-                  value={form.code}
-                  onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                />
-              </div>
-              <div>
-                <label>Name</label>
-                <input
-                  required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              </div>
-              <div>
-                <label>Category</label>
-                <select
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label>Pricing model</label>
-                <select
-                  value={form.pricingModel}
-                  onChange={(e) => setForm({ ...form, pricingModel: e.target.value })}
-                >
-                  {MODELS.map((m) => (
-                    <option key={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label>Price (₱)</label>
-                <input
-                  required
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.priceCents}
-                  onChange={(e) => setForm({ ...form, priceCents: e.target.value })}
-                />
-              </div>
-              <div>
-                <label>Unit label</label>
-                <input
-                  value={form.unit}
-                  placeholder="e.g. day pass"
-                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                />
-              </div>
-              <div>
-                <label>Capacity</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.capacity}
-                  onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-                />
-              </div>
-              {/* `ed-check` gives this the same small box and inline label as
-                  the editor's toggles, instead of a 36px square from the global
-                  input rule with its caption wrapping beside it. */}
-              <div className="row-action">
-                <label className="ed-check">
-                  <input
-                    type="checkbox"
-                    checked={form.reservable}
-                    onChange={(e) => setForm({ ...form, reservable: e.target.checked })}
-                  />
-                  <span>Reservable (time-slot)</span>
-                </label>
-              </div>
-              {/* The action is the last cell of the field row, level with the
-                  inputs rather than a block underneath them. */}
-              <div className="row-action">
-                <button>Create amenity</button>
-              </div>
-            </div>
-          </form>
+                              <button
+                                className="small secondary outline-success"
+                                disabled={edit[f.code] === undefined || edit[f.code] === ''}
+                                onClick={() => savePrice(f.code)}
+                              >
+                                Save Price
+                              </button>
+                              <button
+                                className={`small ${f.active ? 'danger' : 'secondary'}`}
+                                onClick={() => toggleFacility(f)}
+                              >
+                                {f.active ? 'Deactivate' : 'Activate'}
+                              </button>
+                            </span>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
