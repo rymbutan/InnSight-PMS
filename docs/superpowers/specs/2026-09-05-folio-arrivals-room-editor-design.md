@@ -122,10 +122,34 @@ anticipate:
 > `GET /api/folios/daily-totals` `taxCents` also steps from zero to non-zero
 > overnight, putting an unannotated discontinuity in revenue reports.
 
-**Unresolved — for the product owner.** Whether reservation quoting should
-become tax-inclusive, show tax as a separate line, or leave the gap as a
-training-system quirk is a business decision outside what this spec was asked
-to change. Nothing here resolves it.
+**Resolved (2026-09-06, product owner decision): reservation quotes become
+tax-inclusive.** A new reservation's quoted total is priced with the same tax
+engine the folio itself uses, so it matches what the guest is actually billed:
+
+- **Public booking** (`services/reservation/src/index.js`,
+  `POST /api/public/reservations`) fetches the folio's configured rates via a
+  new `services/reservation/src/lib/folioClient.js` and runs them through the
+  same `computeTax` already vendored into `src/lib/policies.js`
+  (`services/reservation/src/lib/publicQuote.js` assembles the two). Folio
+  being unreachable never blocks a booking — the fetch falls back to
+  `DEFAULT_TAX_RATES`, the same best-effort pattern already used for promo-code
+  lookups in that file.
+- **Staff-created bookings** (`web/src/pages/NewReservation.jsx`) had a
+  pre-existing, unrelated bug fixed as part of this: the quote's tax line was
+  a hardcoded `subtotalCents × 0.12` "VAT placeholder", so it under-counted
+  by omitting Service Charge (and any configured Local Tax / RPT) even before
+  this spec's tax work existed. It now fetches
+  `GET /api/settings/tax-rates` and computes all four components, the same
+  fix in spirit.
+- Deposit sizing and the cancellation-fee base need no separate change — both
+  already derive from the corrected grand total.
+- **Existing reservations are not backfilled**, mirroring §1.2's decision not
+  to rewrite historical folio transactions: only reservations created after
+  this ships get a tax-inclusive quote.
+- The public booking page's pre-submit preview (before checkout, `PublicBooking.jsx`)
+  stays untaxed — adding an authenticated-free tax-rates read for a page with
+  no login would be new API surface for a preview number, not a fix to the
+  actual quote — but is now labelled "before taxes" so it does not read as final.
 
 **Backward compatibility is the hard requirement here.** `taxAmountCents`
 remains the single source of truth for every total: `classifyTransactions`
