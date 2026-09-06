@@ -213,40 +213,8 @@ export default function Rooms() {
   }
 
   return (
-    <div className="rooms-fixed">
-      <div className="page-head">
-        <div className="page-head-title">
-          <h1>Rooms</h1>
-        </div>
-      </div>
-
-      {/* Board at the top: how the property stands right now, one chip per
-          housekeeping state. It is also the fastest filter in the page — the
-          question behind "how many are dirty" is almost always "which ones", and
-          before this that meant scrolling past three admin forms to reach a
-          dropdown. Clicking a chip toggles the same statusFilter the select
-          below uses, so the two can never disagree. */}
-      <div className="filter-board" role="group" aria-label="Filter rooms by housekeeping status">
-        {ROOM_STATUSES.map((s) => {
-          const meta = statusMeta(s);
-          const on = statusFilter === s;
-          return (
-            <button
-              key={s}
-              type="button"
-              className={`filter-chip${on ? ' is-on' : ''}`}
-              aria-pressed={on}
-              onClick={() => setStatusFilter(on ? '' : s)}
-              title={meta.hint}
-            >
-              <span className="filter-chip-dot" style={{ background: meta.color }} />
-              <span className="filter-chip-num">{statusCounts[s]}</span>
-              <span className="filter-chip-label">{meta.label}</span>
-              <span className="filter-chip-code">{meta.code}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div>
+      <h2>Hotel Room Information Editor</h2>
 
       {!isAdmin && (
         <p className="muted rooms-note">
