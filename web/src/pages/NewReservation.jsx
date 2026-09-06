@@ -62,12 +62,22 @@ export default function NewReservation() {
   const [addOnCostPesos, setAddOnCostPesos] = useState('');
   const [feePercent, setFeePercent] = useState(10);
   const [feeEditPesos, setFeeEditPesos] = useState('');
+  // Defaults mirror DEFAULT_TAX_RATES in services/_shared/policies.js, so a
+  // failed fetch still quotes the same figures the backend falls back to.
+  const [taxRates, setTaxRates] = useState({ vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 });
 
   useEffect(() => {
     api
       .get('/api/settings/addon-fee-percent')
       .then(({ data }) => setFeePercent(data.feePercent))
       .catch(() => {}); // default of 10 already set; a failed fetch just keeps it
+  }, []);
+
+  useEffect(() => {
+    api
+      .get('/api/settings/tax-rates')
+      .then(({ data }) => setTaxRates(data))
+      .catch(() => {}); // defaults already set; a failed fetch just keeps them
   }, []);
 
   function addAddOn() {
@@ -177,11 +187,16 @@ export default function NewReservation() {
 
   const totals = useMemo(() => {
     const subtotalCents = picks.reduce((s, p) => s + p.ratePerNightCents * p.qty * nights, 0);
-    const taxCents = Math.round(subtotalCents * 0.12); // 12% VAT placeholder
+    // Mirrors computeTax() in services/_shared/policies.js: four named
+    // components at the hotel's configured rates, not a hardcoded VAT-only
+    // guess — this is the same total the night audit will eventually charge.
+    const taxCents = Math.round(
+      (subtotalCents * (taxRates.vat + taxRates.serviceCharge + taxRates.localTax + taxRates.realPropertyTax)) / 100
+    );
     const grandTotalCents = subtotalCents + taxCents + addOnsTotalCents;
     const suggestedDepositCents = Math.round(grandTotalCents * 0.5);
     return { subtotalCents, taxCents, grandTotalCents, suggestedDepositCents };
-  }, [picks, nights, addOnsTotalCents]);
+  }, [picks, nights, addOnsTotalCents, taxRates]);
 
   const balanceDueCents = useMemo(() => {
     return Math.max(0, totals.grandTotalCents - pesosToCents(depositPesos));
