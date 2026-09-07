@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-08
 **Service:** folio
-**Status:** approved design, not yet implemented
+**Status:** implemented 2026-09-08
 
 ## The problem
 
@@ -83,7 +83,8 @@ Largest-remainder method:
 including totals smaller than the number of shares, and negative totals (a credit
 line splits too).
 
-`₱1,000.00` three ways equally → `33333 / 33333 / 33334`.
+`₱1,000.00` three ways equally → `33334 / 33333 / 33333` — the odd centavo
+goes to the earliest share, per the tie rule above.
 
 Equal is percentage with an equal share vector. `method` only decides how the
 vector is built, so there is one allocation path and one set of guarantees.
@@ -153,6 +154,16 @@ Each row's breakdown is itself allocated with `allocate`, per component, so the
 components of a row sum to that row's `taxAmountCents`. Without that second-level
 allocation the printed folio's tax section disagrees with its own balance — which
 `taxByComponent` would then paper over by dumping the difference on VAT.
+
+The breakdown is computed **once, for the receiving half, and negated** for the
+source half. Implementation found this the hard way: allocating each half
+independently reads the original's positive components for both, so reconciling
+that positive sum against the source half's negative tax dumps the whole
+difference on one component. A three-way split of ₱220.00 tax printed the
+source's share as `vat -106.66 / service charge +33.33` — the right total, an
+invented composition, and a positive service charge on a line that gives money
+away. Summing correctly is what hid it; only a per-component assertion catches
+it.
 
 Breakdown amounts are written as **decimal strings**, per the `taxBreakdown` column
 comment: JSON cannot carry `BigInt`.

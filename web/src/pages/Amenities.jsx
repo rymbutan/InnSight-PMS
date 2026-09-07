@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
@@ -121,6 +121,15 @@ export default function Amenities() {
   // yesterday for the whole morning, so the schedule opened on the wrong day
   // until 08:00.
   const [schedDate, setSchedDate] = useState(() => bookForm.date);
+
+  // A bar on the facility calendar links to the booking it draws, not just to
+  // this page. Read once at mount: the highlight is a landing cue, so it must
+  // not come back every time the schedule reloads.
+  const [focusBookingId] = useState(
+    () => new URLSearchParams(window.location.search).get('booking') || ''
+  );
+  const focusRowRef = useRef(null);
+  const didFocusRef = useRef(false);
   const [bookings, setBookings] = useState([]);
 
   // Laundry ticket — several garment lines charged as one folio line.
@@ -166,6 +175,19 @@ export default function Amenities() {
   useEffect(() => {
     loadBookings();
   }, [schedDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once the row for the linked booking is on the page, put it in view. Depends
+  // on `bookings` because the row does not exist until that fetch resolves.
+  //
+  // ...and `didFocusRef` is why it only happens the once. `bookings` is also
+  // replaced by every live refresh on the facilities channels, so without the
+  // latch anyone else's booking would re-run this and yank the reader's
+  // viewport back to a row they had already scrolled away from.
+  useEffect(() => {
+    if (didFocusRef.current || !focusBookingId || !focusRowRef.current) return;
+    didFocusRef.current = true;
+    focusRowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focusBookingId, bookings]);
   useLiveRefresh(
     () => {
       load();
@@ -498,7 +520,12 @@ export default function Amenities() {
                   </thead>
                   <tbody>
                     {bookings.map((b) => (
-                      <tr key={b.id} style={{ opacity: b.status === 'CANCELLED' ? 0.5 : 1 }}>
+                      <tr
+                        key={b.id}
+                        ref={b.id === focusBookingId ? focusRowRef : null}
+                        className={b.id === focusBookingId ? 'is-linked' : undefined}
+                        style={{ opacity: b.status === 'CANCELLED' ? 0.5 : 1 }}
+                      >
                         <td>{b.facility?.name || b.facilityId}</td>
                         <td>
                           {new Date(b.startAt).toLocaleTimeString([], {

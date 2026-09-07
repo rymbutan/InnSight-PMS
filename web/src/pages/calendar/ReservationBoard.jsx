@@ -6,7 +6,7 @@ import { useLiveRefresh, channels } from '../../lib/useLiveEvents';
 import { localDay } from '../../lib/date';
 import { formatPeso } from '../../lib/money';
 import { assignSlots, colorFor, guestKey, inkOn } from '../../lib/guestColors';
-import { buildBars } from '../../lib/calendarBars';
+import { buildBars, barAt, reservationIdForBar } from '../../lib/calendarBars';
 import { useTheme } from '../../theme';
 import CalendarShell from '../../components/CalendarShell';
 import Icon from '../../components/Icon';
@@ -294,18 +294,23 @@ export default function ReservationBoard({ startDate, days }) {
 
   function onBarClick(bar) {
     if (drag) return;
-    if (bar.key.startsWith('res-')) navigate(`/reservations/${bar.key.slice(4)}`);
-    else if (bar.key.startsWith('stay-')) {
-      // find reservation for this stay
-      const stay = stays.find((s) => s.id === bar.key.slice(5));
-      if (stay?.reservationId) navigate(`/reservations/${stay.reservationId}`);
-    }
+    const id = reservationIdForBar(bar, stays);
+    if (id) navigate(`/reservations/${id}`);
   }
 
-  function onCellClick(e, room, day) {
+  function onCellClick(e, room, day, colIdx) {
     if (drag) return;
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
+    // What is already drawn on this room-night. A click on a bar lands on the
+    // CELL, not the bar — the bar is set to pointer-events:none for the frame a
+    // press puts it in drag state, so the click falls through to here and
+    // onBarClick above never runs. That makes this popover the only thing a
+    // click on a booking produces, so it has to be able to open that booking:
+    // offering nothing but "new reservation here" on an occupied night is what
+    // left the board with no way in to a booking at all.
+    const bar = barAt(barsByRoom[room.id], colIdx);
+    const bookingId = reservationIdForBar(bar, stays);
     setPopover({
       x: rect.left + rect.width / 2,
       y: rect.bottom + 4,
@@ -313,7 +318,17 @@ export default function ReservationBoard({ startDate, days }) {
       roomNumber: room.number,
       typeCode: room.typeCode,
       day: isoDay(day),
+      // Absent on a free night, and on an out-of-order block, which has no
+      // booking behind it.
+      bookingId,
+      bookingLabel: bookingId ? bar.label : '',
     });
+  }
+
+  function showBooking() {
+    if (!popover?.bookingId) return;
+    navigate(`/reservations/${popover.bookingId}`);
+    setPopover(null);
   }
 
   function quickCreate() {
@@ -442,7 +457,7 @@ export default function ReservationBoard({ startDate, days }) {
                         <div
                           key={isoDay(d)}
                           className={`cal2-cell ${isToday ? 'today' : ''}`}
-                          onClick={(e) => onCellClick(e, rm, d)}
+                          onClick={(e) => onCellClick(e, rm, d, idx)}
                         >
                           {/* Each bar is rendered INSIDE the cell of the day it
                                   starts on, and sized as a multiple of that cell's
@@ -557,6 +572,20 @@ export default function ReservationBoard({ startDate, days }) {
             <Icon name="plus" size={14} style={{ marginRight: 6 }} />
             New reservation here
           </button>
+          {/* Only when this night is actually taken. The guest's name is on the
+              button because abutting bars put two bookings within a few pixels
+              of each other, and "View booking" alone would not say which one is
+              about to open. */}
+          {popover.bookingId && (
+            <button
+              className="btn-ghost"
+              style={{ width: '100%', marginTop: 6 }}
+              onClick={showBooking}
+            >
+              <Icon name="calendar" size={14} style={{ marginRight: 6 }} />
+              View booking{popover.bookingLabel ? ` · ${popover.bookingLabel}` : ''}
+            </button>
+          )}
         </div>
       )}
     </div>

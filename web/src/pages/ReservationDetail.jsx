@@ -109,6 +109,14 @@ export default function ReservationDetail() {
       toast.error(errMsg(e));
     }
   }
+  async function doSendConfirmationEmail() {
+    try {
+      const { data } = await api.post(`/api/reservations/${id}/send-confirmation-email`);
+      toast.success(`Confirmation email sent to ${data.to}.`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
   async function doCheckIn() {
     try {
       await api.post('/api/check-in', {
@@ -206,7 +214,12 @@ export default function ReservationDetail() {
                   onClick: () => setQuickEditOpen(true),
                 },
                 { label: 'Print Registration Card', onClick: printReg, disabled: !stay },
-                { label: 'Send Confirmation Email', onClick: () => toast.info('Coming soon.') },
+                // Matches the route's own guard: the template says "your reservation
+                // is confirmed", which is only true once it actually has been.
+                !['PENDING', 'CANCELLED', 'NO_SHOW'].includes(res.status) && {
+                  label: 'Send Confirmation Email',
+                  onClick: doSendConfirmationEmail,
+                },
                 { divider: true },
                 ['CONFIRMED', 'PENDING'].includes(res.status) &&
                   hasRole('ADMIN', 'MANAGER', 'AUDITOR') && {
@@ -342,11 +355,11 @@ export default function ReservationDetail() {
         />
       )}
       {activeTab === 'Guest Details' && <GuestDetailsTab res={res} onSaved={load} />}
-      {activeTab === 'Credit Cards' && <CreditCardsTab />}
+      {activeTab === 'Credit Cards' && <CreditCardsTab reservationId={id} />}
       {activeTab === 'Notes' && <NotesTab notes={notes} reservationId={id} onChanged={load} />}
       {activeTab === 'Documents' && <DocumentsTab reservationId={id} />}
       {activeTab === 'Reservation Activity' && <ActivityTab activity={activity} />}
-      {activeTab === 'Sent Pay by Link' && <PayLinkTab />}
+      {activeTab === 'Sent Pay by Link' && <PayLinkTab res={res} folio={folio} />}
 
       {/* Modals */}
       <CancelModal
@@ -747,21 +760,146 @@ function GuestDetailsTab({ res, onSaved }) {
   );
 }
 
-function CreditCardsTab() {
+const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'JCB', 'OTHER'];
+const EMPTY_CARD = { brand: 'VISA', last4: '', expMonth: '', expYear: '', cardholderName: '' };
+
+// A card ON FILE as a booking guarantee, never a real card number — this is a
+// non-PCI-compliant capstone build, so only what a receipt already shows
+// (brand, last 4, expiry, cardholder name) is ever collected or stored. See
+// the ReservationCard model comment in the reservation service.
+function CreditCardsTab({ reservationId }) {
+  const toast = useToast();
+  const [cards, setCards] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState(EMPTY_CARD);
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    const { data } = await api.get(`/api/reservations/${reservationId}/cards`).catch(() => ({ data: [] }));
+    setCards(data || []);
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reservationId]);
+
+  async function submit() {
+    setSaving(true);
+    try {
+      await api.post(`/api/reservations/${reservationId}/cards`, {
+        ...form,
+        expMonth: Number(form.expMonth),
+        expYear: Number(form.expYear),
+      });
+      toast.success('Card added.');
+      setForm(EMPTY_CARD);
+      setAdding(false);
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(cardId) {
+    try {
+      await api.delete(`/api/reservations/${reservationId}/cards/${cardId}`);
+      toast.success('Card removed.');
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   return (
     <div className="folio-layout">
       <div className="folio-list">
-        <div className="folio-list-item">
+        <div className="folio-list-item" onClick={() => setAdding((a) => !a)}>
           <Icon name="plus" size={12} style={{ marginRight: 6 }} />
           <span>ADD CARD</span>
         </div>
       </div>
       <div className="panel">
-        <div className="muted" style={{ textAlign: 'center', padding: 36 }}>
-          No credit cards on file.
-          <br />
-          <small>Capstone build — PCI-compliant card storage is out of scope.</small>
-        </div>
+        {adding && (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
+            <div>
+              <label>Brand</label>
+              <select value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })}>
+                {CARD_BRANDS.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Last 4 digits</label>
+              <input
+                maxLength={4}
+                value={form.last4}
+                onChange={(e) => setForm({ ...form, last4: e.target.value.replace(/\D/g, '') })}
+                style={{ width: 70 }}
+              />
+            </div>
+            <div>
+              <label>Exp. month</label>
+              <input
+                type="number" min="1" max="12"
+                value={form.expMonth}
+                onChange={(e) => setForm({ ...form, expMonth: e.target.value })}
+                style={{ width: 70 }}
+              />
+            </div>
+            <div>
+              <label>Exp. year</label>
+              <input
+                type="number" min={new Date().getFullYear()}
+                value={form.expYear}
+                onChange={(e) => setForm({ ...form, expYear: e.target.value })}
+                style={{ width: 90 }}
+              />
+            </div>
+            <div>
+              <label>Cardholder name</label>
+              <input
+                value={form.cardholderName}
+                onChange={(e) => setForm({ ...form, cardholderName: e.target.value })}
+              />
+            </div>
+            <button className="btn-primary" onClick={submit} disabled={saving}>
+              {saving ? 'Saving…' : 'Add Card'}
+            </button>
+          </div>
+        )}
+
+        {cards === null ? (
+          <div className="loading-row">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : cards.length === 0 ? (
+          <div className="muted" style={{ textAlign: 'center', padding: 36 }}>
+            No credit cards on file.
+            <br />
+            <small>Capstone build — a masked guarantee only, never a full card number.</small>
+          </div>
+        ) : (
+          cards.map((c) => (
+            <div
+              key={c.id}
+              style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: 12, borderBottom: '1px solid var(--border)',
+              }}
+            >
+              <div>
+                <strong>{c.brand}</strong> •••• {c.last4} — exp {String(c.expMonth).padStart(2, '0')}/{c.expYear}
+                <div className="muted" style={{ fontSize: 12 }}>{c.cardholderName}</div>
+              </div>
+              <button className="secondary small" onClick={() => remove(c.id)}>
+                Remove
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -778,6 +916,15 @@ function NotesTab({ notes, reservationId, onChanged }) {
       await api.post(`/api/reservations/${reservationId}/notes`, { body: text });
       setText('');
       toast.success('Note added.');
+      onChanged();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function setArchived(noteId, archived) {
+    try {
+      await api.patch(`/api/reservations/${reservationId}/notes/${noteId}`, { archived });
+      toast.success(archived ? 'Note archived.' : 'Note restored.');
       onChanged();
     } catch (e) {
       toast.error(errMsg(e));
@@ -831,6 +978,11 @@ function NotesTab({ notes, reservationId, onChanged }) {
                   </span>
                 </div>
                 <div>{n.body}</div>
+                <div style={{ textAlign: 'right', marginTop: 6 }}>
+                  <button className="secondary small" onClick={() => setArchived(n.id, activeKind === 'Active')}>
+                    {activeKind === 'Active' ? 'Archive' : 'Restore'}
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -840,15 +992,128 @@ function NotesTab({ notes, reservationId, onChanged }) {
   );
 }
 
-function DocumentsTab({ _reservationId }) {
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      // dataURL looks like "data:application/pdf;base64,AAAA…" — only the part
+      // after the comma is what the server's contentBase64 field expects.
+      resolve(String(reader.result).split(',')[1] || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(n) {
+  const kb = n / 1024;
+  return kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function DocumentsTab({ reservationId }) {
+  const toast = useToast();
+  const [docs, setDocs] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function load() {
+    const { data } = await api.get(`/api/reservations/${reservationId}/documents`).catch(() => ({ data: [] }));
+    setDocs(data || []);
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reservationId]);
+
+  async function upload(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // lets the same file be picked again after removal
+    if (!file) return;
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      return toast.error(`File is too large — max ${formatBytes(MAX_DOCUMENT_BYTES)}.`);
+    }
+    setUploading(true);
+    try {
+      const contentBase64 = await readFileAsBase64(file);
+      await api.post(`/api/reservations/${reservationId}/documents`, {
+        filename: file.name,
+        contentType: file.type || 'application/octet-stream',
+        contentBase64,
+      });
+      toast.success('Document uploaded.');
+      load();
+    } catch (e2) {
+      toast.error(errMsg(e2));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function download(doc) {
+    try {
+      await downloadAuthed(`/api/reservations/${reservationId}/documents/${doc.id}/download`, {
+        filename: doc.filename,
+        openInTab: false,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  async function remove(docId) {
+    try {
+      await api.delete(`/api/reservations/${reservationId}/documents/${docId}`);
+      toast.success('Document removed.');
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   return (
     <div className="panel">
       <h3>Documents</h3>
-      <div className="muted" style={{ padding: 24, textAlign: 'center' }}>
-        Upload guest IDs, signed registration cards, and other reservation documents.
-        <br />
-        <small>(Document storage uses MinIO — wire-up coming in Batch C.)</small>
+      <div style={{ marginBottom: 16 }}>
+        <label className="btn-primary" style={{ display: 'inline-block', cursor: 'pointer' }}>
+          {uploading ? 'Uploading…' : 'Upload Document'}
+          <input type="file" onChange={upload} disabled={uploading} style={{ display: 'none' }} />
+        </label>
+        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+          Guest IDs, signed registration cards, etc. — max {formatBytes(MAX_DOCUMENT_BYTES)}.
+        </span>
       </div>
+
+      {docs === null ? (
+        <div className="loading-row">
+          <span className="spinner" /> Loading…
+        </div>
+      ) : docs.length === 0 ? (
+        <div className="muted" style={{ textAlign: 'center', padding: 24 }}>
+          No documents uploaded yet.
+        </div>
+      ) : (
+        docs.map((d) => (
+          <div
+            key={d.id}
+            style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: 12, borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <div>
+              <strong>{d.filename}</strong>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {formatBytes(d.sizeBytes)} · {new Date(d.uploadedAt).toLocaleString()}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="secondary small" onClick={() => download(d)}>Download</button>
+              <button className="secondary small" onClick={() => remove(d.id)}>Remove</button>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -865,13 +1130,122 @@ function ActivityTab({ activity }) {
   );
 }
 
-function PayLinkTab() {
+// Payment links ride on the stay's folio (see planTransfer/PaymentIntent in the
+// folio service) — there is nowhere else in this app to post the eventual
+// payment. So this tab, like Print Registration Card and Check Out, is only
+// available once the reservation actually has one.
+function PayLinkTab({ res, folio }) {
+  const toast = useToast();
+  const [intents, setIntents] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('QR_WALLET');
+  const [sending, setSending] = useState(false);
+
+  async function loadIntents() {
+    if (!folio?.id) return;
+    const { data } = await api.get(`/api/folios/${folio.id}/payment-intents`).catch(() => ({ data: [] }));
+    setIntents(data || []);
+  }
+  useEffect(() => {
+    loadIntents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folio?.id]);
+
+  async function send() {
+    const amountCents = pesosToCents(amount);
+    if (!amountCents || amountCents <= 0) return toast.error('Enter an amount greater than zero.');
+    setSending(true);
+    try {
+      const { data } = await api.post(`/api/folios/${folio.id}/payment-intents`, {
+        amountCents,
+        method,
+        to: res.guestEmail,
+      });
+      toast.success(`Payment link sent to ${data.sentTo}.`);
+      setAmount('');
+      loadIntents();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (!folio) {
+    return (
+      <div className="panel">
+        <h3>Sent Pay by Link</h3>
+        <div className="muted" style={{ padding: 24, textAlign: 'center' }}>
+          Available once this stay has an open folio to bill — check the guest in first.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel">
       <h3>Sent Pay by Link</h3>
-      <div className="muted" style={{ padding: 24, textAlign: 'center' }}>
-        Payment-link sending is part of the optional payments add-on — not yet wired in this capstone build.
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
+        <div>
+          <label>Amount (₱)</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={{ width: 140 }}
+          />
+        </div>
+        <div>
+          <label>Method</label>
+          <select value={method} onChange={(e) => setMethod(e.target.value)}>
+            <option value="QR_WALLET">QR Wallet</option>
+            <option value="CARD">Card</option>
+            <option value="GCASH">GCash</option>
+            <option value="BANK">Bank Transfer</option>
+          </select>
+        </div>
+        <button className="btn-primary" onClick={send} disabled={sending || !res.guestEmail}>
+          {sending ? 'Sending…' : 'Send Link'}
+        </button>
+        {!res.guestEmail && <span className="muted">No guest email on file.</span>}
       </div>
+
+      {intents === null ? (
+        <div className="loading-row">
+          <span className="spinner" /> Loading…
+        </div>
+      ) : intents.length === 0 ? (
+        <div className="loading-row">No payment links sent yet.</div>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Sent To</th>
+              <th>Amount</th>
+              <th>Method</th>
+              <th>Status</th>
+              <th>Sent</th>
+              <th>Expires</th>
+            </tr>
+          </thead>
+          <tbody>
+            {intents.map((it) => (
+              <tr key={it.id}>
+                <td>{it.sentTo || '— (in-person QR)'}</td>
+                <td>{formatPeso(it.amountCents)}</td>
+                <td>{it.method}</td>
+                <td>
+                  <StatusPill status={it.status} />
+                </td>
+                <td>{new Date(it.createdAt).toLocaleString()}</td>
+                <td>{new Date(it.expiresAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

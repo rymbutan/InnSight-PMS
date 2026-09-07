@@ -296,7 +296,8 @@ export default function PublicBooking() {
               {confirmed.confirmationNumber}
             </div>
             <p className="muted">
-              A confirmation email has been sent to <strong>{guest.email}</strong>.
+              We'll send a confirmation email to <strong>{guest.email}</strong> once our front
+              desk confirms your booking.
             </p>
             <p className="muted" style={{ fontSize: 12 }}>
               Need to view or manage your reservation later? Visit{' '}

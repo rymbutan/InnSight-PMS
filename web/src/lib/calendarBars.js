@@ -146,3 +146,54 @@ export function buildBars({ reservations = [], stays = [], rooms = [], days }) {
 
   return { byRoom, unassigned };
 }
+
+/**
+ * Which bar, if any, covers one column of a room's row.
+ *
+ * The calendar's cell popover needs this to answer "is this room-night taken,
+ * and by which booking?" — a click lands on a cell, and the cell alone does not
+ * know what is drawn over it.
+ *
+ * The range is half-open, matching `span`: a booking occupies startCol up to
+ * BUT NOT INCLUDING startCol + span, because checking out in the morning frees
+ * that night. Getting that boundary wrong offers the departing guest's booking
+ * on a night that is actually free — and the two cases sit next to each other
+ * whenever bookings abut, which is most of a full house.
+ *
+ * @param {object[]} [bars]  a room's bars, e.g. byRoom[roomId]
+ * @param {number} colIdx    zero-based column within the current window
+ * @returns {object|null}
+ */
+export function barAt(bars, colIdx) {
+  if (!bars?.length) return null;
+  return bars.find((b) => colIdx >= b.startCol && colIdx < b.startCol + b.span) || null;
+}
+
+/**
+ * The reservation a bar leads back to, or null when there is not one.
+ *
+ * Three kinds of bar reach this, and they do not all have a booking behind
+ * them:
+ *   res-<id>   the reservation itself.
+ *   stay-<id>  an arrived guest. The stay supersedes its reservation on the
+ *              board, but the record worth opening is still the reservation, so
+ *              this resolves through it.
+ *   ooo-<id>   a room out of order. That is a room STATE, not a guest — there
+ *              is nothing to open, and callers must handle null rather than
+ *              navigate to `/reservations/undefined`.
+ * A walk-in stay with no reservation behind it lands on null for the same
+ * reason.
+ *
+ * @param {object|null} bar
+ * @param {object[]} [stays]  needed only to resolve a stay bar
+ * @returns {string|null}
+ */
+export function reservationIdForBar(bar, stays = []) {
+  if (!bar?.key) return null;
+  if (bar.key.startsWith('res-')) return bar.key.slice(4) || null;
+  if (bar.key.startsWith('stay-')) {
+    const stay = stays.find((s) => s.id === bar.key.slice(5));
+    return stay?.reservationId || null;
+  }
+  return null;
+}
