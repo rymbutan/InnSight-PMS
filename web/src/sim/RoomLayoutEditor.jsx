@@ -11,7 +11,6 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { useTheme } from '../theme';
 import { stageColor } from './stageColor';
-import SaveChip from './SaveChip';
 import { MODELS, GLBoundary } from './task3d';
 import { hydrateAssets, onAssetsChanged, uploadedAssets, uploadAsset } from './assetSync';
 import {
@@ -139,38 +138,8 @@ function Env({ room, _walls, _onPickWall, _sel }) {
   );
 }
 
-// `isNew` opens the editor on a layout that does NOT exist on the server yet.
-// It gates the autosave: a brand-new layout is not written until the author
-// says so, because autosave-from-the-first-keystroke would publish an empty
-// room to every browser the instant the editor opened. `seed` is that starting
-// room — dimensions only; everything in it is placed by hand.
-export default function RoomLayoutEditor({
-  typeName = 'Presidential',
-  onClose,
-  isNew = false,
-  seed = null,
-  // Called after "Save as" writes a copy under a new key, so the page can
-  // re-point the editor at it — the author is now editing the new layout, not
-  // the one they branched from.
-  onSavedAs,
-}) {
-  const plan = useMemo(() => {
-    if (isNew) {
-      const base = getRoomPlan(typeName);
-      return {
-        ...base,
-        w: seed?.w ?? base.w,
-        l: seed?.l ?? base.l,
-        // An empty room, not a copy of whatever tier this folds to. Starting
-        // from Standard's furniture would make "new layout" mean "duplicate".
-        furniture: [],
-        walls: [],
-        stations: [],
-        spawn: [0, 0],
-      };
-    }
-    return getRoomPlan(typeName);
-  }, [typeName, isNew, seed]);
+export default function RoomLayoutEditor({ typeName = 'Presidential', onClose }) {
+  const plan = useMemo(() => getRoomPlan(typeName), [typeName]);
   const fromPlan = () => ({
     furniture: plan.furniture.map((it) => ({ ...it, _hadRy: 'ry' in it })),
     walls: (plan.walls || []).map((w) => ({ ...w })),
@@ -188,9 +157,6 @@ export default function RoomLayoutEditor({
   const confirm = useConfirm();
   const toast = useToast();
   const [saveState, setSaveState] = useState(storedLayoutFor(typeName) ? 'saved' : 'idle');
-  // Flipped false by the first successful save; after that this editor behaves
-  // exactly as it always has.
-  const [needsFirstSave, setNeedsFirstSave] = useState(isNew);
   const [saveError, setSaveError] = useState('');
   // A SET of { kind, i }. `single` is the one-item case, and every pre-existing
   // single-selection path (the three inspectors, patch(), scale) reads it, so
@@ -247,11 +213,6 @@ export default function RoomLayoutEditor({
       firstRun.current = false;
       return;
     }
-    // A layout that does not exist yet is not autosaved. Until the author
-    // presses Save the first time there is nothing on the server to keep in
-    // step — and writing one would publish a half-placed room to every browser
-    // reading this tier.
-    if (needsFirstSave) return;
     setSaveState('saving');
     const t = setTimeout(() => {
       api
@@ -273,73 +234,7 @@ export default function RoomLayoutEditor({
         });
     }, 800);
     return () => clearTimeout(t);
-  }, [furniture, walls, stations, room, typeName, needsFirstSave]);
-
-  // The explicit first save. Same payload as the autosave, so version 1 of a new
-  // layout is shaped exactly like every version after it — and once it lands,
-  // autosave takes over for the rest of the session.
-  async function saveFirst() {
-    setSaveState('saving');
-    try {
-      await api.put(`/api/room-layouts/${encodeURIComponent(typeName)}`, {
-        room,
-        furniture,
-        walls,
-        stations,
-      });
-      setNeedsFirstSave(false);
-      setSaveState('saved');
-      setSaveError('');
-      await hydrateRoomLayouts({ force: true });
-      toast.success(`${typeName} layout saved — autosave is on from here.`);
-    } catch (e) {
-      setSaveState('error');
-      setSaveError(e.response?.data?.error || e.message);
-      toast.error(e.response?.data?.error || e.message);
-    }
-  }
-
-  // Save the room currently on screen as a NEW layout under its own name.
-  //
-  // The point of it is branching: the four committed tiers are the only rooms
-  // that exist, so authoring a fifth meant starting from an empty floor. This
-  // takes what is in front of you — a Suite you have half-rearranged — and
-  // makes it the first version of "Cabana", leaving the Suite untouched.
-  //
-  // Once written it behaves like any other saved layout, which is what makes
-  // autosave safe to hand over: there is now a row to keep in step with.
-  async function saveAs() {
-    const raw = window.prompt('Save this layout as — name:', `${typeName} copy`);
-    if (raw === null) return; // cancelled
-    const key = raw.trim();
-    // Same rule the server enforces, checked here so a bad name costs no round
-    // trip. Kept in sync with TIER_KEY in services/auth/src/routes/layouts.routes.js.
-    if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/.test(key)) {
-      return toast.error('Use letters, numbers, spaces, hyphens or underscores (max 40).');
-    }
-    if (key === typeName) return toast.error('That is the layout you are already editing.');
-    setSaveState('saving');
-    try {
-      await api.put(`/api/room-layouts/${encodeURIComponent(key)}`, {
-        room,
-        furniture,
-        walls,
-        stations,
-      });
-      setSaveState('saved');
-      setSaveError('');
-      // The copy exists, so the editor is no longer authoring an unsaved thing
-      // whichever state it was in a moment ago.
-      setNeedsFirstSave(false);
-      await hydrateRoomLayouts({ force: true });
-      toast.success(`Saved as “${key}” — autosave now writes to it.`);
-      onSavedAs?.(key);
-    } catch (e) {
-      setSaveState('error');
-      setSaveError(e.response?.data?.error || e.message);
-      toast.error(e.response?.data?.error || e.message);
-    }
-  }
+  }, [furniture, walls, stations, room, typeName]);
 
   // Drop every stored version for this tier, so it falls back to the layout
   // committed in roomLayouts.js — globally, not just here.
@@ -670,17 +565,6 @@ export default function RoomLayoutEditor({
         // of the same key rather than as a separate branch.
         if (e.shiftKey) redoAction();
         else undo();
-      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 's') {
-        // ⇧⌘S / Ctrl+Shift+S — Save as. Checked BEFORE the plain-⌘S branch
-        // below, or the unshifted match would swallow it.
-        e.preventDefault();
-        saveAs();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-        // ⌘S. The layout already autosaves, so on an existing layout this is
-        // only the browser's Save dialog being suppressed — but on an UNSAVED
-        // one it is the first save, which is the whole point of the gate.
-        e.preventDefault();
-        if (needsFirstSave) saveFirst();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redoAction();
@@ -844,32 +728,9 @@ export default function RoomLayoutEditor({
 
         {/* Save state, readout and help, hard right. */}
         <div className="tool-group tool-group--end">
-          {/* Only while the layout has never been saved. Once it exists the
-              autosave owns saving and a manual button would be a second, slower
-              way to do the same thing. */}
-          {needsFirstSave && (
-            <button
-              className="tool-btn tool-btn--text is-on"
-              onClick={saveFirst}
-              disabled={saveState === 'saving'}
-              title="Create this layout on the server. Autosave starts after this."
-            >
-              <Icon name="check" size={16} strokeWidth={2.4} />
-              {saveState === 'saving' ? 'Saving…' : 'Save layout'}
-            </button>
-          )}
-          <button
-            className="tool-btn tool-btn--text"
-            onClick={saveAs}
-            disabled={saveState === 'saving'}
-            title="Save this room as a new layout under its own name (⇧⌘S / Ctrl+Shift+S)"
-          >
-            <Icon name="copy" size={16} strokeWidth={1.9} />
-            Save as
-          </button>
           <SaveChip state={saveState} error={saveError} />
           {multi && (
-            <span className="tool-note" style={{ color: 'var(--text-warn)' }}>
+            <span className="tool-note" style={{ color: 'var(--warn)' }}>
               {sel.length} selected · {countByKind(sel).furniture}f {countByKind(sel).wall}w{' '}
               {countByKind(sel).station}s
             </span>
@@ -909,492 +770,481 @@ export default function RoomLayoutEditor({
 
       {/* ── The three columns, below the bar ── */}
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
-        {/* ── LEFT: palette + room ── */}
-        {/* Collapsed, the panel becomes a 34px rail holding only the reopen
+      {/* ── LEFT: palette + room ── */}
+      {/* Collapsed, the panel becomes a 34px rail holding only the reopen
           button. It is NOT unmounted: the palette keeps its tab, its search
           text and its rendered thumbnails, so reopening is instant and shows
           exactly what you left. */}
-        {!leftOpen && (
-          <div className="ed-rail">
-            <button
-              className="tool-btn"
-              onClick={() => setLeftOpen(true)}
-              title="Show the asset palette"
-              aria-label="Show the asset palette"
-            >
-              <Icon name="chevron-right" size={17} strokeWidth={2} />
-            </button>
-          </div>
-        )}
+      {!leftOpen && (
+        <div className="ed-rail">
+          <button
+            className="tool-btn"
+            onClick={() => setLeftOpen(true)}
+            title="Show the asset palette"
+            aria-label="Show the asset palette"
+          >
+            <Icon name="chevron-right" size={17} strokeWidth={2} />
+          </button>
+        </div>
+      )}
+      <div
+        style={{
+          width: 250,
+          flex: 'none',
+          background: 'var(--panel)',
+          display: leftOpen ? 'flex' : 'none',
+          flexDirection: 'column',
+        }}
+      >
         <div
           style={{
-            width: 250,
-            flex: 'none',
-            background: 'var(--panel)',
-            display: leftOpen ? 'flex' : 'none',
-            flexDirection: 'column',
+            padding: '10px 12px',
+            fontWeight: 700,
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            justifyContent: 'space-between',
           }}
         >
-          <div
-            style={{
-              padding: '10px 12px',
-              fontWeight: 700,
-              borderBottom: '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              justifyContent: 'space-between',
-            }}
-          >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Layout editor · {typeName}
-            </span>
-            <span style={{ display: 'flex', gap: 2, flex: 'none' }}>
-              <button
-                className="tool-btn"
-                onClick={() => setLeftOpen(false)}
-                title="Hide this panel"
-                aria-label="Hide the asset palette"
-              >
-                <Icon name="chevron-left" size={16} strokeWidth={2} />
-              </button>
-              <button onClick={onClose} className="tool-btn" aria-label="Close" title="Close the editor">
-                <Icon name="x" size={16} strokeWidth={2} />
-              </button>
-            </span>
-          </div>
-          <div style={{ padding: 8, borderBottom: '1px solid var(--border)' }}>
-            {/* The catalogue as a browsable grid rather than a dropdown. Same
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Layout editor · {typeName}
+          </span>
+          <span style={{ display: 'flex', gap: 2, flex: 'none' }}>
+            <button
+              className="tool-btn"
+              onClick={() => setLeftOpen(false)}
+              title="Hide this panel"
+              aria-label="Hide the asset palette"
+            >
+              <Icon name="chevron-left" size={16} strokeWidth={2} />
+            </button>
+            <button onClick={onClose} className="tool-btn" aria-label="Close" title="Close the editor">
+              <Icon name="x" size={16} strokeWidth={2} />
+            </button>
+          </span>
+        </div>
+        <div style={{ padding: 8, borderBottom: '1px solid var(--border)' }}>
+          {/* The catalogue as a browsable grid rather than a dropdown. Same
               `addKey` values (`model:x` / `type:x`), same `setAddKey`, same
               `addAsset` — a card just writes the value the <select> used to. */}
-            <AssetPalette
-              addKey={addKey}
-              setAddKey={setAddKey}
-              onAdd={addAsset}
-              // The editor covers the whole screen at z-index 400, and the toast
-              // stack renders in the app beneath it — so import feedback is
-              // passed down rather than raised, and shown inside the palette.
-              onNotify={(kind, msg) => (kind === 'error' ? toast.error(msg) : toast.success(msg))}
-            />
-            <div className="tool-bar" style={{ marginTop: 8 }}>
-              <button onClick={addWall} className="tool-btn has-label" title="Add a wall segment">
-                <Icon name="wall" size={15} strokeWidth={1.9} />
-                Wall
-              </button>
-              <button onClick={addStation} className="tool-btn has-label" title="Add a task station">
-                <Icon name="map-pin" size={15} strokeWidth={1.9} />
-                Station
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 4px' }}>SELECT</div>
-            {/* The `disabled` attribute now does the dimming, where an inline
+          <AssetPalette
+            addKey={addKey}
+            setAddKey={setAddKey}
+            onAdd={addAsset}
+            // The editor covers the whole screen at z-index 400, and the toast
+            // stack renders in the app beneath it — so import feedback is
+            // passed down rather than raised, and shown inside the palette.
+            onNotify={(kind, msg) => (kind === 'error' ? toast.error(msg) : toast.success(msg))}
+          />
+          <div className="tool-bar" style={{ marginTop: 8 }}>
+            <button onClick={addWall} className="tool-btn has-label" title="Add a wall segment">
+              <Icon name="wall" size={15} strokeWidth={1.9} />
+              Wall
+            </button>
+            <button onClick={addStation} className="tool-btn has-label" title="Add a task station">
+              <Icon name="map-pin" size={15} strokeWidth={1.9} />
+              Station
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 4px' }}>SELECT</div>
+          {/* The `disabled` attribute now does the dimming, where an inline
               `opacity: 0.45` used to. Same condition, same handlers — but the
               disabled STATE is what CSS reads, so a greyed tool is also
               genuinely unclickable and announces itself as unavailable. */}
-            <div className="tool-bar">
-              <button
-                onClick={() => sel.length && setSel(selectAllLike(arrays, sel[sel.length - 1]))}
-                disabled={!sel.length}
-                title="Every fixture sharing this model — the whole floor in one click"
-                aria-label="Select all like this"
-                className="tool-btn"
-              >
-                <Icon name="copy" size={16} strokeWidth={1.9} />
-              </button>
-              <button
-                onClick={() => setSel(selectAll(arrays))}
-                className="tool-btn"
-                title="Select everything, walls included"
-                aria-label="Select all"
-              >
-                <Icon name="select-all" size={16} strokeWidth={1.9} />
-              </button>
-              <button
-                onClick={() => setSel(selectAllOfKind(arrays, 'furniture'))}
-                className="tool-btn"
-                title="Select all furniture"
-                aria-label="Select all furniture"
-              >
-                <Icon name="armchair" size={16} strokeWidth={1.9} />
-              </button>
-              <button
-                onClick={() => setSel(selectAllOfKind(arrays, 'wall'))}
-                className="tool-btn"
-                title="Select all walls"
-                aria-label="Select all walls"
-              >
-                <Icon name="wall" size={16} strokeWidth={1.9} />
-              </button>
-              <span className="tool-sep" />
-              <button
-                onClick={() => setSel([])}
-                disabled={!sel.length}
-                className="tool-btn"
-                title="Clear the selection"
-                aria-label="Select none"
-              >
-                <Icon name="square-dashed" size={16} strokeWidth={1.9} />
-              </button>
-            </div>
+          <div className="tool-bar">
+            <button
+              onClick={() => sel.length && setSel(selectAllLike(arrays, sel[sel.length - 1]))}
+              disabled={!sel.length}
+              title="Every fixture sharing this model — the whole floor in one click"
+              aria-label="Select all like this"
+              className="tool-btn"
+            >
+              <Icon name="copy" size={16} strokeWidth={1.9} />
+            </button>
+            <button
+              onClick={() => setSel(selectAll(arrays))}
+              className="tool-btn"
+              title="Select everything, walls included"
+              aria-label="Select all"
+            >
+              <Icon name="select-all" size={16} strokeWidth={1.9} />
+            </button>
+            <button
+              onClick={() => setSel(selectAllOfKind(arrays, 'furniture'))}
+              className="tool-btn"
+              title="Select all furniture"
+              aria-label="Select all furniture"
+            >
+              <Icon name="armchair" size={16} strokeWidth={1.9} />
+            </button>
+            <button
+              onClick={() => setSel(selectAllOfKind(arrays, 'wall'))}
+              className="tool-btn"
+              title="Select all walls"
+              aria-label="Select all walls"
+            >
+              <Icon name="wall" size={16} strokeWidth={1.9} />
+            </button>
+            <span className="tool-sep" />
+            <button
+              onClick={() => setSel([])}
+              disabled={!sel.length}
+              className="tool-btn"
+              title="Clear the selection"
+              aria-label="Select none"
+            >
+              <Icon name="square-dashed" size={16} strokeWidth={1.9} />
+            </button>
           </div>
-          {/* The scene lists moved to the right panel, under the inspector — they
+        </div>
+        {/* The scene lists moved to the right panel, under the inspector — they
             describe what is IN the room, which is what the inspector is about;
             this side is the catalogue of what you can add. Same <List>, same
             `pick`. */}
-          <div style={{ flex: 1, overflowY: 'auto' }} />
-          {/* The extra bottom padding is a footer gutter: without it the last
+        <div style={{ flex: 1, overflowY: 'auto' }} />
+        {/* The extra bottom padding is a footer gutter: without it the last
             field sits flush against the panel's bottom edge, which reads as
             content that has been cut off rather than content that has ended. */}
-          <div style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>ROOM</div>
-            <Row>
-              <Lbl>floor</Lbl>
-              <input
-                type="color"
-                value={room.floor}
-                onChange={(e) => setRoom({ ...room, floor: e.target.value })}
-                style={{ width: 38, height: 22, background: 'none', border: 'none' }}
-              />
-              <span style={{ fontSize: 11 }}>{room.floor}</span>
-            </Row>
-            <Row>
-              <Lbl>width</Lbl>
-              <Num v={room.w} on={(n) => setRoom({ ...room, w: n })} />
-              <Lbl>length</Lbl>
-              <Num v={room.l} on={(n) => setRoom({ ...room, l: n })} />
-            </Row>
-            <Row>
-              <Lbl>height</Lbl>
-              <Num v={room.h ?? 3} step={0.25} on={(n) => setRoom({ ...room, h: n })} />
-            </Row>
-            <Row>
-              <Lbl>spawn</Lbl>
-              <Num v={room.spawn[0]} on={(n) => setRoom({ ...room, spawn: [n, room.spawn[1]] })} />
-              <Num v={room.spawn[1]} on={(n) => setRoom({ ...room, spawn: [room.spawn[0], n] })} />
-            </Row>
-            {/* "Copy block → clipboard" and the autosave line above it are gone.
+        <div style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>ROOM</div>
+          <Row>
+            <Lbl>floor</Lbl>
+            <input
+              type="color"
+              value={room.floor}
+              onChange={(e) => setRoom({ ...room, floor: e.target.value })}
+              style={{ width: 38, height: 22, background: 'none', border: 'none' }}
+            />
+            <span style={{ fontSize: 11 }}>{room.floor}</span>
+          </Row>
+          <Row>
+            <Lbl>width</Lbl>
+            <Num v={room.w} on={(n) => setRoom({ ...room, w: n })} />
+            <Lbl>length</Lbl>
+            <Num v={room.l} on={(n) => setRoom({ ...room, l: n })} />
+          </Row>
+          <Row>
+            <Lbl>height</Lbl>
+            <Num v={room.h ?? 3} step={0.25} on={(n) => setRoom({ ...room, h: n })} />
+          </Row>
+          <Row>
+            <Lbl>spawn</Lbl>
+            <Num v={room.spawn[0]} on={(n) => setRoom({ ...room, spawn: [n, room.spawn[1]] })} />
+            <Num v={room.spawn[1]} on={(n) => setRoom({ ...room, spawn: [room.spawn[0], n] })} />
+          </Row>
+          {/* "Copy block → clipboard" and the autosave line above it are gone.
               The live save state lives on the toolbar, and Undo/Reset moved
               there earlier — nothing in this panel reports status any more. */}
-          </div>
         </div>
+      </div>
 
-        {/* ── CENTER: the 3D viewport ── */}
-        {/* `minWidth: 0` still matters even now the toolbar has moved out: a flex
+      {/* ── CENTER: the 3D viewport ── */}
+      {/* `minWidth: 0` still matters even now the toolbar has moved out: a flex
           item's min-width defaults to its CONTENT, and a wide canvas would
           otherwise set this column's floor and push the far panel off the edge
           of the screen. With the floor at 0 the column yields instead. */}
-        <div
-          style={{
-            flex: '1 1 auto',
-            minWidth: 0,
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
+      <div
+        style={{
+          flex: '1 1 auto',
+          minWidth: 0,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <Canvas
+          shadows
+          dpr={[1, 2]}
+          camera={{ position: [0, 13, 12], fov: 50, near: 0.1, far: 120 }}
+          // WebGL cannot read a CSS variable, so the stage colour is resolved
+          // from the live computed style once here and again whenever the theme
+          // flips (see the effect above). `--stage` is the same token the app's
+          // other 3D surface uses, so the backdrop behind the room matches the
+          // rest of the product in both themes and under a custom accent.
+          onCreated={({ gl }) => {
+            glRef.current = gl;
+            gl.setClearColor(stageColor());
           }}
+          onPointerMissed={() => setSel([])}
         >
-          <Canvas
-            shadows
-            dpr={[1, 2]}
-            camera={{ position: [0, 13, 12], fov: 50, near: 0.1, far: 120 }}
-            // WebGL cannot read a CSS variable, so the stage colour is resolved
-            // from the live computed style once here and again whenever the theme
-            // flips (see the effect above). `--stage` is the same token the app's
-            // other 3D surface uses, so the backdrop behind the room matches the
-            // rest of the product in both themes and under a custom accent.
-            onCreated={({ gl }) => {
-              glRef.current = gl;
-              gl.setClearColor(stageColor());
-            }}
-            onPointerMissed={() => setSel([])}
-          >
-            <Env room={room} walls={walls} />
-            {furniture.map((it, i) => (
-              <group
-                key={`f${i}`}
-                ref={(el) => {
-                  if (el) refs.furniture.current[i] = el;
-                }}
-                position={[it.pos[0], itemY(it), it.pos[1]]}
-                rotation={[0, it.ry || 0, 0]}
-                scale={it.scale || [1, 1, 1]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  pick('furniture', i, e);
-                }}
-              >
-                <GLBoundary fallback={null}>
-                  <FixtureBody item={it} />
-                </GLBoundary>
-              </group>
-            ))}
-            {walls.map((w, i) => (
-              <group
-                key={`w${i}`}
-                ref={(el) => {
-                  if (el) refs.wall.current[i] = el;
-                }}
-                position={[w.p[0], (room.h ?? 3) / 2, w.p[1]]}
-                rotation={[0, w.ry || 0, 0]}
-                scale={[1, 1, 1]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  pick('wall', i, e);
-                }}
-              >
-                <RoundedBox args={[w.w, room.h ?? 3, w.d]} radius={0.01}>
-                  <meshStandardMaterial color={w.c || '#cdb391'} />
-                </RoundedBox>
-              </group>
-            ))}
-            {stations.map((s, i) => (
-              <group
-                key={`s${i}`}
-                ref={(el) => {
-                  if (el) refs.station.current[i] = el;
-                }}
-                // Group sits at the station's real height; the ring is offset a hair
-                // above the group origin so a floor station (y=0) still reads, and the
-                // gizmo's Y drag maps 1:1 to the stored `y` with no drift.
-                position={[s.pos[0], s.y ?? 0, s.pos[1]]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  pick('station', i, e);
-                }}
-              >
-                <mesh rotation-x={-Math.PI / 2} position-y={0.04}>
-                  <ringGeometry args={[0.42, 0.6, 32]} />
-                  <meshBasicMaterial
-                    color={has(sel, 'station', i) ? 'var(--warn)' : '#38bdf8'}
-                    transparent
-                    opacity={0.7}
-                    side={THREE.DoubleSide}
-                  />
-                </mesh>
-                <mesh position={[0, 0.5, 0]}>
-                  <sphereGeometry args={[0.08, 10, 10]} />
-                  <meshBasicMaterial color="#38bdf8" />
-                </mesh>
-              </group>
-            ))}
-            {/* Amber floor rings mark a multi-selection. depthTest off so a marker
-              under the bed is still visible while you work. */}
-            {multi &&
-              sel.map((r) => {
-                const it = arrays[r.kind]?.[r.i];
-                if (!it) return null;
-                const [mx, mz] = r.kind === 'wall' ? it.p : it.pos;
-                return (
-                  <mesh key={`mk${r.kind}${r.i}`} rotation-x={-Math.PI / 2} position={[mx, 0.03, mz]}>
-                    <ringGeometry args={[0.3, 0.44, 24]} />
-                    <meshBasicMaterial
-                      color="var(--warn)"
-                      transparent
-                      opacity={0.9}
-                      side={THREE.DoubleSide}
-                      depthTest={false}
-                    />
-                  </mesh>
-                );
-              })}
-            {/* Invisible pivot the group gizmo drives. Keyed so it remounts at the
-              fresh centroid after every commit. */}
-            {multi && <group key={pivotEpoch} ref={setPivotObj} position={[pivot[0], 0.01, pivot[1]]} />}
-            {multi && pivotObj && (
-              <TransformControls
-                object={pivotObj}
-                // Group SCALE is deliberately unsupported: a wall stores w/d while
-                // furniture stores a scale triple, so one gizmo handle has no single
-                // correct meaning and would silently deform walls.
-                mode={mode === 'scale' ? 'translate' : mode}
-                translationSnap={snap ? 0.1 : null}
-                rotationSnap={snap ? Math.PI / 12 : null}
-                showX={mode !== 'rotate'}
-                showZ={mode !== 'rotate'}
-                showY={mode === 'rotate'}
-                onMouseDown={groupDragStart}
-                onObjectChange={groupDragMove}
-                onMouseUp={groupDragEnd}
-              />
-            )}
-            {single &&
-              selObj() &&
-              (() => {
-                const m = single.kind === 'station' ? 'translate' : mode; // stations move only; walls + furniture use the active mode
-                return (
-                  <TransformControls
-                    object={selObj()}
-                    mode={m}
-                    translationSnap={snap ? 0.1 : null}
-                    rotationSnap={snap ? Math.PI / 12 : null}
-                    scaleSnap={snap ? 0.1 : null}
-                    showX={m !== 'rotate'}
-                    showZ={m !== 'rotate'}
-                    showY={
-                      m === 'translate' || m === 'rotate' || (m === 'scale' && single.kind === 'furniture')
-                    }
-                    onMouseDown={() => {
-                      snapshot();
-                      if (orbit.current) orbit.current.enabled = false;
-                    }}
-                    onMouseUp={() => {
-                      if (orbit.current) orbit.current.enabled = true;
-                      commit();
-                    }}
-                  />
-                );
-              })()}
-            <OrbitControls ref={orbit} makeDefault target={[0, 0.8, 0]} maxPolarAngle={Math.PI / 2.05} />
-          </Canvas>
-        </div>
-
-        {/* ── RIGHT: inspector + scene lists ── */}
-        <div
-          style={{
-            width: 232,
-            flex: 'none',
-            background: 'var(--panel)',
-            borderLeft: '1px solid var(--border)',
-            display: rightOpen ? 'flex' : 'none',
-            flexDirection: 'column',
-          }}
-        >
-          <div
-            style={{
-              padding: '10px 12px',
-              fontWeight: 700,
-              borderBottom: '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 6,
-            }}
-          >
-            <span>Inspector</span>
-            <button
-              className="tool-btn"
-              onClick={() => setRightOpen(false)}
-              title="Hide this panel"
-              aria-label="Hide the inspector"
+          <Env room={room} walls={walls} />
+          {furniture.map((it, i) => (
+            <group
+              key={`f${i}`}
+              ref={(el) => {
+                if (el) refs.furniture.current[i] = el;
+              }}
+              position={[it.pos[0], itemY(it), it.pos[1]]}
+              rotation={[0, it.ry || 0, 0]}
+              scale={it.scale || [1, 1, 1]}
+              onClick={(e) => {
+                e.stopPropagation();
+                pick('furniture', i, e);
+              }}
             >
-              <Icon name="chevron-right" size={16} strokeWidth={2} />
-            </button>
-          </div>
-          {/* The inspector body owns the flexible space and scrolls inside it.
+              <GLBoundary fallback={null}>
+                <FixtureBody item={it} />
+              </GLBoundary>
+            </group>
+          ))}
+          {walls.map((w, i) => (
+            <group
+              key={`w${i}`}
+              ref={(el) => {
+                if (el) refs.wall.current[i] = el;
+              }}
+              position={[w.p[0], (room.h ?? 3) / 2, w.p[1]]}
+              rotation={[0, w.ry || 0, 0]}
+              scale={[1, 1, 1]}
+              onClick={(e) => {
+                e.stopPropagation();
+                pick('wall', i, e);
+              }}
+            >
+              <RoundedBox args={[w.w, room.h ?? 3, w.d]} radius={0.01}>
+                <meshStandardMaterial color={w.c || '#cdb391'} />
+              </RoundedBox>
+            </group>
+          ))}
+          {stations.map((s, i) => (
+            <group
+              key={`s${i}`}
+              ref={(el) => {
+                if (el) refs.station.current[i] = el;
+              }}
+              // Group sits at the station's real height; the ring is offset a hair
+              // above the group origin so a floor station (y=0) still reads, and the
+              // gizmo's Y drag maps 1:1 to the stored `y` with no drift.
+              position={[s.pos[0], s.y ?? 0, s.pos[1]]}
+              onClick={(e) => {
+                e.stopPropagation();
+                pick('station', i, e);
+              }}
+            >
+              <mesh rotation-x={-Math.PI / 2} position-y={0.04}>
+                <ringGeometry args={[0.42, 0.6, 32]} />
+                <meshBasicMaterial
+                  color={has(sel, 'station', i) ? 'var(--warn)' : '#38bdf8'}
+                  transparent
+                  opacity={0.7}
+                  side={THREE.DoubleSide}
+                />
+              </mesh>
+              <mesh position={[0, 0.5, 0]}>
+                <sphereGeometry args={[0.08, 10, 10]} />
+                <meshBasicMaterial color="#38bdf8" />
+              </mesh>
+            </group>
+          ))}
+          {/* Amber floor rings mark a multi-selection. depthTest off so a marker
+              under the bed is still visible while you work. */}
+          {multi &&
+            sel.map((r) => {
+              const it = arrays[r.kind]?.[r.i];
+              if (!it) return null;
+              const [mx, mz] = r.kind === 'wall' ? it.p : it.pos;
+              return (
+                <mesh key={`mk${r.kind}${r.i}`} rotation-x={-Math.PI / 2} position={[mx, 0.03, mz]}>
+                  <ringGeometry args={[0.3, 0.44, 24]} />
+                  <meshBasicMaterial
+                    color="var(--warn)"
+                    transparent
+                    opacity={0.9}
+                    side={THREE.DoubleSide}
+                    depthTest={false}
+                  />
+                </mesh>
+              );
+            })}
+          {/* Invisible pivot the group gizmo drives. Keyed so it remounts at the
+              fresh centroid after every commit. */}
+          {multi && <group key={pivotEpoch} ref={setPivotObj} position={[pivot[0], 0.01, pivot[1]]} />}
+          {multi && pivotObj && (
+            <TransformControls
+              object={pivotObj}
+              // Group SCALE is deliberately unsupported: a wall stores w/d while
+              // furniture stores a scale triple, so one gizmo handle has no single
+              // correct meaning and would silently deform walls.
+              mode={mode === 'scale' ? 'translate' : mode}
+              translationSnap={snap ? 0.1 : null}
+              rotationSnap={snap ? Math.PI / 12 : null}
+              showX={mode !== 'rotate'}
+              showZ={mode !== 'rotate'}
+              showY={mode === 'rotate'}
+              onMouseDown={groupDragStart}
+              onObjectChange={groupDragMove}
+              onMouseUp={groupDragEnd}
+            />
+          )}
+          {single &&
+            selObj() &&
+            (() => {
+              const m = single.kind === 'station' ? 'translate' : mode; // stations move only; walls + furniture use the active mode
+              return (
+                <TransformControls
+                  object={selObj()}
+                  mode={m}
+                  translationSnap={snap ? 0.1 : null}
+                  rotationSnap={snap ? Math.PI / 12 : null}
+                  scaleSnap={snap ? 0.1 : null}
+                  showX={m !== 'rotate'}
+                  showZ={m !== 'rotate'}
+                  showY={
+                    m === 'translate' || m === 'rotate' || (m === 'scale' && single.kind === 'furniture')
+                  }
+                  onMouseDown={() => {
+                    snapshot();
+                    if (orbit.current) orbit.current.enabled = false;
+                  }}
+                  onMouseUp={() => {
+                    if (orbit.current) orbit.current.enabled = true;
+                    commit();
+                  }}
+                />
+              );
+            })()}
+          <OrbitControls ref={orbit} makeDefault target={[0, 0.8, 0]} maxPolarAngle={Math.PI / 2.05} />
+        </Canvas>
+      </div>
+
+      {/* ── RIGHT: inspector + scene lists ── */}
+      <div
+        style={{
+          width: 232,
+          flex: 'none',
+          background: 'var(--panel)',
+          borderLeft: '1px solid var(--border)',
+          display: rightOpen ? 'flex' : 'none',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          style={{
+            padding: '10px 12px',
+            fontWeight: 700,
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 6,
+          }}
+        >
+          <span>Inspector</span>
+          <button
+            className="tool-btn"
+            onClick={() => setRightOpen(false)}
+            title="Hide this panel"
+            aria-label="Hide the inspector"
+          >
+            <Icon name="chevron-right" size={16} strokeWidth={2} />
+          </button>
+        </div>
+        {/* The inspector body owns the flexible space and scrolls inside it.
             It used to have none of its own, so a tall inspector simply ran off
             the bottom of the panel with no way to reach the last field. */}
-          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>
-            {!sel.length && (
-              <div style={{ padding: 12, color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
-                Select an item (list or 3D) to edit its properties.
-                <div style={{ marginTop: 10, color: 'var(--muted-2)' }}>
-                  ⇧-click adds to the selection · ⇧-click a list row for a range · ⌘A all · ⌘D duplicate
-                  <br />M move · R rotate · T resize
-                </div>
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>
+          {!sel.length && (
+            <div style={{ padding: 12, color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
+              Select an item (list or 3D) to edit its properties.
+              <div style={{ marginTop: 10, color: 'var(--muted-2)' }}>
+                ⇧-click adds to the selection · ⇧-click a list row for a range · ⌘A all · ⌘D duplicate
+                <br />M move · R rotate · T resize
               </div>
-            )}
-            {multi && <MultiSummary sel={sel} />}
-            {item && single.kind === 'furniture' && <FurnitureInspector it={item} patch={patch} />}
-            {item && single.kind === 'wall' && <WallInspector it={item} patch={patch} />}
-            {item && single.kind === 'station' && <StationInspector it={item} patch={patch} />}
-          </div>
-          {/* No `marginTop: auto` here any more. There were two of them in this
+            </div>
+          )}
+          {multi && <MultiSummary sel={sel} />}
+          {item && single.kind === 'furniture' && <FurnitureInspector it={item} patch={patch} />}
+          {item && single.kind === 'wall' && <WallInspector it={item} patch={patch} />}
+          {item && single.kind === 'station' && <StationInspector it={item} patch={patch} />}
+        </div>
+        {/* No `marginTop: auto` here any more. There were two of them in this
             column — this row and the lists below — and two auto margins SPLIT
             the free space between them, so the action row floated into the
             middle of the panel instead of sitting under the inspector. */}
-          {!!sel.length && (
-            <div
-              style={{
-                flex: 'none',
-                padding: 8,
-                borderTop: '1px solid var(--border)',
-                display: 'flex',
-                gap: 6,
-              }}
-            >
-              <button
-                onClick={duplicateSel}
-                className="tool-btn has-label"
-                title={`Duplicate${multi ? ` ${sel.length} items` : ''}`}
-              >
-                <Icon name="copy" size={15} strokeWidth={1.9} />
-                Duplicate{multi ? ` ${sel.length}` : ''}
-              </button>
-              <button
-                onClick={removeSel}
-                className="tool-btn has-label is-danger"
-                title={`Delete${multi ? ` ${sel.length} items` : ''}`}
-                style={{
-                  flex: 1,
-                  background: 'var(--danger-soft)',
-                  borderColor: 'var(--danger)',
-                  color: 'var(--on-danger-soft)',
-                }}
-              >
-                <Icon name="trash" size={15} strokeWidth={1.9} />
-                Delete{multi ? ` ${sel.length}` : ''}
-              </button>
-            </div>
-          )}
-
-          {/* ── Scene contents, below the inspector ──
-            `flex: none` with its own max-height: the inspector above takes the
-            flexible space, this takes a fixed share of the panel and scrolls
-            within it. Both being flexible is what made the column fight itself. */}
+        {!!sel.length && (
           <div
-            style={{
-              flex: 'none',
-              borderTop: '1px solid var(--border)',
-              maxHeight: '40vh',
-              overflowY: 'auto',
-              // Matching gutter at the foot of the scroll. Scrolled to the end,
-              // the last row otherwise stops exactly on the panel edge and reads
-              // as clipped — you cannot tell you have reached the bottom.
-              paddingBottom: 20,
-            }}
+            style={{ flex: 'none', padding: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}
           >
-            <List
-              title={`Furniture (${furniture.length})`}
-              items={furniture}
-              kind="furniture"
-              sel={sel}
-              onPick={pick}
-              label={(it) => it.model || it.type}
-            />
-            <List
-              title={`Walls (${walls.length})`}
-              items={walls}
-              kind="wall"
-              sel={sel}
-              onPick={pick}
-              label={() => 'wall'}
-            />
-            <List
-              title={`Stations (${stations.length})`}
-              items={stations}
-              kind="station"
-              sel={sel}
-              onPick={pick}
-              label={(it) => it.title}
-            />
-          </div>
-        </div>
-
-        {/* `--right` moves the divider to the rail's LEFT edge. Sharing one class
-          with the left rail put the line on the outer edge of the window, where
-          it divided the panel from nothing, and left no seam at all between the
-          viewport and the rail. */}
-        {!rightOpen && (
-          <div className="ed-rail ed-rail--right">
             <button
-              className="tool-btn"
-              onClick={() => setRightOpen(true)}
-              title="Show the inspector"
-              aria-label="Show the inspector"
+              onClick={duplicateSel}
+              className="tool-btn has-label"
+              title={`Duplicate${multi ? ` ${sel.length} items` : ''}`}
             >
-              <Icon name="chevron-left" size={17} strokeWidth={2} />
+              <Icon name="copy" size={15} strokeWidth={1.9} />
+              Duplicate{multi ? ` ${sel.length}` : ''}
+            </button>
+            <button
+              onClick={removeSel}
+              className="tool-btn has-label is-danger"
+              title={`Delete${multi ? ` ${sel.length} items` : ''}`}
+              style={{ flex: 1, background: 'var(--danger-soft)', borderColor: 'var(--danger)', color: 'var(--on-danger-soft)' }}
+            >
+              <Icon name="trash" size={15} strokeWidth={1.9} />
+              Delete{multi ? ` ${sel.length}` : ''}
             </button>
           </div>
         )}
+
+        {/* ── Scene contents, below the inspector ──
+            `flex: none` with its own max-height: the inspector above takes the
+            flexible space, this takes a fixed share of the panel and scrolls
+            within it. Both being flexible is what made the column fight itself. */}
+        <div
+          style={{
+            flex: 'none',
+            borderTop: '1px solid var(--border)',
+            maxHeight: '40vh',
+            overflowY: 'auto',
+            // Matching gutter at the foot of the scroll. Scrolled to the end,
+            // the last row otherwise stops exactly on the panel edge and reads
+            // as clipped — you cannot tell you have reached the bottom.
+            paddingBottom: 20,
+          }}
+        >
+          <List
+            title={`Furniture (${furniture.length})`}
+            items={furniture}
+            kind="furniture"
+            sel={sel}
+            onPick={pick}
+            label={(it) => it.model || it.type}
+          />
+          <List
+            title={`Walls (${walls.length})`}
+            items={walls}
+            kind="wall"
+            sel={sel}
+            onPick={pick}
+            label={() => 'wall'}
+          />
+          <List
+            title={`Stations (${stations.length})`}
+            items={stations}
+            kind="station"
+            sel={sel}
+            onPick={pick}
+            label={(it) => it.title}
+          />
+        </div>
+      </div>
+
+      {/* `--right` moves the divider to the rail's LEFT edge. Sharing one class
+          with the left rail put the line on the outer edge of the window, where
+          it divided the panel from nothing, and left no seam at all between the
+          viewport and the rail. */}
+      {!rightOpen && (
+        <div className="ed-rail ed-rail--right">
+          <button
+            className="tool-btn"
+            onClick={() => setRightOpen(true)}
+            title="Show the inspector"
+            aria-label="Show the inspector"
+          >
+            <Icon name="chevron-left" size={17} strokeWidth={2} />
+          </button>
+        </div>
+      )}
       </div>
     </div>
   );
@@ -1405,7 +1255,7 @@ function MultiSummary({ sel }) {
   const c = countByKind(sel);
   return (
     <div style={{ padding: 10, fontSize: 12, lineHeight: 1.7 }}>
-      <div style={{ fontWeight: 700, color: 'var(--text-warn)' }}>{sel.length} items selected</div>
+      <div style={{ fontWeight: 700, color: 'var(--warn)' }}>{sel.length} items selected</div>
       <div style={{ color: 'var(--muted)' }}>
         {c.furniture} furniture · {c.wall} walls · {c.station} stations
       </div>
@@ -1574,6 +1424,31 @@ function SpinGroup({ children }) {
 // Four states, and each says what it means for OTHER people, because that is
 // what is surprising here: this editor writes the shared layout, so "saved"
 // means every browser now has it.
+const SAVE_UI = {
+  idle: { icon: 'check-circle', label: 'Autosave on', title: 'Edits save automatically for everyone.' },
+  saving: { icon: 'refresh-cw', label: 'Saving…', title: 'Sending this layout to the server.' },
+  saved: { icon: 'check-circle', label: 'Saved', title: 'Saved — live for every browser.' },
+  error: { icon: 'alert-circle', label: 'Not saved', title: 'The last autosave failed.' },
+};
+
+function SaveChip({ state, error }) {
+  const ui = SAVE_UI[state] || SAVE_UI.idle;
+  return (
+    <span
+      className={`ed-save is-${state}`}
+      // The failure REASON goes in the tooltip, not the chip. It can be a long
+      // server message, and a toolbar that resizes itself when a save fails
+      // would shove every tool sideways at the worst possible moment.
+      title={state === 'error' && error ? `${ui.title} ${error}` : ui.title}
+      role="status"
+      aria-live="polite"
+    >
+      <Icon name={ui.icon} size={14} strokeWidth={2} />
+      <span className="ed-save-label">{ui.label}</span>
+    </span>
+  );
+}
+
 // ── Help ────────────────────────────────────────────────────────────────────
 // The shortcuts and a short guide, in the editor rather than in a markdown file
 // nobody has open while they are dragging a sofa.
@@ -1583,8 +1458,6 @@ function SpinGroup({ children }) {
 // modal rendered into the app's own layer would either land underneath it or
 // hand the keyboard back to the global shortcut handler mid-edit.
 const HELP_KEYS = [
-  ['⇧⌘S / Ctrl+Shift+S', 'Save as — a copy under a new name'],
-  ['⌘S / Ctrl+S', 'Save an unsaved layout (existing ones autosave)'],
   ['M', 'Move gizmo'],
   ['R', 'Rotate gizmo'],
   ['T', 'Resize gizmo'],
@@ -1667,8 +1540,8 @@ function EditorHelp({ onClose }) {
 
           <h4>Careful with</h4>
           <p className="ed-help-note">
-            <strong>Reset to file</strong> discards every edit for this tier and reloads the checked-in layout
-            — it is not an undo, and Undo will not bring the edits back.
+            <strong>Reset to file</strong> discards every edit for this tier and reloads the checked-in
+            layout — it is not an undo, and Undo will not bring the edits back.
           </p>
         </div>
       </div>
@@ -1920,7 +1793,7 @@ function AssetPalette({ addKey, setAddKey, onAdd, onNotify }) {
         </button>
         <button
           type="button"
-          className="tool-btn tool-btn--text is-on"
+          className="tool-btn is-on"
           onClick={onAdd}
           title="Add the selected asset to the room"
           aria-label="Add selected asset"
@@ -2015,9 +1888,7 @@ function PalettePreview({ addKey }) {
         position: 'relative',
       }}
     >
-      <span
-        style={{ position: 'absolute', left: 6, top: 4, fontSize: 10, color: 'var(--muted-2)', zIndex: 1 }}
-      >
+      <span style={{ position: 'absolute', left: 6, top: 4, fontSize: 10, color: 'var(--muted-2)', zIndex: 1 }}>
         preview
       </span>
       <Canvas camera={{ position: [1.9, 1.5, 2.3], fov: 45 }} dpr={[1, 1.5]}>
@@ -2121,13 +1992,7 @@ function Row({ children }) {
 function Lbl({ children }) {
   return <span style={{ fontSize: 11, color: 'var(--muted)', width: 34 }}>{children}</span>;
 }
-const swatch = {
-  width: 40,
-  height: 24,
-  background: 'none',
-  border: '1px solid var(--border)',
-  borderRadius: 4,
-};
+const swatch = { width: 40, height: 24, background: 'none', border: '1px solid var(--border)', borderRadius: 4 };
 const txt = {
   flex: 1,
   background: 'var(--field)',

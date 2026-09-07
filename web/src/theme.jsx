@@ -2,25 +2,19 @@
 // Persists to localStorage, defaults to system preference.
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { refreshAccentForTheme } from './lib/accent';
-import { THEME_KEY, resolveTheme } from './lib/themeMode';
 
 const ThemeCtx = createContext({ theme: 'light', toggle: () => {} });
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(resolveTheme);
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('innsight_theme');
+    if (saved === 'dark' || saved === 'light') return saved;
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      /* private mode — the theme just resets next session */
-    }
-    // The hotel accent is painted as INLINE custom properties on <html>, which
-    // outrank any stylesheet rule including the dark block. Re-evaluate it on
-    // every theme change or dark mode would keep wearing the light accent.
-    refreshAccentForTheme();
+    localStorage.setItem('innsight_theme', theme);
   }, [theme]);
 
   return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
@@ -13,13 +13,10 @@ import { refOf, scenarioCounts } from './scenario';
 import { variantsFor, labelFor } from './assetFamilies';
 import { getRoomPlan } from '../roomLayouts';
 import { stageColor } from '../stageColor';
-import SaveChip from '../SaveChip';
 import { MODELS } from '../task3d';
 import { offerableCategories } from './categories';
 import { hydrateCategories } from './categorySync';
 import InspectionShift from './InspectionShift';
-import { useSavedScenarios, STATUS } from './useSavedScenarios';
-import SavedScenarioList from './SavedScenarioList';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Authoring what is WRONG with a room.
@@ -177,8 +174,8 @@ function ScenarioHelp({ onClose }) {
               students flagging everything that highlights.
             </li>
             <li>
-              <strong>Preview</strong> runs the real inspection with recording off, then <strong>Save</strong>
-              .
+              <strong>Preview</strong> runs the real inspection with recording off, then{' '}
+              <strong>Save</strong>.
             </li>
           </ol>
           <h4>Shortcuts</h4>
@@ -196,15 +193,16 @@ function ScenarioHelp({ onClose }) {
           </table>
           <h4>The booking on the clipboard</h4>
           <p className="ed-help-note">
-            Not authored here. The student inspects against the <strong>real reservation on the room</strong>{' '}
-            — guest, party size and special requests all come from the PMS, so one scenario works on any room
-            of its tier. A fault that booking cannot support (twin beds tagged for a couple, on a solo stay)
-            is shown as a clean decoy rather than graded. Previewing as a student uses a practice booking,
-            marked as such.
+            Not authored here. The student inspects against the{' '}
+            <strong>real reservation on the room</strong> — guest, party size and special requests all come
+            from the PMS, so one scenario works on any room of its tier. A fault that booking cannot support
+            (twin beds tagged for a couple, on a solo stay) is shown as a clean decoy rather than graded.
+            Previewing as a student uses a practice booking, marked as such.
           </p>
           <h4>Careful with</h4>
           <p className="ed-help-note">
-            Nothing here autosaves — unlike the room layout editor, this one saves only when you press Save.
+            Nothing here autosaves — unlike the room layout editor, this one saves only when you press
+            Save.
           </p>
         </div>
       </div>
@@ -216,18 +214,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   const toast = useToast();
   const confirm = useConfirm();
   const [tier, setTier] = useState('Standard');
-  // The library lives in its own hook — see useSavedScenarios. The callbacks are
-  // memoised because the hook fetches in an effect keyed on them; a fresh arrow
-  // each render would re-fetch the list on every keystroke in the editor.
-  const onListError = useCallback((m) => toast.error(m), [toast]);
-  const onListSuccess = useCallback((m) => toast.success(m), [toast]);
-  const {
-    savedScenarios,
-    loaded: listLoaded,
-    reload: reloadScenarios,
-    setStatus: setScenarioStatus,
-    remove: removeScenario,
-  } = useSavedScenarios({ onError: onListError, onSuccess: onListSuccess, confirm });
+  const [scenarios, setScenarios] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [name, setName] = useState('');
   // The shared category library. Authored here, usable by every scenario and
@@ -241,14 +228,10 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   const [addKey, setAddKey] = useState('sofa');
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
-  // idle | saving | saved | error — what the autosave is doing, mirrored into
-  // the SaveChip in the toolbar. Only meaningful once the scenario exists; the
-  // chip shows 'pending' until then.
-  const [saveState, setSaveState] = useState('idle');
-  const [saveError, setSaveError] = useState('');
   const [history, setHistory] = useState([]);
   // The redo branch, plus the chrome state the toolbar drives.
   const [future, setFuture] = useState([]);
+  const [listLoaded, setListLoaded] = useState(false);
   const [sideOpen, setSideOpen] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
   const [panelTab, setPanelTab] = useState('build');
@@ -400,6 +383,25 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     }));
   }
 
+  async function load() {
+    try {
+      const { data } = await api.get('/api/training/scenarios');
+      setScenarios(data || []);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      // In `finally`, so a failed fetch still releases the restore gate below.
+      // Keyed off "the list has been fetched", not "the list has rows": with an
+      // empty library, or an offline server, `scenarios.length` stays 0 forever
+      // and the gate would never open — leaving the URL frozen for the rest of
+      // the session.
+      setListLoaded(true);
+    }
+  }
+  useEffect(() => {
+    load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Reopen the scenario named in the URL, once, after the list arrives.
   // `restored` is a ref rather than state so it cannot re-trigger: without the
   // guard, `scenarios` changing after any save would reopen the stored copy and
@@ -411,7 +413,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
       restored.current = true;
       return;
     }
-    const found = savedScenarios.find((s) => s.id === wanted.current);
+    const found = scenarios.find((s) => s.id === wanted.current);
     // Set BEFORE dispatching either branch, so the mirror effect above is
     // released in the same pass rather than staying blocked if openScenario
     // throws.
@@ -421,7 +423,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     if (found) openScenario(found);
     else onScenarioChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedScenarios, listLoaded]);
+  }, [scenarios, listLoaded]);
 
   // Start a fresh scenario from the tier's correct room.
   useEffect(() => {
@@ -661,53 +663,13 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
         setEditingId(data.id);
         toast.success(`“${payload.name}” created.`);
       }
-      reloadScenarios();
+      load();
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
       setBusy(false);
     }
   }
-
-  // ── Autosave, once the scenario exists ────────────────────────────────────
-  // Deliberately NOT from the first keystroke. A scenario needs a name and at
-  // least one tagged fault before it is savable at all (see save()), so an
-  // autosave on an unsaved draft would spend every debounce firing a request
-  // the server is right to reject. It engages the moment `editingId` exists —
-  // i.e. after the first explicit Create — and from then on the editor behaves
-  // like the room-layout one: 900ms of stillness ends an edit.
-  //
-  // PATCH only. Creating is an explicit act; autosave never invents a row.
-  const autoFirst = useRef(true);
-  useEffect(() => {
-    if (autoFirst.current) {
-      autoFirst.current = false;
-      return;
-    }
-    if (!editingId) return; // not saved yet — Create is still the author's call
-    const payload = currentPayload();
-    if (!payload.name || !scenarioCounts(payload).faults) return; // would 400
-    setSaveState('saving');
-    const t = setTimeout(() => {
-      api
-        .patch(`/api/training/scenarios/${editingId}`, payload)
-        .then(() => {
-          setSaveState('saved');
-          setSaveError('');
-          reloadScenarios();
-        })
-        // Quiet on success — a toast every 900ms while dragging is noise, which
-        // is exactly what the chip is for. A failure still speaks, because
-        // silently not saving is the bad case.
-        .catch((e) => {
-          setSaveState('error');
-          setSaveError(e.response?.data?.error || e.message);
-          toast.error(errMsg(e));
-        });
-    }, 900);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objects, name, tier, editingId]);
 
   function openScenario(s) {
     setEditingId(s.id);
@@ -761,23 +723,41 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     resetHistory();
   }
 
-  // Reset the form to defaults. Also clears the URL's ?scenario= — leaving it
-  // pointed at the row you just stopped editing would restore that row on the
-  // next reload and quietly discard the blank scenario you had started.
   function newScenario() {
     setEditingId(null);
     setName('');
     setObjects(seedFromTier(tier));
     setSelId(null);
     resetHistory();
-    onScenarioChange?.(null);
   }
 
-  // Delete lives in the hook; the only editor-specific part is that deleting the
-  // row currently open has to empty the form behind it.
-  async function removeAndClear(s) {
-    const gone = await removeScenario(s);
-    if (gone && editingId === s.id) newScenario();
+  async function toggleActive(s) {
+    try {
+      await api.patch(`/api/training/scenarios/${s.id}`, { active: !s.active });
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  async function remove(s) {
+    // Previously deleted on the first click with no guard at all — an authored
+    // scenario is what students are graded against, so losing one to a misclick
+    // is not recoverable from the UI.
+    const ok = await confirm({
+      title: 'Delete scenario',
+      message: `Are you sure you want to delete “${s.name}”?`,
+      detail: 'Rooms assigned to it will fall back to generating their own faults.',
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/training/scenarios/${s.id}`);
+      if (editingId === s.id) newScenario();
+      toast.success(`“${s.name}” deleted.`);
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
   }
 
   // Preview runs the REAL inspection on this exact scenario, with recording
@@ -851,7 +831,12 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
           >
             <Icon name="bird-eye" size={18} strokeWidth={1.9} />
           </button>
-          <button onClick={defaultView} className="tool-btn" title="Default view" aria-label="Default view">
+          <button
+            onClick={defaultView}
+            className="tool-btn"
+            title="Default view"
+            aria-label="Default view"
+          >
             <Icon name="home" size={18} strokeWidth={1.9} />
           </button>
         </div>
@@ -880,11 +865,6 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
         </div>
 
         <div className="tool-group tool-group--end">
-          {/* Same chip the room-layout editor uses. `pending` is the state that
-              only exists here: a scenario is not autosaved until it has been
-              created once, and showing "Autosave on" over a draft that is not
-              being saved would be the one message that actively misleads. */}
-          <SaveChip state={editingId ? saveState : 'pending'} error={saveError} />
           <span className="tool-note">
             {faultCount} fault{faultCount === 1 ? '' : 's'} · {decoyCount} decoy
             {decoyCount === 1 ? '' : 's'}
@@ -924,24 +904,24 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
           </div>
         )}
         <div className="se-side" style={{ display: sideOpen ? 'block' : 'none' }}>
-          <div className="se-head">
-            <strong>Inspection Scenarios</strong>
-            <span style={{ display: 'flex', gap: 2, marginLeft: 'auto' }}>
-              <button
-                className="tool-btn"
-                onClick={() => setSideOpen(false)}
-                title="Hide this panel"
-                aria-label="Hide the scenario panel"
-              >
-                <Icon name="chevron-left" size={16} strokeWidth={2} />
-              </button>
-              <button className="tool-btn" onClick={onClose} title="Close the editor" aria-label="Close">
-                <Icon name="x" size={16} strokeWidth={2} />
-              </button>
-            </span>
-          </div>
+        <div className="se-head">
+          <strong>Inspection Scenarios</strong>
+          <span style={{ display: 'flex', gap: 2, marginLeft: 'auto' }}>
+            <button
+              className="tool-btn"
+              onClick={() => setSideOpen(false)}
+              title="Hide this panel"
+              aria-label="Hide the scenario panel"
+            >
+              <Icon name="chevron-left" size={16} strokeWidth={2} />
+            </button>
+            <button className="tool-btn" onClick={onClose} title="Close the editor" aria-label="Close">
+              <Icon name="x" size={16} strokeWidth={2} />
+            </button>
+          </span>
+        </div>
 
-          {/* Three tabs instead of one nine-section scroll. The panel was every
+        {/* Three tabs instead of one nine-section scroll. The panel was every
             control the editor has, stacked: tier, name, a paragraph about the
             booking, the category library, its add-form, the object picker, a
             four-group inspector, the actions and the saved list — so the thing
@@ -952,493 +932,496 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             almost all the time, Scenario is opening/naming/saving, Faults is
             the category library you touch rarely. Nothing is removed and no
             handler changes — this only decides what is on screen at once. */}
-          <div className="pal-tabs" role="tablist">
-            {SE_TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={panelTab === t.id}
-                className={`pal-tab${panelTab === t.id ? ' is-on' : ''}`}
-                title={t.title}
-                onClick={() => setPanelTab(t.id)}
-              >
-                <Icon name={t.icon} size={16} strokeWidth={1.9} />
-                <span className="se-tab-label">{t.label}</span>
-              </button>
-            ))}
-          </div>
+        <div className="pal-tabs" role="tablist">
+          {SE_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={panelTab === t.id}
+              className={`pal-tab${panelTab === t.id ? ' is-on' : ''}`}
+              title={t.title}
+              onClick={() => setPanelTab(t.id)}
+            >
+              <Icon name={t.icon} size={16} strokeWidth={1.9} />
+              <span className="se-tab-label">{t.label}</span>
+            </button>
+          ))}
+        </div>
 
-          {panelTab === 'scenario' && (
-            <>
-              <label>Room tier</label>
-              <select value={tier} onChange={(e) => setTier(e.target.value)} disabled={!!editingId}>
-                {TIERS.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-              {editingId && <p className="muted se-note">Tier is fixed once a scenario exists.</p>}
+        {panelTab === 'scenario' && (
+          <>
+            <label>Room tier</label>
+            <select value={tier} onChange={(e) => setTier(e.target.value)} disabled={!!editingId}>
+              {TIERS.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+            {editingId && <p className="muted se-note">Tier is fixed once a scenario exists.</p>}
 
-              <label>Scenario name</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Couple in a twin room"
-              />
-              {/* The booking explanation was a six-line paragraph holding
+            <label>Scenario name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Couple in a twin room"
+            />
+            {/* The booking explanation was a six-line paragraph holding
                 permanent space for something you read once. It is in the help
                 panel now, one click away and out of the way. */}
-              <p className="muted se-note">The booking is not authored here — see Help for why.</p>
-            </>
-          )}
+            <p className="muted se-note">
+              The booking is not authored here — see Help for why.
+            </p>
+          </>
+        )}
 
-          {panelTab === 'faults' && (
-            <>
-              <div className="se-section">Fault categories</div>
-              <p className="se-hint">
-                The six built-in categories cover most faults. Anything you add here is saved to the shared
-                library and offered on <strong>every scenario and every room</strong>.
-              </p>
-              <ul className="se-cat-list">
-                {cats.map((c) => (
-                  <li key={c.id} className={c.custom ? 'se-cat is-custom' : 'se-cat'}>
-                    <span className="se-cat-label">{c.label}</span>
-                    {c.custom ? (
-                      <button type="button" className="se-cat-retire" onClick={() => retireCategory(c)}>
-                        Retire
-                      </button>
-                    ) : (
-                      <span className="se-cat-builtin">built-in</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <form onSubmit={saveCategory} className="se-cat-form">
-                <input
-                  value={catForm.label}
-                  onChange={(e) => setCatForm({ ...catForm, label: e.target.value })}
-                  placeholder="Category name — e.g. Pest or sanitation hazard"
-                />
-                <textarea
-                  value={catForm.why}
-                  onChange={(e) => setCatForm({ ...catForm, why: e.target.value })}
-                  rows={2}
-                  placeholder="Why is this a fault? The student reads this after grading. (required)"
-                />
-                <textarea
-                  value={catForm.feedback}
-                  onChange={(e) => setCatForm({ ...catForm, feedback: e.target.value })}
-                  rows={2}
-                  placeholder="Coaching note shown when they miscategorise it (optional)"
-                />
-                <button disabled={catBusy}>{catBusy ? 'Saving…' : 'Add category'}</button>
-              </form>
-            </>
-          )}
+        {panelTab === 'faults' && (
+          <>
+        <div className="se-section">Fault categories</div>
+        <p className="se-hint">
+          The six built-in categories cover most faults. Anything you add here is saved to the shared library
+          and offered on <strong>every scenario and every room</strong>.
+        </p>
+        <ul className="se-cat-list">
+          {cats.map((c) => (
+            <li key={c.id} className={c.custom ? 'se-cat is-custom' : 'se-cat'}>
+              <span className="se-cat-label">{c.label}</span>
+              {c.custom ? (
+                <button type="button" className="se-cat-retire" onClick={() => retireCategory(c)}>
+                  Retire
+                </button>
+              ) : (
+                <span className="se-cat-builtin">built-in</span>
+              )}
+            </li>
+          ))}
+        </ul>
+        <form onSubmit={saveCategory} className="se-cat-form">
+          <input
+            value={catForm.label}
+            onChange={(e) => setCatForm({ ...catForm, label: e.target.value })}
+            placeholder="Category name — e.g. Pest or sanitation hazard"
+          />
+          <textarea
+            value={catForm.why}
+            onChange={(e) => setCatForm({ ...catForm, why: e.target.value })}
+            rows={2}
+            placeholder="Why is this a fault? The student reads this after grading. (required)"
+          />
+          <textarea
+            value={catForm.feedback}
+            onChange={(e) => setCatForm({ ...catForm, feedback: e.target.value })}
+            rows={2}
+            placeholder="Coaching note shown when they miscategorise it (optional)"
+          />
+          <button disabled={catBusy}>{catBusy ? 'Saving…' : 'Add category'}</button>
+        </form>
+          </>
+        )}
 
-          {panelTab === 'build' && (
-            <>
-              <div className="se-section">Add an object</div>
-              <select value={addKey} onChange={(e) => setAddKey(e.target.value)}>
-                <optgroup label="Props (no 3D model)">
-                  {PRIMS.map((p) => (
-                    <option key={p.prim} value={p.prim}>
-                      {p.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Room assets">
-                  {MODEL_KEYS.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-              <button
-                onClick={addObject}
-                className="tool-btn has-label is-on"
-                style={{ width: '100%', marginTop: 6 }}
-                title="Place the selected asset in the room"
-              >
-                <Icon name="armchair" size={15} strokeWidth={1.9} />
-                Add to room
-              </button>
+        {panelTab === 'build' && (
+          <>
+        <div className="se-section">Add an object</div>
+        <select value={addKey} onChange={(e) => setAddKey(e.target.value)}>
+          <optgroup label="Props (no 3D model)">
+            {PRIMS.map((p) => (
+              <option key={p.prim} value={p.prim}>
+                {p.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Room assets">
+            {MODEL_KEYS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        <button
+          onClick={addObject}
+          className="tool-btn has-label is-on"
+          style={{ width: '100%', marginTop: 6 }}
+          title="Place the selected asset in the room"
+        >
+          <Icon name="armchair" size={15} strokeWidth={1.9} />
+          Add to room
+        </button>
 
-              <div className="se-section">
-                Selected object {sel ? '' : <span className="muted">— click one in the room</span>}
-              </div>
-              {sel && (
+        <div className="se-section">
+          Selected object {sel ? '' : <span className="muted">— click one in the room</span>}
+        </div>
+        {sel && (
+          <>
+            {/* ── OBJECT ─────────────────────────────────────────────── */}
+            <div className="se-group">
+              <div className="se-group-h">Object</div>
+              <div className="se-objname">{defaultLabel(sel)}</div>
+              {sel.model && variantsFor(sel.model).length > 0 && (
                 <>
-                  {/* ── OBJECT ─────────────────────────────────────────────── */}
-                  <div className="se-group">
-                    <div className="se-group-h">Object</div>
-                    <div className="se-objname">{defaultLabel(sel)}</div>
-                    {sel.model && variantsFor(sel.model).length > 0 && (
-                      <>
-                        <label>Swap this asset</label>
-                        <div className="se-swaps">
-                          {[sel.model, ...variantsFor(sel.model)].map((k) => (
-                            <button
-                              key={k}
-                              type="button"
-                              className={`se-swap${k === sel.model ? ' on' : ''}`}
-                              title={k}
-                              onClick={() => {
-                                if (k === sel.model) return;
-                                snapshot();
-                                patchSel({ model: k });
-                              }}
-                            >
-                              {labelFor(k)}
-                            </button>
-                          ))}
-                        </div>
-                        <p className="muted se-note">
-                          Only the asset changes — position and size stay exactly as the room has them.
-                        </p>
-                      </>
-                    )}
+                  <label>Swap this asset</label>
+                  <div className="se-swaps">
+                    {[sel.model, ...variantsFor(sel.model)].map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`se-swap${k === sel.model ? ' on' : ''}`}
+                        title={k}
+                        onClick={() => {
+                          if (k === sel.model) return;
+                          snapshot();
+                          patchSel({ model: k });
+                        }}
+                      >
+                        {labelFor(k)}
+                      </button>
+                    ))}
                   </div>
+                  <p className="muted se-note">
+                    Only the asset changes — position and size stay exactly as the room has them.
+                  </p>
+                </>
+              )}
+            </div>
 
-                  {/* ── PLACEMENT ──────────────────────────────────────────── */}
-                  <div className="se-group">
-                    <div className="se-group-h">Placement</div>
-                    {/* Same handlers and the same two mode values as before — the
+            {/* ── PLACEMENT ──────────────────────────────────────────── */}
+            <div className="se-group">
+              <div className="se-group-h">Placement</div>
+              {/* Same handlers and the same two mode values as before — the
                   buttons are the shared `.tool-btn` tiles the room layout
                   editor uses, so Move and Rotate are one shape across both
                   editors instead of two differently-styled text buttons. */}
-                    <div className="tool-bar">
-                      <button
-                        className={`tool-btn${mode === 'translate' ? ' is-on' : ''}`}
-                        onClick={() => setMode('translate')}
-                        title="Move"
-                        aria-label="Move"
-                        aria-pressed={mode === 'translate'}
-                      >
-                        <Icon name="move" size={17} strokeWidth={1.9} />
-                      </button>
-                      <button
-                        className={`tool-btn${mode === 'rotate' ? ' is-on' : ''}`}
-                        onClick={() => setMode('rotate')}
-                        title="Rotate"
-                        aria-label="Rotate"
-                        aria-pressed={mode === 'rotate'}
-                      >
-                        <Icon name="rotate-cw" size={17} strokeWidth={1.9} />
-                      </button>
-                    </div>
-                    <label>Horizontal rotation</label>
-                    <div className="se-yaw">
-                      <input
-                        type="range"
-                        min="0"
-                        max="359"
-                        step="1"
-                        value={yawDeg}
-                        onChange={(e) => setYaw(Number(e.target.value))}
-                      />
-                      <input
-                        type="number"
-                        className="se-yaw-num"
-                        value={yawDeg}
-                        onChange={(e) => setYaw(Number(e.target.value) || 0)}
-                      />
-                      <span className="muted">deg</span>
-                    </div>
-                    <div className="row" style={{ gap: 4 }}>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setYaw(yawDeg - 90);
-                        }}
-                      >
-                        &#8630; 90
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setYaw(yawDeg + 90);
-                        }}
-                      >
-                        &#8631; 90
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setYaw(0);
-                        }}
-                      >
-                        Face front
-                      </button>
-                    </div>
+              <div className="tool-bar">
+                <button
+                  className={`tool-btn${mode === 'translate' ? ' is-on' : ''}`}
+                  onClick={() => setMode('translate')}
+                  title="Move"
+                  aria-label="Move"
+                  aria-pressed={mode === 'translate'}
+                >
+                  <Icon name="move" size={17} strokeWidth={1.9} />
+                </button>
+                <button
+                  className={`tool-btn${mode === 'rotate' ? ' is-on' : ''}`}
+                  onClick={() => setMode('rotate')}
+                  title="Rotate"
+                  aria-label="Rotate"
+                  aria-pressed={mode === 'rotate'}
+                >
+                  <Icon name="rotate-cw" size={17} strokeWidth={1.9} />
+                </button>
+              </div>
+              <label>Horizontal rotation</label>
+              <div className="se-yaw">
+                <input
+                  type="range"
+                  min="0"
+                  max="359"
+                  step="1"
+                  value={yawDeg}
+                  onChange={(e) => setYaw(Number(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="se-yaw-num"
+                  value={yawDeg}
+                  onChange={(e) => setYaw(Number(e.target.value) || 0)}
+                />
+                <span className="muted">deg</span>
+              </div>
+              <div className="row" style={{ gap: 4 }}>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setYaw(yawDeg - 90);
+                  }}
+                >
+                  &#8630; 90
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setYaw(yawDeg + 90);
+                  }}
+                >
+                  &#8631; 90
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setYaw(0);
+                  }}
+                >
+                  Face front
+                </button>
+              </div>
 
-                    <label>Height off the floor</label>
-                    <div className="se-yaw">
-                      <input
-                        type="range"
-                        min="0"
-                        max="3"
-                        step="0.05"
-                        value={Math.min(3, Math.max(0, heightM))}
-                        onChange={(e) => setHeight(Number(e.target.value))}
-                      />
-                      <input
-                        type="number"
-                        className="se-yaw-num"
-                        step="0.05"
-                        value={heightM}
-                        onChange={(e) => setHeight(Number(e.target.value))}
-                      />
-                      <span className="muted">m</span>
-                    </div>
-                    <div className="row" style={{ gap: 4 }}>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setHeight(heightM - 0.1);
-                        }}
-                      >
-                        Down
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setHeight(heightM + 0.1);
-                        }}
-                      >
-                        Up
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setHeight(sel.added ? 0 : (sel._baseY ?? 0));
-                        }}
-                      >
-                        On the floor
-                      </button>
-                    </div>
+              <label>Height off the floor</label>
+              <div className="se-yaw">
+                <input
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="0.05"
+                  value={Math.min(3, Math.max(0, heightM))}
+                  onChange={(e) => setHeight(Number(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="se-yaw-num"
+                  step="0.05"
+                  value={heightM}
+                  onChange={(e) => setHeight(Number(e.target.value))}
+                />
+                <span className="muted">m</span>
+              </div>
+              <div className="row" style={{ gap: 4 }}>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setHeight(heightM - 0.1);
+                  }}
+                >
+                  Down
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setHeight(heightM + 0.1);
+                  }}
+                >
+                  Up
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setHeight(sel.added ? 0 : (sel._baseY ?? 0));
+                  }}
+                >
+                  On the floor
+                </button>
+              </div>
 
-                    <label>Size</label>
-                    <div className="se-yaw">
-                      <input
-                        type="range"
-                        min="25"
-                        max="300"
-                        step="5"
-                        value={Math.min(300, Math.max(25, sizePct))}
-                        onChange={(e) => setSize(Number(e.target.value))}
-                      />
-                      <input
-                        type="number"
-                        className="se-yaw-num"
-                        value={sizePct}
-                        onChange={(e) => setSize(Number(e.target.value))}
-                      />
-                      <span className="muted">%</span>
-                    </div>
-                    <div className="row" style={{ gap: 4 }}>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setSize(sizePct - 10);
-                        }}
-                      >
-                        Smaller
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          setSize(sizePct + 10);
-                        }}
-                      >
-                        Bigger
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          snapshot();
-                          patchSel({ scale: sel.added ? [1, 1, 1] : sel._baseScale || [1, 1, 1] });
-                        }}
-                      >
-                        Reset
-                      </button>
-                    </div>
-                  </div>
+              <label>Size</label>
+              <div className="se-yaw">
+                <input
+                  type="range"
+                  min="25"
+                  max="300"
+                  step="5"
+                  value={Math.min(300, Math.max(25, sizePct))}
+                  onChange={(e) => setSize(Number(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="se-yaw-num"
+                  value={sizePct}
+                  onChange={(e) => setSize(Number(e.target.value))}
+                />
+                <span className="muted">%</span>
+              </div>
+              <div className="row" style={{ gap: 4 }}>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setSize(sizePct - 10);
+                  }}
+                >
+                  Smaller
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    setSize(sizePct + 10);
+                  }}
+                >
+                  Bigger
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    snapshot();
+                    patchSel({ scale: sel.added ? [1, 1, 1] : sel._baseScale || [1, 1, 1] });
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
 
-                  {/* ── FAULT ──────────────────────────────────────────────── */}
-                  <div className="se-group">
-                    <div className="se-group-h">What the student should find</div>
-                    <select
-                      value={
-                        sel.defectId === undefined
-                          ? 'untagged'
-                          : sel.defectId === null
-                            ? 'clean'
-                            : sel.defectId
-                      }
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        patchSel({ defectId: v === 'untagged' ? undefined : v === 'clean' ? null : v });
-                      }}
-                    >
-                      <option value="untagged">Not inspectable (scenery)</option>
-                      <option value="clean">Inspectable, but correct (decoy)</option>
-                      {offerableCategories().map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    {sel.defectId !== undefined && (
-                      <>
-                        <label>Label shown to the student</label>
-                        <input
-                          value={sel.label ?? defaultLabel(sel)}
-                          onChange={(e) => patchSel({ label: e.target.value })}
-                        />
-                        <p className="muted se-note">Name the object, never its condition.</p>
-                      </>
-                    )}
-                  </div>
-
-                  {/* ── ACTIONS ────────────────────────────────────────────── */}
-                  <div className="tool-bar" style={{ marginTop: 6 }}>
-                    <button
-                      className="tool-btn has-label"
-                      onClick={duplicateSel}
-                      title="Duplicate this object"
-                    >
-                      <Icon name="copy" size={15} strokeWidth={1.9} />
-                      Duplicate
-                    </button>
-                    <button
-                      className="tool-btn has-label is-danger"
-                      onClick={removeSel}
-                      title="Delete this object"
-                      style={{
-                        background: 'var(--danger-soft)',
-                        borderColor: 'var(--danger)',
-                        color: 'var(--on-danger-soft)',
-                      }}
-                    >
-                      <Icon name="trash" size={15} strokeWidth={1.9} />
-                      Delete
-                    </button>
-                  </div>
+            {/* ── FAULT ──────────────────────────────────────────────── */}
+            <div className="se-group">
+              <div className="se-group-h">What the student should find</div>
+              <select
+                value={
+                  sel.defectId === undefined ? 'untagged' : sel.defectId === null ? 'clean' : sel.defectId
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  patchSel({ defectId: v === 'untagged' ? undefined : v === 'clean' ? null : v });
+                }}
+              >
+                <option value="untagged">Not inspectable (scenery)</option>
+                <option value="clean">Inspectable, but correct (decoy)</option>
+                {offerableCategories().map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {sel.defectId !== undefined && (
+                <>
+                  <label>Label shown to the student</label>
+                  <input
+                    value={sel.label ?? defaultLabel(sel)}
+                    onChange={(e) => patchSel({ label: e.target.value })}
+                  />
+                  <p className="muted se-note">Name the object, never its condition.</p>
                 </>
               )}
-            </>
-          )}
+            </div>
 
-          {/* Save / Preview / New and the saved list stay OUTSIDE the tabs. They
+            {/* ── ACTIONS ────────────────────────────────────────────── */}
+            <div className="tool-bar" style={{ marginTop: 6 }}>
+              <button className="tool-btn has-label" onClick={duplicateSel} title="Duplicate this object">
+                <Icon name="copy" size={15} strokeWidth={1.9} />
+                Duplicate
+              </button>
+              <button
+                className="tool-btn has-label is-danger"
+                onClick={removeSel}
+                title="Delete this object"
+                style={{ background: 'var(--danger-soft)', borderColor: 'var(--danger)', color: 'var(--on-danger-soft)' }}
+              >
+                <Icon name="trash" size={15} strokeWidth={1.9} />
+                Delete
+              </button>
+            </div>
+          </>
+        )}
+
+          </>
+        )}
+
+        {/* Save / Preview / New and the saved list stay OUTSIDE the tabs. They
             are the way out of whatever you are doing, and hiding Save behind a
             tab in an editor that does not autosave is how work gets lost. The
             fault/decoy count moved to the toolbar; Undo moved there beside
             Redo. */}
-          <div className="se-section">Scenario</div>
-          <div className="row" style={{ gap: 4 }}>
-            {/* The shortcut is in the tooltip rather than on the button face: the
+        <div className="se-section">Scenario</div>
+        <div className="row" style={{ gap: 4 }}>
+          {/* The shortcut is in the tooltip rather than on the button face: the
               label already switches between two words depending on whether this
               creates or updates, and a chord appended to both makes the button
               the widest thing in a 320px panel. */}
-            <button onClick={save} disabled={busy} title="Save the scenario (⌘S / Ctrl+S)">
-              {editingId ? 'Save changes' : 'Create scenario'}
-            </button>
-            <button className="secondary" onClick={previewAsStudent}>
-              Preview
-            </button>
-            {/* "New" used to sit here as well. It is the + New Scenario button
-                at the head of the list below — two controls doing the same thing
-                a few pixels apart. */}
-          </div>
-
-          <div className="se-section">Saved scenarios</div>
-          <SavedScenarioList
-            scenarios={savedScenarios}
-            loaded={listLoaded}
-            editingId={editingId}
-            onNew={newScenario}
-            onEdit={openScenario}
-            onActivate={(s) => setScenarioStatus(s, STATUS.ACTIVE)}
-            onDisable={(s) => setScenarioStatus(s, STATUS.DISABLED)}
-            onDelete={removeAndClear}
-          />
+          <button onClick={save} disabled={busy} title="Save the scenario (⌘S / Ctrl+S)">
+            {editingId ? 'Save changes' : 'Create scenario'}
+          </button>
+          <button className="secondary" onClick={previewAsStudent}>
+            Preview
+          </button>
+          <button className="secondary" onClick={newScenario}>
+            New
+          </button>
         </div>
 
-        <div className="se-stage">
-          <Canvas
-            shadows
-            dpr={[1, 2]}
-            camera={{ position: [7, 6, 7], fov: 50 }}
-            gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-            onCreated={({ gl }) => gl.setClearColor(stageColor())}
-            onPointerMissed={() => setSelId(null)}
-          >
-            <Bounds fit clip observe margin={1.1}>
-              <RoomShell layout={{ ...base, furniture: [] }} />
-              {objects.map((o) => (
-                <EditorObject
-                  key={o.id}
-                  item={o}
-                  selected={o.id === selId}
-                  onSelect={(id) => setSelId(id)}
-                  objectRef={selObjRef}
-                />
-              ))}
-            </Bounds>
-            {sel && selObjRef.current && (
-              <TransformControls
-                object={selObjRef.current}
-                mode={mode}
-                translationSnap={0.1}
-                rotationSnap={Math.PI / 12}
-                // Rotation here is HORIZONTAL only — yaw about Y, the axis that
-                // turns a fixture to face a different way on the floor.
-                //
-                // It used to be the one axis you could NOT use. showY was false
-                // whenever mode was 'rotate', while showX/showZ defaulted to true,
-                // so the gizmo offered exactly the two rings that tumble an object
-                // onto its side — and commitGizmo() persists `ry` and nothing else,
-                // so those rotations were applied on screen and then silently
-                // discarded on mouse-up. Showing only the Y ring makes the gizmo
-                // match what can actually be saved. (RoomLayoutEditor already did
-                // this correctly; this editor was the outlier.)
-                showX={mode !== 'rotate'}
-                showZ={mode !== 'rotate'}
-                // Y is available to EVERYTHING in translate mode. It used to be
-                // gated on `!!sel.prim`, so a model fixture had no vertical arrow at
-                // all — and even if you found one, commitGizmo() only persisted `y`
-                // for prims, so the height was discarded on mouse-up. itemY() has
-                // always honoured `y` for models; only the authoring was missing.
-                showY={mode === 'rotate' || mode === 'translate'}
-                onMouseDown={() => {
-                  snapshot();
-                  if (orbit.current) orbit.current.enabled = false;
-                }}
-                onMouseUp={() => {
-                  if (orbit.current) orbit.current.enabled = true;
-                  commitGizmo();
-                }}
+        <div className="se-section">Saved scenarios</div>
+        {scenarios.length === 0 && <p className="muted se-note">None yet.</p>}
+        {scenarios.map((s) => (
+          <div key={s.id} className={`se-row${editingId === s.id ? ' se-row-open' : ''}`}>
+            <button className="se-open" onClick={() => openScenario(s)}>
+              {s.name}
+              <span className="muted"> · {s.roomTier}</span>
+            </button>
+            <button className="secondary small" onClick={() => toggleActive(s)} title="Show to students">
+              {s.active ? 'On' : 'Off'}
+            </button>
+            {/* A trash icon, not a "✕" glyph: ✕ reads as "close/dismiss" and
+                this permanently deletes an authored scenario. */}
+            <button
+              className="danger small"
+              onClick={() => remove(s)}
+              title={`Delete "${s.name}"`}
+              aria-label={`Delete ${s.name}`}
+            >
+              <Icon name="trash" size={13} strokeWidth={1.9} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="se-stage">
+        <Canvas
+          shadows
+          dpr={[1, 2]}
+          camera={{ position: [7, 6, 7], fov: 50 }}
+          gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
+          onCreated={({ gl }) => gl.setClearColor(stageColor())}
+          onPointerMissed={() => setSelId(null)}
+        >
+          <Bounds fit clip observe margin={1.1}>
+            <RoomShell layout={{ ...base, furniture: [] }} />
+            {objects.map((o) => (
+              <EditorObject
+                key={o.id}
+                item={o}
+                selected={o.id === selId}
+                onSelect={(id) => setSelId(id)}
+                objectRef={selObjRef}
               />
-            )}
-            <OrbitControls ref={orbit} makeDefault />
-          </Canvas>
-          {/* The emoji is gone; the swatch is the same red the halo is drawn in,
+            ))}
+          </Bounds>
+          {sel && selObjRef.current && (
+            <TransformControls
+              object={selObjRef.current}
+              mode={mode}
+              translationSnap={0.1}
+              rotationSnap={Math.PI / 12}
+              // Rotation here is HORIZONTAL only — yaw about Y, the axis that
+              // turns a fixture to face a different way on the floor.
+              //
+              // It used to be the one axis you could NOT use. showY was false
+              // whenever mode was 'rotate', while showX/showZ defaulted to true,
+              // so the gizmo offered exactly the two rings that tumble an object
+              // onto its side — and commitGizmo() persists `ry` and nothing else,
+              // so those rotations were applied on screen and then silently
+              // discarded on mouse-up. Showing only the Y ring makes the gizmo
+              // match what can actually be saved. (RoomLayoutEditor already did
+              // this correctly; this editor was the outlier.)
+              showX={mode !== 'rotate'}
+              showZ={mode !== 'rotate'}
+              // Y is available to EVERYTHING in translate mode. It used to be
+              // gated on `!!sel.prim`, so a model fixture had no vertical arrow at
+              // all — and even if you found one, commitGizmo() only persisted `y`
+              // for prims, so the height was discarded on mouse-up. itemY() has
+              // always honoured `y` for models; only the authoring was missing.
+              showY={mode === 'rotate' || mode === 'translate'}
+              onMouseDown={() => {
+                snapshot();
+                if (orbit.current) orbit.current.enabled = false;
+              }}
+              onMouseUp={() => {
+                if (orbit.current) orbit.current.enabled = true;
+                commitGizmo();
+              }}
+            />
+          )}
+          <OrbitControls ref={orbit} makeDefault />
+        </Canvas>
+        {/* The emoji is gone; the swatch is the same red the halo is drawn in,
             so the key matches what is on screen instead of approximating it
             with whatever red the reader's emoji font happens to use. */}
-          <div className="se-legend">
-            <span className="se-legend-dot" /> tagged fault · click any object to select · the halo is
-            editor-only, students never see it
-          </div>
+        <div className="se-legend">
+          <span className="se-legend-dot" /> tagged fault · click any object to select · the halo is
+          editor-only, students never see it
+        </div>
         </div>
       </div>
     </div>

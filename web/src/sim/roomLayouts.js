@@ -606,26 +606,6 @@ const serverLayouts = new Map();
  *
  * @param {Array<{roomTier: string, room: object, furniture: array, walls: array, stations: array}>} rows
  */
-// A layout key an admin authored for a room type that is not one of the four
-// built-ins. Bounded and kept to plain characters, mirroring the server's own
-// check in services/auth/src/routes/layouts.routes.js — the two have to agree or
-// a row the server accepts is one the client silently drops.
-const CUSTOM_KEY = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/;
-
-// The structural defaults a custom layout inherits. Only the fields every plan
-// consumer reads and that a stored row may legitimately omit — the geometry
-// itself always comes from the row.
-const CUSTOM_BASE = {
-  w: 5,
-  l: 6,
-  h: 3,
-  floor: '#5a3d28',
-  spawn: [0, 0],
-  furniture: [],
-  walls: [],
-  stations: [],
-};
-
 export function setRoomLayouts(rows) {
   serverLayouts.clear();
   for (const r of rows || []) {
@@ -633,25 +613,10 @@ export function setRoomLayouts(rows) {
     // An EXACT tier key, deliberately not canonicalTier(): that function falls
     // back to 'Standard' for anything it does not recognise, so a row with a
     // junk roomTier would silently replace the Standard layout.
-    //
-    // Custom keys are now kept as well as the four built-ins. They used to be
-    // dropped here, which capped layouts at whatever shipped in this file —
-    // an admin could author a layout for a room type they created and the
-    // client would throw the row away on the next hydrate. The regex is what
-    // still keeps junk out; membership of LAYOUTS is no longer the test.
     const tier = r.roomTier;
-    const known = Object.prototype.hasOwnProperty.call(LAYOUTS, tier);
-    if (!known && !CUSTOM_KEY.test(String(tier || ''))) continue;
-    // A custom layout has no committed base to fall back on, so it has to carry
-    // its own dimensions — a row without them would render a room with no floor.
-    if (!known && !(Number.isFinite(r.room.w) && Number.isFinite(r.room.l))) continue;
+    if (!Object.prototype.hasOwnProperty.call(LAYOUTS, tier)) continue;
     serverLayouts.set(tier, r);
   }
-}
-
-/** Stored layout keys that are not one of the four committed tiers. */
-export function customLayoutKeys() {
-  return [...serverLayouts.keys()].filter((k) => !Object.prototype.hasOwnProperty.call(LAYOUTS, k)).sort();
 }
 
 /** True once the server's layouts have been applied. */
@@ -661,10 +626,7 @@ export function hasServerLayouts() {
 
 /** The stored layout for a tier, or null when the committed one is in force. */
 export function storedLayoutFor(typeName = '') {
-  // Exact key first. A custom layout is keyed by its own name, and
-  // canonicalTier() would fold it into one of the four built-ins — "Cabana"
-  // becomes "Standard" — handing back the wrong room.
-  return serverLayouts.get(typeName) || serverLayouts.get(canonicalTier(typeName)) || null;
+  return serverLayouts.get(canonicalTier(typeName)) || null;
 }
 
 // Map a room-type name to a plan: the shared stored layout if there is one,
@@ -672,17 +634,9 @@ export function storedLayoutFor(typeName = '') {
 // plan-shaped, so every consumer (RoomFreeRoam geometry, collision, station
 // markers, the scenario overlay) needs no other change.
 export function getRoomPlan(typeName = '') {
-  // An EXACT stored key wins over the canonical fold. Without this a layout
-  // authored for a room type the property invented could never be served:
-  // canonicalTier('Cabana') is 'Standard', so the sim would hand back the
-  // Standard room and the new layout would be dead data.
-  const exact = serverLayouts.get(typeName);
   const tier = canonicalTier(typeName);
-  // A custom key has no committed layout behind it, so the stored row is the
-  // whole truth. CUSTOM_BASE supplies only the structural defaults every plan
-  // consumer reads; setRoomLayouts has already guaranteed w and l are present.
-  const base = exact && !LAYOUTS[typeName] ? { ...CUSTOM_BASE } : LAYOUTS[tier];
-  const ov = exact || serverLayouts.get(tier);
+  const base = LAYOUTS[tier];
+  const ov = serverLayouts.get(tier);
   if (!ov) return base;
   return {
     ...base,
