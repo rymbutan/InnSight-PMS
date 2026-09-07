@@ -14,6 +14,8 @@ import FilterPanel, { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
 import Timeline from '../components/Timeline';
 import { labelize } from '../lib/labels';
+import { SOURCES, SOURCE_LABELS, PAYMENT_TYPES } from '../lib/reservationOptions';
+import { planQuickEdit } from '../lib/quickEditPlan';
 
 const TABS = [
   'Accommodations',
@@ -400,6 +402,7 @@ export default function ReservationDetail() {
         onClose={() => setQuickEditOpen(false)}
         res={res}
         stay={stay}
+        balanceCents={balanceDue}
         onDone={() => {
           setQuickEditOpen(false);
           load();
@@ -1240,9 +1243,32 @@ function RefundModal({ open, onClose, folio, txns, onDone }) {
   );
 }
 
-function QuickEditModal({ open, onClose, res, stay, onDone }) {
+function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) {
   const toast = useToast();
-  const [newCheckOut, setNewCheckOut] = useState(res?.checkOut?.slice(0, 10) || '');
+
+  // Every field the reservation header shows, so Quick Edit can correct the whole
+  // summary strip instead of only the checkout date. All of these are columns the
+  // reservation PATCH whitelist accepts.
+  //
+  // Deliberately NOT here:
+  //   · Nights and Balance Due are derived (nights from the dates, balance from
+  //     the folio) — shown read-only so the effect of a date edit is visible.
+  //   · Reservation Date is `createdAt`, the audit record of when the booking was
+  //     taken. Prisma owns it and the route does not accept it.
+  const EMPTY_STAY = {
+    checkIn: '',
+    checkOut: '',
+    adults: 1,
+    children: 0,
+    source: 'DIRECT',
+    paymentType: '',
+    ratePlan: '',
+    origin: '',
+    expectedArrivalTime: '',
+    specialRequests: '',
+  };
+  const [form, setForm] = useState(EMPTY_STAY);
+
   // Guest details are editable here too: correcting a misspelled name meant
   // leaving the reservation for the Guests screen and finding the profile again.
   //
@@ -1259,9 +1285,22 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
   });
   const [busy, setBusy] = useState(false);
 
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
   useEffect(() => {
     if (!res || !open) return;
-    setNewCheckOut(res.checkOut?.slice(0, 10) || '');
+    setForm({
+      checkIn: res.checkIn?.slice(0, 10) || '',
+      checkOut: res.checkOut?.slice(0, 10) || '',
+      adults: res.adults ?? 1,
+      children: res.children ?? 0,
+      source: res.source || 'DIRECT',
+      paymentType: res.paymentType || '',
+      ratePlan: res.ratePlan || '',
+      origin: res.origin || '',
+      expectedArrivalTime: res.expectedArrivalTime || '',
+      specialRequests: res.specialRequests || '',
+    });
     // The reservation carries a single guestName; split it only to seed the
     // fields. The guest RECORD is the source of truth, so load it when there is
     // one and let it win.
@@ -1291,11 +1330,33 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
     }
   }, [res, open]);
 
+  // Nights follows the dates the user is editing, not the saved reservation, so
+  // the number moves as they pick. The server recomputes it the same way.
+  const liveNights = useMemo(() => {
+    const a = new Date(form.checkIn);
+    const b = new Date(form.checkOut);
+    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+    const n = Math.round((b - a) / 86400000);
+    return n > 0 ? n : null;
+  }, [form.checkIn, form.checkOut]);
+
+  // What Save will actually do. See lib/quickEditPlan.js — the arrival branch is
+  // subtle enough to be worth unit tests of its own.
+  const plan = useMemo(
+    () => planQuickEdit({ res: res || {}, stay, form }),
+    [res, stay, form]
+  );
+
   async function submit() {
     if (!res) return;
+    if (plan.errors.length) {
+      toast.error(plan.errors[0]);
+      return;
+    }
+
     setBusy(true);
     try {
-      let changed = false;
+      let guestSaved = false;
 
       // ── Guest details ──
       if (res.guestId) {
@@ -1310,34 +1371,35 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
           return;
         }
         await api.patch(`/api/guests/${res.guestId}`, patch);
-        changed = true;
+        guestSaved = true;
       }
 
-      // ── Dates ──
-      const diffDays = Math.round((new Date(newCheckOut) - new Date(res.checkOut)) / 86400000);
-      if (diffDays !== 0) {
-        if (stay) {
-          // Both directions just move the expected checkout date. /extend handles
-          // that; /early-departure is a different action (departs the guest now
-          // with a refund) and must not be triggered by a date edit.
-          await api.post(`/api/stays/${stay.id}/extend`, { newCheckOut });
-          toast.success(
-            diffDays > 0
-              ? `Extended by ${diffDays} night(s).`
-              : `Shortened by ${Math.abs(diffDays)} night(s).`
-          );
-        } else {
-          await api.patch(`/api/reservations/${res.id}`, { checkOut: newCheckOut });
-          toast.success('Reservation dates updated.');
-        }
-        changed = true;
-      } else if (changed) {
-        toast.success('Guest details updated.');
+      // ── Reservation fields ──
+      // The patch carries only what moved. An unchanged date must not be echoed
+      // back: the route re-holds inventory whenever it sees one, so resending
+      // today's checkout would churn a hold for nothing.
+      const patchedRes = Object.keys(plan.resPatch).length > 0;
+      if (patchedRes) {
+        await api.patch(`/api/reservations/${res.id}`, plan.resPatch);
       }
 
-      if (!changed) {
+      // ── Keep the stay's expected checkout in step ──
+      if (plan.extendTo && stay) {
+        await api.post(`/api/stays/${stay.id}/extend`, { newCheckOut: plan.extendTo });
+      }
+
+      if (!patchedRes && !plan.extendTo && !guestSaved) {
         toast.info('No change.');
         return;
+      }
+
+      const datesMoved = Boolean(plan.resPatch.checkIn || plan.resPatch.checkOut || plan.extendTo);
+      if (datesMoved) {
+        toast.success(liveNights ? `Dates updated — now ${liveNights} night(s).` : 'Dates updated.');
+      } else if (patchedRes) {
+        toast.success('Reservation updated.');
+      } else {
+        toast.success('Guest details updated.');
       }
       onDone();
     } catch (e) {
@@ -1348,23 +1410,28 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
   }
 
   if (!res) return null;
-  const ci = new Date(res.checkIn);
+
+  // The strip anchors on the EARLIER of the saved and the edited check-in, so
+  // pulling check-in forward keeps the whole range on screen.
+  const origIn = new Date(res.checkIn);
+  const editedIn = new Date(form.checkIn);
+  const anchor = !Number.isNaN(editedIn.getTime()) && editedIn < origIn ? editedIn : origIn;
   const days = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(ci);
-    d.setDate(ci.getDate() + i);
+    const d = new Date(anchor);
+    d.setDate(anchor.getDate() + i);
     return d;
   });
   const cur = new Date(res.checkOut);
-  const sel = new Date(newCheckOut);
+  const selIn = Number.isNaN(editedIn.getTime()) ? origIn : editedIn;
+  const sel = new Date(form.checkOut);
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Quick Edit"
-      // Wider than the 480px default: it now carries two-column guest fields as
-      // well as the 14-day date strip.
-      width={620}
+      // Wide enough for two-column fields plus the 14-day date strip.
+      width={720}
       footer={
         <>
           <button className="secondary" onClick={onClose}>
@@ -1423,12 +1490,109 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
               </select>
             </div>
           </div>
-          <h4 className="guest-sub">Stay dates</h4>
         </>
       ) : null}
 
-      <label>Check-out date</label>
-      <input type="date" value={newCheckOut} onChange={(e) => setNewCheckOut(e.target.value)} />
+      <h4 className="guest-sub">Stay</h4>
+      <div className="row">
+        <div>
+          <label>Check-in date</label>
+          <input
+            type="date"
+            value={form.checkIn}
+            onChange={set('checkIn')}
+            disabled={plan.checkInLocked}
+          />
+          {plan.checkInLocked && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              The guest has checked in — check-in is fixed.
+            </div>
+          )}
+        </div>
+        <div>
+          <label>Check-out date</label>
+          <input type="date" value={form.checkOut} onChange={set('checkOut')} />
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <label>Nights</label>
+          <input value={liveNights ?? '—'} readOnly disabled />
+        </div>
+        <div>
+          <label>Reservation date</label>
+          <input
+            value={res.createdAt ? new Date(res.createdAt).toLocaleDateString() : '—'}
+            readOnly
+            disabled
+          />
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <label>Adults</label>
+          <input type="number" min="1" value={form.adults} onChange={set('adults')} />
+        </div>
+        <div>
+          <label>Children</label>
+          <input type="number" min="0" value={form.children} onChange={set('children')} />
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <label>Source</label>
+          <select value={form.source} onChange={set('source')}>
+            {SOURCES.map((s) => (
+              <option key={s} value={s}>
+                {SOURCE_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label>Origin</label>
+          <input value={form.origin} onChange={set('origin')} placeholder="e.g. Booking.com" />
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <label>Payment type</label>
+          <select value={form.paymentType} onChange={set('paymentType')}>
+            <option value="">—</option>
+            {PAYMENT_TYPES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label>Rate plan</label>
+          <input value={form.ratePlan} onChange={set('ratePlan')} placeholder="Base Rate" />
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <label>Estimated arrival time</label>
+          <input
+            value={form.expectedArrivalTime}
+            onChange={set('expectedArrivalTime')}
+            placeholder="e.g. 14:00"
+          />
+        </div>
+        <div>
+          <label>Balance due</label>
+          <input value={formatPeso(balanceCents)} readOnly disabled />
+        </div>
+      </div>
+      <label>Special requests</label>
+      <textarea
+        rows={3}
+        value={form.specialRequests}
+        onChange={set('specialRequests')}
+        placeholder="e.g. Honeymoon trip — please set the room up for a couple."
+      />
+
       <div style={{ marginTop: 16, overflowX: 'auto' }}>
         <table style={{ minWidth: 600 }}>
           <thead>
@@ -1446,8 +1610,8 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
           <tbody>
             <tr>
               {days.map((d, i) => {
-                const inOriginal = d >= ci && d < cur;
-                const inSelected = d >= ci && d < sel;
+                const inOriginal = d >= origIn && d < cur;
+                const inSelected = d >= selIn && d < sel;
                 return (
                   <td key={i} style={{ textAlign: 'center', padding: 6 }}>
                     <input type="checkbox" checked={inSelected} readOnly style={{ width: 'auto' }} />
