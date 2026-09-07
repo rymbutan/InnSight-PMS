@@ -88,7 +88,7 @@ line splits too).
 Equal is percentage with an equal share vector. `method` only decides how the
 vector is built, so there is one allocation path and one set of guarantees.
 
-### `planSplit({ transactions, targets, folioNumbers, sourceFolioId })`
+### `planSplit({ transactions, targets, folioNumbers, payerNames, sourceFolioId })`
 
 Returns the full set of transaction rows to write. For each splittable line it
 calls `allocate` on the line's **net remaining** amount (see Component 2), then
@@ -157,17 +157,98 @@ allocation the printed folio's tax section disagrees with its own balance — wh
 Breakdown amounts are written as **decimal strings**, per the `taxBreakdown` column
 comment: JSON cannot carry `BigInt`.
 
-## Component 4 — `POST /api/folios/:id/split`
+## Component 4 — who each folio bills, and saying so on the document
+
+A split is only half-done if the resulting documents cannot tell you who they
+bill. Today they cannot: `folioPrintModel` derives one name —
+`stay?.guestName || reservation?.guestName` — and prints it as both
+`meta.guestName` and `footer.billTo`. Every folio on a stay therefore prints the
+*same* name, so a bill split between two payers produces two documents that both
+claim to bill the same person and differ only in their totals.
+
+### `Folio.payerName`
+
+A nullable `payerName` column on `Folio`, set per payer when a split is made. A new
+Prisma migration; `db-init.sh` runs `migrate deploy`, so it applies on the normal
+startup path.
+
+Nullable on purpose: every folio that exists today, and every folio opened outside
+a split, has no distinct payer and correctly falls back to the stay's guest.
+
+Names are supplied by the operator, not derived. A co-payer is often not a guest
+in the system at all — a company, an employer, a friend settling the bar tab — so
+this is a plain string on the folio and not a `guestId` reference. It is trimmed,
+capped at 120 characters, and required for every payer in a split so no folio is
+left ambiguous.
+
+### What changes on the document
+
+The printed folio already has both lines this needs, so no layout work:
+
+| Line | Today | After |
+|---|---|---|
+| `Bill To` (`folio.routes.js:1825`) | the stay's guest, on every folio | `folio.payerName` when set, else the stay's guest |
+| `Remark` (`folio.routes.js:1821`) | always blank | the split note |
+
+`meta.guestName` deliberately keeps printing the **stay's** guest. Who occupied the
+room and who is settling this folio are different facts, and the document has a
+distinct line for each. Overwriting `guestName` with the payer would misstate the
+stay itself.
+
+The split note names the co-payers, so each half of a split says what it is part
+of and who holds the other part:
+
+```
+Bill To               :  Bartolome Vendiola
+Remark                :  Split bill — 40% of folio F-001. Shared with:
+                         Arym Vendiola (60%, folio F-001).
+```
+
+And on the other folio:
+
+```
+Bill To               :  Arym Vendiola
+Remark                :  Split bill — 60%, folios F-002. Shared with:
+                         Bartolome Vendiola (40%, folio F-002).
+```
+
+The note is derived at print time from the folio's own TRANSFER rows and the
+`payerName` of the folios named in them, not stored as frozen prose — a payer
+renamed after the split then prints correctly, and the note cannot drift from the
+transactions it describes.
+
+### Transfer line labels
+
+`planTransfer` writes `— transferred to folio F-002`. With payers named, the
+counterpart's name goes in the label too, so a line in the existing "Transferred
+To Folio" section reads as a person rather than a document number:
+
+```
+Room — transferred to folio F-002 (Bartolome Vendiola)
+```
+
+Done by giving `planTransfer` an **optional** labels argument alongside its
+existing `folioNumbers` map. Optional so the current transfer route is unaffected
+until it chooses to pass one — and it should, since a manual `Move` benefits from
+naming the payer identically. One description builder, used by both paths.
+
+## Component 5 — `POST /api/folios/:id/split`
 
 Guarded with `CASHIER` (`['ADMIN','MANAGER','FRONT_DESK']`), matching `transfer`.
 
 **Request**
 
+One shape for both methods: `payers[0]` is the source folio, and `percent` is
+absent for `EQUAL` because the server derives equal shares itself rather than
+trusting a client to divide 100 by 3.
+
 ```jsonc
 {
-  "method": "EQUAL",        // or "PERCENT"
-  "ways": 3,                // EQUAL only
-  "shares": [60, 40]        // PERCENT only; source folio is shares[0]
+  "method": "PERCENT",                                  // or "EQUAL"
+  "payers": [
+    { "payerName": "Arym Vendiola",      "percent": 60 },  // the source folio
+    { "payerName": "Bartolome Vendiola", "percent": 40 }   // a folio the split opens
+  ]
 }
 ```
 
@@ -175,8 +256,12 @@ Guarded with `CASHIER` (`['ADMIN','MANAGER','FRONT_DESK']`), matching `transfer`
 generic failure:
 
 - `method` is one of `EQUAL`, `PERCENT`.
-- `EQUAL`: `ways` is an integer, `2 <= ways <= 8`.
-- `PERCENT`: `shares` is an array of 2–8 numbers summing to exactly `100`,
+- `payers` is an array of 2–8 entries.
+- Every entry has a non-empty `payerName` after trimming, at most 120 characters.
+  A split whose folios cannot say who they bill is the thing this is meant to fix,
+  so an unnamed payer is rejected rather than defaulted.
+- `EQUAL`: no `percent` is read; shares are derived as `ways = payers.length`.
+- `PERCENT`: every `percent` is a number summing to exactly `100`,
   compared as integers scaled by 100 so `33.33 + 33.33 + 33.34` is accepted
   without a float epsilon. Every share must be **greater than zero**: a payer
   owing nothing does not need a folio opened for them, and a 0% entry is far
@@ -191,10 +276,14 @@ generic failure:
 **Behaviour** — one `prisma.$transaction` covering everything, so a split can
 never half-apply and invent or destroy money:
 
-1. Create the `ways - 1` sibling folios, copying `stayId`, `guestId`, `type` and
-   `currency` from the source.
-2. Read the source folio's transactions, compute net remaining per line.
-3. `planSplit`, then create every row with `sourceSystem: 'split'` and
+1. Create one sibling folio per payer after the first, copying `stayId`,
+   `guestId`, `type` and `currency` from the source, each with its own
+   `payerName`.
+2. Set the **source** folio's `payerName` from `payers[0]`. Without this the
+   folio keeping the largest share is the one document that still cannot say who
+   it bills.
+3. Read the source folio's transactions, compute net remaining per line.
+4. `planSplit`, then create every row with `sourceSystem: 'split'` and
    `postedBy` from `req.user`.
 
 `sourceSystem: 'split'` rather than `'transfer'` so the audit trail distinguishes
@@ -235,7 +324,7 @@ publishes and which the web live-refresh layer already forwards. Payload carries
 together, and there is nothing a split needs to say that this channel does not
 already mean.
 
-## Component 5 — the honest-void fix
+## Component 6 — the honest-void fix
 
 `reversalOf` carries two meanings: "this row voids that row" (the void route) and
 "this row is half of a transfer pair for that row" (`planTransfer`).
@@ -264,34 +353,45 @@ The guard becomes type-aware and reports the real cause:
 Scope note: this fixes the message, not the behaviour. Making a split reversible
 is deliberately out of scope, and is recorded under Not in scope below.
 
-## Component 6 — UI
+## Component 7 — UI
 
 Replaces the `Split bill — add folio` button in `web/src/pages/Folios.jsx:456`. The
 per-line `Move` control stays: one-off manual reassignment is still a real need and
 is not what a proportional split is for.
 
 ```
-┌────────────────────────────────────────────────┐
-│  Split folio F-001                             │
-│                                                │
-│   Method    ( ) Equally   (•) By percentage     │
-│                                                │
-│   F-001  (this folio)     [ 60 ] %    ₱6,720   │
-│   New folio 2             [ 40 ] %    ₱4,480   │
-│   [ + add a payer ]                            │
-│                          ──────────────────    │
-│                           100 %      ₱11,200   │
-│                                                │
-│   ⓘ  ₱5,000 already paid on this folio stays   │
-│      here — a payment cannot be reassigned.    │
-│                                                │
-│              [ Cancel ]  [ Split bill ]        │
-└────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Split folio F-001                                       │
+│                                                          │
+│   Method    ( ) Equally   (•) By percentage               │
+│                                                          │
+│   Payer                        Share      Gets           │
+│   [ Arym Vendiola        ]     [ 60 ] %   ₱6,720         │
+│     this folio (F-001)                                   │
+│   [ Bartolome Vendiola   ]     [ 40 ] %   ₱4,480         │
+│     a new folio                                          │
+│   [ + add a payer ]                                      │
+│                              ─────────────────────       │
+│                                100 %     ₱11,200         │
+│                                                          │
+│   ⓘ  ₱5,000 already paid on this folio stays here —      │
+│      a payment cannot be reassigned.                     │
+│                                                          │
+│   Each folio prints its payer on its Bill To line.       │
+│                                                          │
+│                      [ Cancel ]  [ Split bill ]          │
+└──────────────────────────────────────────────────────────┘
 ```
 
 - **Equally** collapses the percentage inputs to a number-of-ways stepper and
   shows the resulting per-folio total, including which folio absorbs the odd cent
-  so the operator is never surprised by a 1-cent asymmetry.
+  so the operator is never surprised by a 1-cent asymmetry. The payer name fields
+  stay — an equal split still needs to know who the halves belong to.
+- The first payer row is labelled as **this folio** and pre-filled with the stay's
+  guest name, since the person already in the room is nearly always one of the
+  payers. Every other row is a folio the split will open.
+- Payer names are required; `Split bill` stays disabled while any is blank, and
+  the row itself shows why rather than only the footer.
 - The live preview comes from the **dry-run call**, debounced (~250ms) while the
   operator types, so the figures shown are the server's own arithmetic rather
   than a second implementation that could round differently. See the dry-run
@@ -338,6 +438,20 @@ Two that guard the design's central promises:
 - **The void guard reports the right reason**: a charge with a `TRANSFER` reversal
   is refused as split/transferred, a charge with a genuine void reversal is still
   refused as already voided.
+- **Every payer's folio is named**, the source folio's included — the failure mode
+  being a split that leaves the largest share on a document that cannot say who
+  it bills.
+
+Print-model tests in the existing `folioPrintModel.test.js`:
+
+- `footer.billTo` is the folio's `payerName` when set and the stay's guest when
+  not, so no existing folio's document changes.
+- `meta.guestName` stays the **stay's** guest even when `payerName` differs — the
+  occupant and the payer are different facts and the document keeps both.
+- The split note names the co-payers and their shares, and is derived from the
+  folio's TRANSFER rows rather than stored, so renaming a payer after the split
+  reprints correctly.
+- A folio with no transfers prints a blank `Remark`, exactly as today.
 
 Web: `npx eslint`, `npm run build`, and `node --test` over the touched lib globs
 (there is no `npm test` in `web/`).
@@ -350,8 +464,13 @@ Web: `npx eslint`, `npm run build`, and `node --test` over the touched lib globs
 - **Splitting by amount** (payer A pays exactly ₱2,000, B the rest) or **by charge
   category** (A pays room, B pays extras). Both are plausible next methods; neither
   was asked for, and the `method` field leaves room for them.
-- **Assigning a payer name or guest to each new folio.** The split creates folios
-  copying the source's `guestId`; naming payers is a separate concern.
+- **Linking a payer to a `guestId`.** `payerName` is a plain string: a co-payer is
+  often a company or a non-guest, and forcing a guest record for one would make
+  splitting harder than doing it by hand. New folios still copy the source's
+  `guestId` so the stay linkage is intact.
+- **Renaming a payer after the split.** No edit control is added for `payerName`
+  in this change. The printed note derives names at print time, so the field is
+  safe to make editable later without reworking anything here.
 
 ## Files
 
@@ -359,7 +478,15 @@ Web: `npx eslint`, `npm run build`, and `node --test` over the touched lib globs
 |---|---|
 | `services/folio/src/lib/split.js` | new — `allocate`, `planSplit` |
 | `services/folio/src/lib/split.test.js` | new |
-| `services/folio/src/routes/folio.routes.js` | new `POST /folios/:id/split`; type-aware void guard |
+| `services/folio/src/prisma/schema.prisma` | `Folio.payerName String?` |
+| `services/folio/src/prisma/migrations/…_folio_payer_name/` | new migration |
+| `services/folio/src/lib/transfer.js` | optional payer labels on descriptions |
+| `services/folio/src/lib/folioPrintModel.js` | `billTo` from `payerName`; split note in `Remark` |
+| `services/folio/src/lib/folioPrintModel.test.js` | cases for both |
+| `services/folio/src/routes/folio.routes.js` | new `POST /folios/:id/split`; type-aware void guard; pass `payerName` into the print model |
 | `services/folio/src/routes/folioSplit.test.js` | new |
 | `web/src/pages/Folios.jsx` | split dialog replaces the add-folio button |
 | `web/src/styles.css` | dialog styling |
+
+No PDF layout work: the `Bill To` and `Remark` lines are already rendered at
+`folio.routes.js:1821-1825`, and `Remark` prints blank today.
