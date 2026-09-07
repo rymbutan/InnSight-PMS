@@ -8,17 +8,9 @@ import { formatPeso, pesosToCents } from '../lib/money';
 import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 
+import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
+
 const STEPS = ['Availability', 'Details', 'Guests', 'Add-ons', 'Payment'];
-const SOURCES = ['DIRECT', 'WALK_IN', 'BOOKING_COM', 'AIRBNB', 'EXPEDIA', 'AGODA', 'OTA'];
-const SOURCE_LABELS = {
-  DIRECT: 'Direct',
-  WALK_IN: 'Walk-in',
-  BOOKING_COM: 'Booking.com',
-  AIRBNB: 'Airbnb',
-  EXPEDIA: 'Expedia',
-  AGODA: 'Agoda',
-  OTA: 'Other OTA',
-};
 
 export default function NewReservation() {
   const [params] = useSearchParams();
