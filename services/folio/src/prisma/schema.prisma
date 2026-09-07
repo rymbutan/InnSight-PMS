@@ -12,6 +12,17 @@ model Folio {
   folioNumber   String             @unique
   stayId        String?
   guestId       String?
+  // Who this folio bills, when that is not simply the guest whose stay it is.
+  // Set per payer by a bill split; null on every folio without a distinct payer,
+  // which then falls back to the stay's guest name on the printed document.
+  payerName     String?
+  // The credential on the QR code printed in the folio's header: a stranger who
+  // guesses it can read this one folio's PDF and nothing else, unauthenticated
+  // (see /api/public/folios/:token/pdf). Generated lazily on first print rather
+  // than at folio creation, since most folios are never scanned and most are
+  // never split into new ones either — no code path should be required to
+  // remember to set it.
+  publicToken   String?            @unique
   type          FolioType          @default(GUEST)
   status        FolioStatus        @default(OPEN)
   currency      String             @default("PHP")
@@ -137,6 +148,10 @@ model PaymentIntent {
   confirmedAt DateTime?
   createdAt   DateTime            @default(now())
   createdBy   String?
+  // Set only when this intent was emailed rather than shown as an in-person QR —
+  // null for the original scan-in-front-of-the-guest flow, so "Sent Pay by Link"
+  // can list just the ones actually sent somewhere.
+  sentTo      String?
 
   @@index([folioId, status])
 }

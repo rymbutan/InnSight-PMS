@@ -8,10 +8,11 @@ const { folioListRow } = require('../lib/folioList');
 const { folioPrintModel } = require('../lib/folioPrintModel');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
 const { planTransfer } = require('../lib/transfer');
+const { allocate, netRemaining, planSplit } = require('../lib/split');
 const { receiptModel } = require('../lib/receipt');
 const { send: sendMail } = require('../lib/notifier');
 const { qrPngBuffer, qrDataUrl } = require('../lib/qr');
-const { newToken, intentState, INTENT_TTL_MS } = require('../lib/paymentIntent');
+const { newToken, intentState, INTENT_TTL_MS, LINK_TTL_MS } = require('../lib/paymentIntent');
 const { publicUrl } = require('../lib/publicUrl');
 const { validateTaxRates, validateHotel } = require('../lib/settings');
 const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
@@ -77,7 +78,14 @@ function facilityTotalCents(f, { units, persons, startAt, endAt } = {}) {
   return p * Math.max(1, units || 1);
 }
 
+const crypto = require('crypto');
+
 const router = express.Router();
+// A second, unauthenticated router for the folio's QR code — mounted by
+// index.js BEFORE verifyToken, exactly like the PaymentIntent public routes.
+// Kept here rather than duplicated in index.js because serving it means
+// rebuilding the same print model this file already builds for staff.
+const publicRouter = express.Router();
 const prisma = require('../lib/prisma');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 redis.on('error', (e) => console.error('[Folio] redis error:', e.message));
@@ -632,7 +640,18 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
       include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: true },
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
-    res.json(folio);
+
+    // The split-bill dialog defaults its payer count to this booking's guest
+    // count, so it fetched here rather than making the browser call the
+    // reservation service separately just to draw a default.
+    const stay = folio.stayId
+      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+      : null;
+    const reservation = stay?.reservationId
+      ? await fetchJsonOrNull(`${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`)
+      : null;
+
+    res.json({ ...folio, adults: reservation?.adults ?? null });
   } catch (err) {
     console.error('[Folio] Get folio error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -942,9 +961,24 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
     if (original.reversalOf) {
       return res.status(400).json({ error: 'Cannot void a reversal transaction.' });
     }
-    const existingReversal = await prisma.folioTransaction.findFirst({ where: { reversalOf: original.id } });
+    // `reversalOf` carries two meanings: "voids that row" (here) and "is half of
+    // a transfer pair for that row" (lib/transfer.js, lib/split.js). Both block a
+    // void, and should — a charge whose money now sits on another folio must not
+    // be voided out from under the folios carrying it. But they are not the same
+    // event, and reporting a transferred charge as "already voided" sends the
+    // desk looking for a void that never happened. A split posts up to seven
+    // pairs per line, so this was about to become the common case.
+    const existingReversal = await prisma.folioTransaction.findFirst({
+      where: { reversalOf: original.id },
+      orderBy: { postedAt: 'asc' },
+    });
     if (existingReversal) {
-      return res.status(409).json({ error: 'Transaction has already been voided.' });
+      return res.status(409).json({
+        error:
+          existingReversal.type === 'TRANSFER'
+            ? 'This charge has been split or transferred to another folio. Void it there, or move the share back first.'
+            : 'Transaction has already been voided.',
+      });
     }
 
     // The reversal carries the NEGATED breakdown of the row it reverses, not a
@@ -1059,6 +1093,217 @@ router.post('/folios/:id/transfer', requireRole(...CASHIER), async (req, res) =>
   }
 });
 
+// POST /api/folios/:id/split — divide this folio's charges across several payers.
+//
+// The real bill-splitting action. `transfer` above moves ONE WHOLE transaction;
+// this divides every charge on the folio by a share vector, which is what the
+// desk means by "split it 60/40" or "split it three ways". Before this existed
+// the only "Split bill" control opened an empty second folio and left the
+// operator to move each charge by hand — and any charge that did not divide into
+// whole cents could not be divided at all.
+//
+// Emits the same reversing TRANSFER pairs as `transfer`, for the same reason
+// (lib/transfer.js explains it), so balances, the printed folio's sections and
+// the night audit all keep working with no changes: classifyTransactions already
+// counts TRANSFER exactly like CHARGE.
+//
+// `dryRun` returns what a split WOULD do and writes nothing. The dialog's live
+// preview uses it, so the figures the operator confirms are produced by this
+// same code rather than by a second implementation of money-rounding in the web
+// bundle that nothing would check for drift.
+router.post('/folios/:id/split', requireRole(...CASHIER), async (req, res) => {
+  try {
+    const { method, payers, dryRun } = req.body || {};
+
+    if (method !== 'EQUAL' && method !== 'PERCENT') {
+      return res.status(400).json({ error: "method must be 'EQUAL' or 'PERCENT'." });
+    }
+    if (!Array.isArray(payers) || payers.length < 2 || payers.length > 8) {
+      return res.status(400).json({ error: 'A split needs between 2 and 8 payers.' });
+    }
+
+    // Every folio a split produces must be able to say who it bills — that is
+    // the whole point of naming payers, so an unnamed one is rejected rather
+    // than quietly defaulted to the guest.
+    const names = payers.map((p) => String(p?.payerName || '').trim());
+    if (names.some((n) => !n)) {
+      return res.status(400).json({ error: 'Every payer needs a name.' });
+    }
+    if (names.some((n) => n.length > 120)) {
+      return res.status(400).json({ error: 'A payer name may be at most 120 characters.' });
+    }
+
+    let shares;
+    if (method === 'EQUAL') {
+      // Derived here, not taken from the client: nothing sensible can be sent
+      // for "100 divided by 3" and a client that tries will send 33.33 thrice,
+      // which does not sum to 100.
+      shares = payers.map(() => 1);
+    } else {
+      shares = payers.map((p) => Number(p?.percent));
+      if (shares.some((n) => !Number.isFinite(n) || n <= 0)) {
+        return res.status(400).json({ error: 'Every share must be a percentage greater than zero.' });
+      }
+      // Compared as integers scaled by 100 so 33.33 + 33.33 + 33.34 is accepted
+      // without reaching for a float epsilon.
+      const scaled = shares.reduce((a, n) => a + Math.round(n * 100), 0);
+      if (scaled !== 10000) {
+        return res.status(400).json({ error: 'Shares must add up to exactly 100%.' });
+      }
+    }
+
+    const source = await prisma.folio.findUnique({
+      where: { id: req.params.id },
+      include: { transactions: { orderBy: { postedAt: 'asc' } } },
+    });
+    if (!source) return res.status(404).json({ error: 'Folio not found.' });
+    if (source.status !== 'OPEN') {
+      return res.status(409).json({ error: 'Only an open folio can be split.' });
+    }
+    // A folio with no stay is a walk-in POS sale. The transfer guard refuses to
+    // move charges off one, and a split must not become a way around that.
+    if (!source.stayId) {
+      return res.status(409).json({ error: 'Only a folio attached to a stay can be split.' });
+    }
+
+    // Is there anything left to divide? A folio whose charges have all been
+    // split away already would otherwise report a cheerful success having
+    // written nothing.
+    const splittable = source.transactions.filter(
+      (t) => t.type !== 'PAYMENT' && t.type !== 'REFUND' && t.type !== 'TRANSFER'
+    );
+    const divisible = splittable.some((t) => {
+      const net = netRemaining(t, source.transactions);
+      return net.amountCents !== 0n || net.taxAmountCents !== 0n;
+    });
+    if (!divisible) {
+      return res.status(409).json({ error: 'This folio has no charges left to split.' });
+    }
+
+    // What each payer's folio ends up holding. Computed from the same allocate()
+    // the rows are built with, so a preview cannot disagree with the split.
+    function previewFor(folioNumbers) {
+      const totals = shares.map(() => 0n);
+      for (const tx of splittable) {
+        const net = netRemaining(tx, source.transactions);
+        const amounts = allocate(net.amountCents, shares);
+        const taxes = allocate(net.taxAmountCents, shares);
+        for (let i = 0; i < shares.length; i++) totals[i] += amounts[i] + taxes[i];
+      }
+      const scaledTotal = shares.reduce((a, n) => a + n, 0);
+      return payers.map((p, i) => ({
+        payerName: names[i],
+        percent: method === 'EQUAL' ? 100 / shares.length : Number(p.percent),
+        share: shares[i] / scaledTotal,
+        folioNumber: folioNumbers ? folioNumbers[i] : null,
+        isSource: i === 0,
+        totalCents: totals[i].toString(),
+      }));
+    }
+
+    if (dryRun) {
+      return res.json({
+        dryRun: true,
+        method,
+        payers: previewFor([source.folioNumber]),
+      });
+    }
+
+    // Distinct by construction. nextFolioNumber() is Date.now() plus 3 random
+    // digits, and these are created inside one transaction well within a single
+    // millisecond — a ~1-in-1000 collision per pair against a @unique column,
+    // which would abort the whole split.
+    const newNumbers = payers.slice(1).map((_, i) => `${nextFolioNumber()}-${i + 1}`);
+
+    const out = await prisma.$transaction(async (px) => {
+      // The source folio is payers[0] and keeps its own share. It needs its
+      // payerName set too: without it the folio holding the largest share is the
+      // one document that still cannot say who it bills.
+      const updatedSource = await px.folio.update({
+        where: { id: source.id },
+        data: { payerName: names[0] },
+      });
+
+      const created = [];
+      for (let i = 1; i < payers.length; i++) {
+        created.push(
+          await px.folio.create({
+            data: {
+              folioNumber: newNumbers[i - 1],
+              stayId: source.stayId,
+              guestId: source.guestId,
+              type: source.type,
+              currency: source.currency,
+              payerName: names[i],
+            },
+          })
+        );
+      }
+
+      const folios = [updatedSource, ...created];
+      const targets = folios.map((f, i) => ({ folioId: f.id, share: shares[i] }));
+      const folioNumbers = Object.fromEntries(folios.map((f) => [f.id, f.folioNumber]));
+      const payerNames = Object.fromEntries(folios.map((f) => [f.id, f.payerName]));
+
+      const rows = planSplit({
+        transactions: source.transactions,
+        targets,
+        folioNumbers,
+        payerNames,
+        sourceFolioId: source.id,
+      });
+
+      const transactions = [];
+      for (const data of rows) {
+        transactions.push(
+          await px.folioTransaction.create({
+            data: {
+              ...data,
+              postedBy: req.user?.username || req.user?.sub,
+              // 'split' rather than 'transfer' so the audit trail can tell a
+              // proportional split from a manual one-line move.
+              sourceSystem: 'split',
+            },
+          })
+        );
+      }
+      return { folios, transactions };
+    });
+
+    // The channel the manual transfer already publishes and the web live-refresh
+    // layer already forwards. A split has nothing to say that this does not
+    // already mean, and a new channel would mean editing the inventory service's
+    // LIVE_CHANNELS, useLiveEvents.js and notifications.js in step.
+    redis.publish(
+      'folio:transferred',
+      JSON.stringify({
+        fromFolioId: source.id,
+        toFolioId: out.folios.slice(1).map((f) => f.id).join(','),
+        stayId: source.stayId,
+        split: true,
+      })
+    );
+
+    res.status(201).json({
+      folios: out.folios.map((f) => ({
+        id: f.id,
+        folioNumber: f.folioNumber,
+        payerName: f.payerName,
+      })),
+      transactionCount: out.transactions.length,
+      payers: previewFor(out.folios.map((f) => f.folioNumber)),
+    });
+  } catch (err) {
+    console.error('[Folio] Split error:', err.message);
+    // planSplit throws on a target set that cannot describe a split. That is a
+    // bad request, not a server fault, and saying so is more use than a 500.
+    if (/at least two|source folio|share/i.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // POST /api/folios/:id/payment-intents — generate a QR code for a simulated
 // wallet payment. The client asked whether payment could be simulated this way.
 //
@@ -1080,17 +1325,41 @@ router.post('/folios/:id/payment-intents', requireRole(...CASHIER), async (req, 
     if (!folio) return res.status(404).json({ error: 'Folio not found.' });
     if (folio.status !== 'OPEN') return res.status(409).json({ error: 'This folio is not open.' });
 
+    // Present only when this intent is meant to be EMAILED rather than scanned
+    // in person — "Sent Pay by Link". A longer TTL and a `sentTo` record follow
+    // from that one distinction.
+    const to = req.body?.to || null;
+
     const intent = await prisma.paymentIntent.create({
       data: {
         token: newToken(),
         folioId: folio.id,
         amountCents,
-        expiresAt: new Date(Date.now() + INTENT_TTL_MS),
+        expiresAt: new Date(Date.now() + (to ? LINK_TTL_MS : INTENT_TTL_MS)),
         createdBy: req.user?.username || req.user?.sub,
+        sentTo: to,
       },
     });
 
     const url = publicUrl(`/pay/${intent.token}`);
+
+    if (to) {
+      await sendMail({
+        to,
+        subject: `Complete your payment — InnSight Hotel`,
+        body: [
+          `Hi,`,
+          '',
+          `Please use the link below to pay ${(Number(intent.amountCents) / 100).toFixed(2)} PHP:`,
+          url,
+          '',
+          `This link expires ${intent.expiresAt.toUTCString()}.`,
+          '',
+          'InnSight Hotel',
+        ].join('\r\n'),
+      });
+    }
+
     res.status(201).json({
       id: intent.id,
       url,
@@ -1100,9 +1369,40 @@ router.post('/folios/:id/payment-intents', requireRole(...CASHIER), async (req, 
       // Lets the desk say "scan this" or "confirm on screen" truthfully. A code
       // encoding localhost cannot be opened by a phone — see lib/publicUrl.js.
       scannable: publicUrl.isScannableByPhone,
+      ...(to && { sent: true, sentTo: to }),
     });
   } catch (err) {
     console.error('[Folio] Payment intent error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/folios/:id/payment-intents — the history behind "Sent Pay by Link":
+// every intent ever generated for this folio, in-person QR codes included, so
+// the desk can see what has actually gone out and to whom.
+router.get('/folios/:id/payment-intents', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+
+    const rows = await prisma.paymentIntent.findMany({
+      where: { folioId: folio.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        amountCents: r.amountCents.toString(),
+        method: r.method,
+        status: intentState(r),
+        sentTo: r.sentTo || null,
+        createdAt: r.createdAt,
+        expiresAt: r.expiresAt,
+        confirmedAt: r.confirmedAt,
+      }))
+    );
+  } catch (err) {
+    console.error('[Folio] List payment intents error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -1550,95 +1850,129 @@ router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASH
   }
 });
 
-// GET /api/folios/:id/print — the guest folio as a PDF, laid out to match the
-// panel's reference invoice: a bordered grid with every section always present.
-//
-// The arithmetic lives in lib/folioPrintModel.js so it can be unit tested; this
-// route is rendering only.
-router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
-  try {
-    const folio = await prisma.folio.findUnique({
-      where: { id: req.params.id },
-      include: { transactions: { orderBy: { postedAt: 'asc' } } },
-    });
-    if (!folio) return res.status(404).json({ error: 'Not found.' });
+// Builds the structured print model for one folio — the part staff printing
+// and the public QR link both need. Pulled out of the /print route so the
+// public route below can produce the identical document from just a token,
+// without a second copy of this cross-service assembly.
+async function buildFolioPrintModel(folio) {
+  const codeRows = await prisma.chargeCode.findMany({
+    where: { category: { in: ['ROOM', 'FACILITY'] } },
+    select: { code: true, category: true },
+  });
+  const roomCodes = new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code));
+  const facilityCodes = new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code));
 
-    const codeRows = await prisma.chargeCode.findMany({
-      where: { category: { in: ['ROOM', 'FACILITY'] } },
-      select: { code: true, category: true },
-    });
-    const roomCodes = new Set(codeRows.filter((c) => c.category === 'ROOM').map((c) => c.code));
-    const facilityCodes = new Set(codeRows.filter((c) => c.category === 'FACILITY').map((c) => c.code));
+  // Tag each transaction with whether it is room revenue, so the print model
+  // can split room tax from tax on other charges without re-deriving the
+  // classification.
+  const transactions = folio.transactions.map((t) => ({
+    ...t,
+    __isRoom: roomCodes.has(t.chargeCode),
+  }));
+  const summary = classifyTransactions(transactions, { roomCodes, facilityCodes });
 
-    // Tag each transaction with whether it is room revenue, so the print model
-    // can split room tax from tax on other charges without re-deriving the
-    // classification.
-    const transactions = folio.transactions.map((t) => ({
-      ...t,
-      __isRoom: roomCodes.has(t.chargeCode),
-    }));
-    const summary = classifyTransactions(transactions, { roomCodes, facilityCodes });
+  // Upstream failures degrade to a dash rather than failing the print: staff
+  // need folios to print during an audit even when a service is down.
+  const guest = folio.guestId
+    ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
+    : null;
+  const stay = folio.stayId
+    ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+    : null;
+  const reservation = stay?.reservationId
+    ? await fetchJsonOrNull(`${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`)
+    : null;
 
-    // Upstream failures degrade to a dash rather than failing the print: staff
-    // need folios to print during an audit even when a service is down.
-    const guest = folio.guestId
-      ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
-      : null;
-    const stay = folio.stayId
-      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
-      : null;
-    const reservation = stay?.reservationId
-      ? await fetchJsonOrNull(`${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`)
-      : null;
+  // The other folios on this stay, so a split folio's Remark line can name the
+  // co-payers it shares the bill with. Only fetched when this folio actually
+  // carries transfers: an ordinary folio prints a blank Remark exactly as it
+  // always has, and pays no query for the privilege.
+  const counterparts = folio.stayId && transactions.some((t) => t.type === 'TRANSFER')
+    ? (
+        await prisma.folio.findMany({
+          where: { stayId: folio.stayId, id: { not: folio.id } },
+          select: { id: true, folioNumber: true, payerName: true },
+          orderBy: { openedAt: 'asc' },
+        })
+      ).map((f) => ({ folioId: f.id, folioNumber: f.folioNumber, payerName: f.payerName }))
+    : [];
 
-    const model = folioPrintModel({
-      folio, transactions, summary,
-      guest, stay, reservation, hotel: await getHotel(),
-    });
+  return folioPrintModel({
+    folio, transactions, summary,
+    guest, stay, reservation, hotel: await getHotel(),
+    counterparts,
+  });
+}
 
-    // The reference prints amounts as "25,350.00 P".
-    const money = (cents) =>
-      `${(Number(cents) / 100).toLocaleString('en-US', {
-        minimumFractionDigits: 2, maximumFractionDigits: 2,
-      })} P`;
+// The credential behind the folio's QR code. Generated lazily on first print
+// rather than at folio creation — most folios are never scanned or split, and
+// no earlier code path should be required to remember to set this. 24 random
+// bytes makes guessing it as infeasible as guessing a PaymentIntent token.
+async function ensurePublicToken(folio) {
+  if (folio.publicToken) return folio.publicToken;
+  const token = crypto.randomBytes(24).toString('base64url');
+  const updated = await prisma.folio.update({ where: { id: folio.id }, data: { publicToken: token } });
+  return updated.publicToken;
+}
 
-    const doc = new PDFDocument({ size: 'A4', margin: 36 });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="folio-${folio.folioNumber}.pdf"`);
-    doc.pipe(res);
+// Renders a print model to a PDF response — shared by the staff route and the
+// public one below, so a scanned code and a staff printout are byte-for-byte
+// the same document.
+async function renderFolioPdf(res, model, { filename, qrUrl } = {}) {
+  // The reference prints amounts as "25,350.00 P".
+  const money = (cents) =>
+    `${(Number(cents) / 100).toLocaleString('en-US', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    })} P`;
 
-    const L = 36;                       // left margin
-    const R = doc.page.width - 36;      // right margin
-    const W = R - L;
-    const SPLIT = L + W * 0.72;         // where the Particular column ends
-    const TOP = 36;                     // where a continuation page starts
-    // The lowest y a block may occupy. Everything below is drawn at ABSOLUTE
-    // coordinates while this route advances its own `y`, so pdfkit's automatic
-    // pagination must never be allowed to fire: it starts a page and resets
-    // only ITS cursor, leaving `y` still climbing, so every subsequent draw
-    // spilled again and each extra row cost several pages. Every block asks
-    // reserve() first instead.
-    const BOTTOM = doc.page.height - 36;
+  const doc = new PDFDocument({ size: 'A4', margin: 36 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${filename || `folio-${model.meta.folioNumber}.pdf`}"`
+  );
+  doc.pipe(res);
 
-    const rowH = 16;
-    const lineH = 13;
-    const AMOUNT_COL = SPLIT - 130;
+  const L = 36;                       // left margin
+  const R = doc.page.width - 36;      // right margin
+  const W = R - L;
+  const SPLIT = L + W * 0.72;         // where the Particular column ends
+  const TOP = 36;                     // where a continuation page starts
+  // The lowest y a block may occupy. Everything below is drawn at ABSOLUTE
+  // coordinates while this route advances its own `y`, so pdfkit's automatic
+  // pagination must never be allowed to fire: it starts a page and resets
+  // only ITS cursor, leaving `y` still climbing, so every subsequent draw
+  // spilled again and each extra row cost several pages. Every block asks
+  // reserve() first instead.
+  const BOTTOM = doc.page.height - 36;
 
-    // ── Hotel header ──
-    doc.font('Helvetica-Bold').fontSize(15).text(model.hotel.name, L, 40, { width: W, align: 'center' });
-    doc.font('Helvetica').fontSize(8);
-    for (const line of [
-      model.hotel.address,
-      [model.hotel.phone && `Phone: ${model.hotel.phone}`,
-       model.hotel.fax && `Fax: ${model.hotel.fax}`,
-       model.hotel.email && `E-Mail: ${model.hotel.email}`].filter(Boolean).join(' ; '),
-      model.hotel.url && `URL: ${model.hotel.url}`,
-    ].filter(Boolean)) {
-      doc.text(line, L, doc.y, { width: W, align: 'center' });
-    }
-    doc.moveDown(0.6);
-    doc.font('Helvetica-Bold').fontSize(10).text('Invoice', L, doc.y, { width: W, align: 'center' });
-    doc.moveDown(0.5);
+  const rowH = 16;
+  const lineH = 13;
+  const AMOUNT_COL = SPLIT - 130;
+
+  // ── QR code, upper right — the panel's reference invoice leaves this corner
+  // blank for one. It resolves to the public print route below, so scanning it
+  // (no login needed) opens the exact same document as the one being printed.
+  if (qrUrl) {
+    const qrSize = 68;
+    doc.image(await qrPngBuffer(qrUrl), R - qrSize, 34, { width: qrSize, height: qrSize });
+  }
+
+  // ── Hotel header ──
+  doc.font('Helvetica-Bold').fontSize(15).text(model.hotel.name, L, 40, { width: W, align: 'center' });
+  doc.font('Helvetica').fontSize(8);
+  for (const line of [
+    model.hotel.address,
+    [model.hotel.phone && `Phone: ${model.hotel.phone}`,
+     model.hotel.fax && `Fax: ${model.hotel.fax}`,
+     model.hotel.email && `E-Mail: ${model.hotel.email}`].filter(Boolean).join(' ; '),
+    model.hotel.url && `URL: ${model.hotel.url}`,
+  ].filter(Boolean)) {
+    doc.text(line, L, doc.y, { width: W, align: 'center' });
+  }
+  doc.moveDown(0.6);
+  doc.font('Helvetica-Bold').fontSize(10).text('Invoice', L, doc.y, { width: W, align: 'center' });
+  doc.moveDown(0.5);
 
     // ── Boxed helpers ──
     const cell = (x, y, w, h, text, opts = {}) => {
@@ -1836,11 +2170,58 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
     doc.font('Helvetica-Bold').text(checkoutText, { width: W });
     doc.font('Helvetica').text(agreeText, { width: W, align: 'justify' });
 
-    doc.end();
+  doc.end();
+}
+
+// GET /api/folios/:id/print — the guest folio as a PDF, laid out to match the
+// panel's reference invoice: a bordered grid with every section always present.
+//
+// The arithmetic lives in lib/folioPrintModel.js and the model-building in
+// buildFolioPrintModel above, so this route only wires the two together.
+router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({
+      where: { id: req.params.id },
+      include: { transactions: { orderBy: { postedAt: 'asc' } } },
+    });
+    if (!folio) return res.status(404).json({ error: 'Not found.' });
+
+    const model = await buildFolioPrintModel(folio);
+    const token = await ensurePublicToken(folio);
+    await renderFolioPdf(res, model, {
+      filename: `folio-${folio.folioNumber}.pdf`,
+      qrUrl: publicUrl(`/api/public/folios/${token}/pdf`),
+    });
   } catch (err) {
     console.error('[Folio] Print error:', err.message);
     if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
+// GET /api/public/folios/:token/pdf — what the QR code on the printed folio
+// resolves to. Unauthenticated: the token is the credential, exactly like a
+// PaymentIntent link (see index.js, which mounts this before verifyToken).
+// Deliberately does NOT mint a token for a folio that doesn't have one — only
+// a folio that has actually been printed at least once is reachable this way,
+// so a guessed id can never be turned into a valid link.
+publicRouter.get('/folios/:token/pdf', async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({
+      where: { publicToken: req.params.token },
+      include: { transactions: { orderBy: { postedAt: 'asc' } } },
+    });
+    if (!folio) return res.status(404).json({ error: 'This folio link is not valid.' });
+
+    const model = await buildFolioPrintModel(folio);
+    await renderFolioPdf(res, model, {
+      filename: `folio-${folio.folioNumber}.pdf`,
+      qrUrl: publicUrl(`/api/public/folios/${folio.publicToken}/pdf`),
+    });
+  } catch (err) {
+    console.error('[Folio] Public print error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 module.exports = router;
+module.exports.publicRouter = publicRouter;

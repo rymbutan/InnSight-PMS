@@ -12,6 +12,7 @@ function startSubscriber() {
     'payment:authorized',
     'folio:created',
     'guest:profile_updated',
+    'reservation:updated',
     (err) => {
       if (err) {
         console.error('[Stay] Redis subscribe error:', err);
@@ -24,6 +25,39 @@ function startSubscriber() {
   subscriber.on('message', async (channel, message) => {
     try {
       const data = JSON.parse(message);
+
+      // A booking's dates moved. The Stay carries its own expected window, and
+      // it is read in places the reservation is not: the registration card's
+      // arrival date, Arrivals' early-check-in confirmation, and the expected
+      // column in Reports. Left alone it goes on describing the old dates.
+      //
+      // expectedCheckIn only follows while the guest has not arrived. Once
+      // IN_HOUSE their arrival is a fact, so only the expected departure can
+      // still move — which is also what POST /stays/:id/extend does.
+      if (channel === 'reservation:updated' && data.reservationId && (data.checkIn || data.checkOut)) {
+        const stay = await prisma.stay.findFirst({
+          where: {
+            reservationId: data.reservationId,
+            status: { notIn: ['DEPARTED', 'NO_SHOW'] },
+          },
+        });
+        if (stay) {
+          const next = {};
+          if (data.checkOut) next.expectedCheckOut = new Date(data.checkOut);
+          if (data.checkIn && stay.status === 'PRE_ARRIVAL') {
+            next.expectedCheckIn = new Date(data.checkIn);
+          }
+          // Only write when something actually differs, so an unrelated field
+          // edit on the reservation does not churn the stay row.
+          const changed = Object.entries(next).some(
+            ([k, v]) => new Date(stay[k] || 0).getTime() !== v.getTime()
+          );
+          if (changed) {
+            await prisma.stay.update({ where: { id: stay.id }, data: next });
+            console.log(`[Stay] Synced expected window on ${stay.id} from its reservation`);
+          }
+        }
+      }
 
       // `guestName` on a Stay is a denormalised copy, and it is what the
       // arrivals and housekeeping screens render. A guest renamed on their

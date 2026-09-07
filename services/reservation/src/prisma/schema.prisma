@@ -46,6 +46,8 @@ model Reservation {
   updatedAt             DateTime               @updatedAt
   notes                 ReservationNote[]
   activity              ReservationActivity[]
+  cards                 ReservationCard[]
+  documents             ReservationDocument[]
 
   // The calendar and arrivals views filter on checkIn + status and order by
   // checkIn. With only confirmationNumber indexed, every one of those queries
@@ -87,6 +89,44 @@ model ReservationActivity {
   reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@index([reservationId, createdAt])
+}
+
+// A card ON FILE as a guarantee for the booking — not a payment. This is a
+// non-PCI-compliant capstone build, so the schema itself makes storing a real
+// card number impossible: there is no field that could hold one, only what a
+// receipt already shows (brand, last 4, expiry, cardholder name). An actual
+// charge still goes through Folio.Payment (services/folio), same as any other
+// payment method.
+model ReservationCard {
+  id             String      @id @default(uuid())
+  reservationId  String
+  brand          String
+  last4          String
+  expMonth       Int
+  expYear        Int
+  cardholderName String
+  createdAt      DateTime    @default(now())
+  createdBy      String?
+  reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId])
+}
+
+// Metadata only — the bytes live in MinIO under objectKey (see lib/storage.js).
+// Nothing here can be used to reconstruct a file without going through that
+// client, so a leaked database row leaks a filename, not a document.
+model ReservationDocument {
+  id            String      @id @default(uuid())
+  reservationId String
+  filename      String
+  contentType   String
+  sizeBytes     Int
+  objectKey     String      @unique
+  uploadedAt    DateTime    @default(now())
+  uploadedBy    String?
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId])
 }
 
 model AppSetting {

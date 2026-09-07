@@ -7933,3 +7933,215 @@ html[data-theme='dark'] .hk-tooltip {
 .seg-btn.is-active:hover {
   background: var(--accent-hover);
 }
+
+/* A row the facility calendar linked to. Tinted so the eye lands on the right
+   booking after the jump, then faded out: the class stays on the row for the
+   life of the page (the landing cue is read once, at mount), so the fade is
+   what stops it hardening into a permanent selection state the user cannot
+   clear. Colour only, no movement — it is a one-shot cue like .hk-room-flash. */
+tr.is-linked > td {
+  animation: row-linked-flash 2.4s ease-out;
+}
+@keyframes row-linked-flash {
+  0%,
+  40% {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+
+/* ── Split bill dialog ─────────────────────────────────────────────────────
+   Built out of the controls the rest of the app already uses: .seg/.seg-btn for
+   the method (as in Arrivals), .secondary.small for the stepper, .error for the
+   message, tabular-nums for money. The first version reached for raw radio
+   inputs and its own colour block, and both fought the global form rules —
+   `input { width: 100%; min-height: var(--control-h) }` turned each radio into a
+   large circle, and the uppercase global `label` broke "By percentage" over two
+   lines. */
+
+/* A labelled row: caption on the left, control on the right. */
+.split-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.split-block + .split-list {
+  margin-top: 0;
+}
+/* Quieter than the global uppercase `label`, which is sized for dense table
+   forms. Matches .set-label's role in the settings cards. */
+.split-block-label {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* .seg carries `margin-left: auto` so it right-aligns inside a .panel-head.
+   Here it follows its caption instead. */
+.split-seg.seg {
+  margin-left: 0;
+}
+
+.split-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.split-stepper strong {
+  min-width: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.split-list {
+  list-style: none;
+  margin: 0 0 2px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.split-payer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.split-payer + .split-payer {
+  border-top: 1px solid var(--border);
+}
+.split-payer-main {
+  flex: 1;
+  min-width: 0;
+}
+/* Which folio this payer's share lands on — the open one, or one the split
+   opens for them. */
+.split-payer-dest {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.split-payer-share {
+  flex: none;
+}
+.split-pct-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.split-pct {
+  width: 76px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Chrome reserves room inside a number input for its spinner arrows whether or
+   not they are visible, so "33.34" rendered as "33.3" with the last digit
+   clipped — a percentage that silently loses its final digit is worse than no
+   percentage at all. The arrows are redundant here anyway: the payer count has
+   its own stepper and these values are typed. */
+.split-pct::-webkit-outer-spin-button,
+.split-pct::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+.split-pct {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.split-pct-sign,
+.split-pct-static {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.split-pct-static {
+  display: inline-block;
+  min-width: 52px;
+  text-align: right;
+}
+.split-payer-amount {
+  flex: none;
+  min-width: 104px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Holds the column's width while the server has not priced the row yet. A row
+   of floating em-dashes under a "Gets" heading read as broken output rather
+   than as "not known yet". */
+.split-pending {
+  display: inline-block;
+  width: 56px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  opacity: 0.7;
+}
+/* The last figures the server gave, while a new dry run is in flight. Greyed
+   rather than blanked: a total that empties on every keystroke reads as
+   instability in the numbers themselves. */
+.split-payer-amount.is-stale,
+.split-total-amount.is-stale {
+  opacity: 0.4;
+}
+
+.split-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px 0;
+}
+.split-total-label {
+  flex: 1;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.split-total-pct {
+  min-width: 52px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Shares that do not add up to 100 are the one error the operator can see and
+   fix without reading the message, so the figure itself says so. */
+.split-total-pct.is-off {
+  color: var(--danger);
+}
+.split-total-amount {
+  min-width: 104px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.split-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.split-note svg {
+  flex: none;
+  margin-top: 2px;
+}

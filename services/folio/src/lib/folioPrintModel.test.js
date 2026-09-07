@@ -405,3 +405,77 @@ test('an orphaned reversal — its original is not in the set — still falls ba
   assert.equal(componentAmounts(sectionNamed(m, 'Add : Room Tax')).VAT, -220000n);
   assert.equal(sectionNamed(m, 'Add : Room Tax').subtotalCents, -220000n, 'the subtotal still equals the row tax');
 });
+
+// ── Bill To and the split note ──────────────────────────────────────────────
+// A split produces several folios on one stay. Before payerName existed they all
+// printed the same name, so two halves of a split bill were two documents both
+// claiming to bill the same person and differing only in their totals.
+
+test('Bill To is the stay guest when the folio has no distinct payer', () => {
+  // Every folio that predates payerName lands here. No historical document moves.
+  const model = build(REFERENCE_TX, { stay: { guestName: 'Arym Vendiola' } });
+  assert.equal(model.footer.billTo, 'Arym Vendiola');
+});
+
+test('Bill To is the folio payer when one is set', () => {
+  const model = build(REFERENCE_TX, {
+    folio: { folioNumber: '12', currency: 'PHP', payerName: 'Bartolome Vendiola' },
+    stay: { guestName: 'Arym Vendiola' },
+  });
+  assert.equal(model.footer.billTo, 'Bartolome Vendiola');
+});
+
+test('the guest name still names the guest, even when the payer differs', () => {
+  // Who slept in the room and who settles this folio are different facts, and
+  // the document has a line for each. Overwriting guestName with the payer would
+  // misstate the stay itself.
+  const model = build(REFERENCE_TX, {
+    folio: { folioNumber: '12', currency: 'PHP', payerName: 'Company Ltd' },
+    stay: { guestName: 'Arym Vendiola' },
+  });
+  assert.equal(model.meta.guestName, 'Arym Vendiola');
+  assert.equal(model.footer.billTo, 'Company Ltd');
+});
+
+test('a folio that was never split prints a blank Remark, as it always has', () => {
+  const model = build(REFERENCE_TX, { stay: { guestName: 'Arym Vendiola' } });
+  assert.equal(model.footer.remark, '');
+});
+
+test('a split folio names its co-payers on the Remark line', () => {
+  const withTransfer = [
+    ...REFERENCE_TX,
+    {
+      id: 'tr1', type: 'TRANSFER', chargeCode: 'RM',
+      description: 'Room charge — transferred to folio F-2 (Bartolome Vendiola)',
+      amountCents: -1014000n, taxAmountCents: -223080n, taxBreakdown: null, reversalOf: 'rm1',
+    },
+  ];
+  const model = build(withTransfer, {
+    folio: { folioNumber: 'F-1', currency: 'PHP', payerName: 'Arym Vendiola' },
+    stay: { guestName: 'Arym Vendiola' },
+    counterparts: [{ folioId: 'B', folioNumber: 'F-2', payerName: 'Bartolome Vendiola' }],
+  });
+  assert.match(model.footer.remark, /split/i);
+  assert.match(model.footer.remark, /Bartolome Vendiola/);
+  assert.match(model.footer.remark, /F-2/);
+});
+
+test('the split note is derived, so a payer renamed after the split reprints correctly', () => {
+  // The note is not frozen prose stored at split time: it is rebuilt from the
+  // folio's transfer rows and the counterpart folios' current names, so it can
+  // never drift from the transactions it describes.
+  const withTransfer = [
+    ...REFERENCE_TX,
+    {
+      id: 'tr1', type: 'TRANSFER', chargeCode: 'RM', description: 'Room charge — transferred',
+      amountCents: -1014000n, taxAmountCents: -223080n, taxBreakdown: null, reversalOf: 'rm1',
+    },
+  ];
+  const model = build(withTransfer, {
+    folio: { folioNumber: 'F-1', currency: 'PHP', payerName: 'Arym Vendiola' },
+    stay: { guestName: 'Arym Vendiola' },
+    counterparts: [{ folioId: 'B', folioNumber: 'F-2', payerName: 'Renamed Later Inc' }],
+  });
+  assert.match(model.footer.remark, /Renamed Later Inc/);
+});

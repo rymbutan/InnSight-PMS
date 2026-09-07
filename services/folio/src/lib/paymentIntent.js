@@ -18,6 +18,11 @@ function newToken() {
 // is not still spendable at the end of the shift.
 const INTENT_TTL_MS = 15 * 60 * 1000;
 
+// An emailed link isn't opened in front of the desk the way a QR code is — a
+// guest might not check their inbox for hours. 15 minutes would make "Sent Pay
+// by Link" mail a code that is already dead before it's read.
+const LINK_TTL_MS = 24 * 60 * 60 * 1000;
+
 // Expiry is DERIVED, never stored as a status. A row written PENDING would
 // otherwise stay payable indefinitely unless something swept the table, and a
 // sweeper that fails silently is a worse failure than no sweeper.
@@ -30,4 +35,4 @@ function intentState(intent, now = new Date()) {
   return new Date(intent.expiresAt) <= now ? 'EXPIRED' : 'PENDING';
 }
 
-module.exports = { newToken, intentState, INTENT_TTL_MS };
+module.exports = { newToken, intentState, INTENT_TTL_MS, LINK_TTL_MS };

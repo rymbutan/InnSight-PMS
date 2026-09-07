@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 
-import { buildBars } from './calendarBars.js';
+import { buildBars, barAt, reservationIdForBar } from './calendarBars.js';
 
 // The calendar window used throughout: 5 nights from 2026-09-05.
 const days = Array.from({ length: 5 }, (_, i) => new Date(2026, 8, 5 + i));
@@ -182,4 +182,75 @@ test('two separate bookings in one room are both drawn', () => {
       [2, 2],
     ]
   );
+});
+
+// ── barAt / reservationIdForBar ──────────────────────────────────────────────
+// What the calendar's cell popover uses to answer "is there a booking on this
+// room-night, and which one?" — so it can offer to open it.
+
+test('barAt finds the bar covering a column, and nothing outside it', () => {
+  const { byRoom } = buildBars({
+    reservations: [reservation({ checkIn: '2026-09-06', checkOut: '2026-09-08' })],
+    rooms,
+    days,
+  });
+  const bars = byRoom.r201; // startCol 1, span 2 → columns 1 and 2
+  assert.strictEqual(barAt(bars, 0), null, 'the night before is free');
+  assert.strictEqual(barAt(bars, 1)?.key, 'res-res1');
+  assert.strictEqual(barAt(bars, 2)?.key, 'res-res1');
+  // Half-open: checkout morning frees the night, so the column at startCol+span
+  // belongs to nobody. An off-by-one here would offer the WRONG booking.
+  assert.strictEqual(barAt(bars, 3), null, 'checkout day is not occupied');
+});
+
+test('barAt picks the right neighbour when two bookings abut', () => {
+  const { byRoom } = buildBars({
+    reservations: [
+      reservation({ id: 'first', checkIn: '2026-09-05', checkOut: '2026-09-07' }),
+      reservation({ id: 'second', checkIn: '2026-09-07', checkOut: '2026-09-09' }),
+    ],
+    rooms,
+    days,
+  });
+  assert.strictEqual(barAt(byRoom.r201, 1)?.key, 'res-first');
+  assert.strictEqual(barAt(byRoom.r201, 2)?.key, 'res-second');
+});
+
+test('barAt tolerates a room with no bars at all', () => {
+  assert.strictEqual(barAt(undefined, 0), null);
+  assert.strictEqual(barAt([], 0), null);
+});
+
+test('reservationIdForBar reads the id straight off a reservation bar', () => {
+  const { byRoom } = buildBars({ reservations: [reservation()], rooms, days });
+  assert.strictEqual(reservationIdForBar(byRoom.r201[0], []), 'res1');
+});
+
+test('reservationIdForBar resolves a stay bar through to its reservation', () => {
+  const stays = [
+    {
+      id: 's1',
+      reservationId: 'res-behind-the-stay',
+      assignedRoomId: 'r201',
+      guestName: 'Arrived Guest',
+      status: 'IN_HOUSE',
+      expectedCheckIn: '2026-09-06',
+      expectedCheckOut: '2026-09-08',
+    },
+  ];
+  const { byRoom } = buildBars({ stays, rooms, days });
+  assert.strictEqual(byRoom.r201[0].key, 'stay-s1');
+  assert.strictEqual(reservationIdForBar(byRoom.r201[0], stays), 'res-behind-the-stay');
+});
+
+test('reservationIdForBar returns null when there is no booking behind the bar', () => {
+  // An out-of-order block is a room STATE, not a guest — there is nothing to open.
+  const oooRooms = [{ id: 'r203', number: '203', typeCode: 'STD', status: 'OUT_OF_ORDER' }];
+  const { byRoom } = buildBars({ rooms: oooRooms, days });
+  assert.strictEqual(byRoom.r203[0].key, 'ooo-r203');
+  assert.strictEqual(reservationIdForBar(byRoom.r203[0], []), null);
+  // A walk-in stay with no reservation behind it, and the empty cases.
+  const orphan = [{ id: 's9', reservationId: null, assignedRoomId: 'r201' }];
+  assert.strictEqual(reservationIdForBar({ key: 'stay-s9' }, orphan), null);
+  assert.strictEqual(reservationIdForBar(null, []), null);
 });

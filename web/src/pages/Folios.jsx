@@ -8,6 +8,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents, formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
+import SplitBillDialog from '../components/SplitBillDialog';
 
 export default function Folios() {
   const [searchParams] = useSearchParams();
@@ -25,6 +26,11 @@ export default function Folios() {
   // people are settling different parts of the bill.
   const [siblings, setSiblings] = useState([]);
   const [moving, setMoving] = useState(null);
+  const [splitOpen, setSplitOpen] = useState(false);
+  // The stay's guest name. Neither GET /folios/:id nor the statement carries it —
+  // it lives on the guest service and only the folio LIST joins it — so it is
+  // read out of the sibling fetch below rather than paid for with a second call.
+  const [stayGuestName, setStayGuestName] = useState('');
   // The QR payment code currently on screen, if any.
   const [qr, setQr] = useState(null);
 
@@ -167,12 +173,26 @@ export default function Folios() {
   // Whenever the open folio belongs to a stay, load that stay's other folios so a
   // charge can be moved between them. A walk-in folio has no stay and no siblings.
   useEffect(() => {
-    if (!folio?.stayId) return setSiblings([]);
+    if (!folio?.stayId) {
+      setSiblings([]);
+      setStayGuestName('');
+      return undefined;
+    }
     let cancelled = false;
     api
       .get(`/api/folios?stayId=${encodeURIComponent(folio.stayId)}`)
-      .then((r) => !cancelled && setSiblings(r.data.filter((f) => f.id !== folio.id && f.status === 'OPEN')))
-      .catch(() => !cancelled && setSiblings([]));
+      .then((r) => {
+        if (cancelled) return;
+        setSiblings(r.data.filter((f) => f.id !== folio.id && f.status === 'OPEN'));
+        // Every folio on a stay shares its guest, so the first name present is
+        // the right one whichever row it came from.
+        setStayGuestName(r.data.find((f) => f.guestName)?.guestName || '');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSiblings([]);
+        setStayGuestName('');
+      });
     return () => {
       cancelled = true;
     };
@@ -452,9 +472,24 @@ export default function Folios() {
                   Print PDF
                 </button>
                 {folio.status === 'OPEN' && folio.stayId && (
-                  <button className="secondary" onClick={addFolio}>
-                    Split bill — add folio
-                  </button>
+                  <>
+                    {/* A real split: pick the payers and how the bill divides,
+                        and the folios are opened and the charges apportioned in
+                        one action. The button this replaced said "Split bill"
+                        but only opened an empty folio, leaving the operator to
+                        move every charge by hand — and a charge that did not
+                        divide into whole cents could not be divided at all. */}
+                    <button className="btn-cta" onClick={() => setSplitOpen(true)}>
+                      Split bill
+                    </button>
+                    {/* Kept, honestly labelled now. The per-line Move control
+                        needs a sibling folio to move a charge ONTO, so removing
+                        the only way to open one would take away manual
+                        splitting along with the misleading label. */}
+                    <button className="secondary" onClick={addFolio}>
+                      Add folio
+                    </button>
+                  </>
                 )}
                 {folio.status === 'OPEN' && (
                   <button className="danger" onClick={closeFolio}>
@@ -745,6 +780,30 @@ export default function Folios() {
           </div>
         </>
       )}
+
+      <SplitBillDialog
+        open={splitOpen}
+        folio={folio}
+        // The guest occupying the room is nearly always one of the payers, so the
+        // dialog opens with their name already in the first row.
+        guestName={stayGuestName}
+        // Defaults the payer count to the booking's adult count instead of an
+        // arbitrary 2, since the desk splits a bill among the people who are
+        // actually staying far more often than any other number.
+        adults={folio?.adults}
+        // Drives the notice explaining that money already taken cannot be moved
+        // to another payer. Only shown when there is any, so an untouched folio
+        // is not warned about a situation it is not in. Checked against the
+        // TRANSACTIONS, because those are what a split does and does not move —
+        // the Payment rows are a different table and a refund has no row there.
+        hasPayments={(statement?.folio?.transactions || []).some(
+          (t) => t.type === 'PAYMENT' || t.type === 'REFUND'
+        )}
+        onClose={() => setSplitOpen(false)}
+        // A split opens folios and posts transfer pairs, so both the folio and
+        // its siblings have moved on — reload rather than patching local state.
+        onDone={() => load(folioId)}
+      />
     </div>
   );
 }
