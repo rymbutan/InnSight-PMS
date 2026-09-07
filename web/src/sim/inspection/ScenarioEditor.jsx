@@ -923,7 +923,10 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             </button>
           </div>
         )}
-        <div className="se-side" style={{ display: sideOpen ? 'block' : 'none' }}>
+        {/* Hidden by a class, not an inline `display`, so the stylesheet keeps
+            control of the panel's layout — an inline display:block outranks the
+            flex column .se-side needs to stretch the saved-scenarios list. */}
+        <div className={`se-side${sideOpen ? '' : ' se-side--hidden'}`}>
           <div className="se-head">
             <strong>Inspection Scenarios</strong>
             <span style={{ display: 'flex', gap: 2, marginLeft: 'auto' }}>

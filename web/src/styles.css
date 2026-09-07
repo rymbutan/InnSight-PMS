@@ -6523,14 +6523,22 @@ html[data-theme='dark'] .hk-tooltip {
   min-height: 0;
   display: flex;
 }
+/* A flex column so the saved-scenarios list at the bottom can flex to fill the
+   leftover height rather than ending in dead space. Children still stack
+   exactly as they did. */
 .se-side {
   width: 320px;
   flex: 0 0 320px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   padding: 14px 14px 40px;
   border-right: 1px solid var(--border);
   background: var(--panel);
+}
+.se-side--hidden {
+  display: none;
 }
 .se-head {
   display: flex;
@@ -7469,8 +7477,16 @@ html[data-theme='dark'] .hk-tooltip {
 /* Every object in the room, selectable. Clicking a small fixture behind the bed
    in a perspective view is a game of patience; this is the way to reach one the
    camera has hidden. */
+/* The list fills whatever height is left in the side panel instead of being
+   capped at a fixed 190px. That cap was enough for the New Scenario button and
+   about one and a half cards, so the second scenario was sliced through its
+   action row while the panel below it sat empty — the list looked broken rather
+   than scrollable. It is the last element in `.se-side`, so flexing it to fill
+   uses that space; `min-height` keeps it usable when the form above is tall,
+   and it still scrolls internally once the scenarios outgrow the panel. */
 .se-list {
-  max-height: 190px;
+  flex: 1 1 auto;
+  min-height: 160px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
