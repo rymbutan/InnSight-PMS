@@ -32,7 +32,11 @@ BigInt.prototype.toJSON = function () {
 let folioRow = null;
 
 const mockPrisma = {
-  folio: { findUnique: async () => folioRow, findMany: async () => [] },
+  folio: {
+    findUnique: async () => folioRow,
+    findMany: async () => [],
+    update: async ({ data }) => Object.assign(folioRow, data),
+  },
   chargeCode: {
     findMany: async () => [
       { code: 'RM', category: 'ROOM' },

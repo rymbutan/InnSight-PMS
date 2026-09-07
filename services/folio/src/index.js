@@ -126,6 +126,11 @@ app.post('/api/public/payment-intents/:token/confirm', async (req, res) => {
   }
 });
 
+// The folio's QR code, scanned unauthenticated — same routing precedent as the
+// payment-intent routes above. Lives in folio.routes.js since serving it means
+// rebuilding the exact print model that route file already knows how to build.
+app.use('/api/public', folioRoutes.publicRouter);
+
 app.use('/api', verifyToken, idempotency, folioRoutes);
 
 const subscriber = startSubscriber();

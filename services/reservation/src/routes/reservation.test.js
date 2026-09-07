@@ -27,6 +27,8 @@ const memDb = {
   reservation: new Map(),
   reservationNote: new Map(),
   reservationActivity: new Map(),
+  reservationCard: new Map(),
+  reservationDocument: new Map(),
   appSetting: new Map(),
 };
 
@@ -160,6 +162,51 @@ function makeMockPrisma() {
         const row = { ...memDb.reservationNote.get(id), ...data };
         memDb.reservationNote.set(id, row);
         return row;
+      },
+    },
+    reservationCard: {
+      create: async ({ data }) => {
+        const id = data.id || 'card' + memDb.reservationCard.size;
+        const row = { id, ...data, createdAt: new Date() };
+        memDb.reservationCard.set(id, row);
+        return row;
+      },
+      findMany: async ({ where, orderBy }) =>
+        applyOrderBy(
+          [...memDb.reservationCard.values()].filter(
+            (c) => !where || c.reservationId === where.reservationId
+          ),
+          orderBy
+        ),
+      // deleteMany, not delete: a delete keyed only on {id} would remove a card
+      // through ANY reservation's URL, the same cross-tenant hole ReservationNote's
+      // archive route guards against by scoping its update the same way.
+      deleteMany: async ({ where }) => {
+        const doomed = [...memDb.reservationCard.values()].filter((c) => matchesWhere(c, where));
+        for (const c of doomed) memDb.reservationCard.delete(c.id);
+        return { count: doomed.length };
+      },
+    },
+    reservationDocument: {
+      create: async ({ data }) => {
+        const id = data.id || 'doc' + memDb.reservationDocument.size;
+        const row = { id, ...data, uploadedAt: new Date() };
+        memDb.reservationDocument.set(id, row);
+        return row;
+      },
+      findMany: async ({ where, orderBy }) =>
+        applyOrderBy(
+          [...memDb.reservationDocument.values()].filter(
+            (d) => !where || d.reservationId === where.reservationId
+          ),
+          orderBy
+        ),
+      findFirst: async ({ where }) =>
+        [...memDb.reservationDocument.values()].find((d) => matchesWhere(d, where)) || null,
+      deleteMany: async ({ where }) => {
+        const doomed = [...memDb.reservationDocument.values()].filter((d) => matchesWhere(d, where));
+        for (const d of doomed) memDb.reservationDocument.delete(d.id);
+        return { count: doomed.length };
       },
     },
     reservationActivity: {
@@ -299,11 +346,59 @@ require.cache[require.resolve('../lib/inventoryClient')] = {
   },
 };
 
+// ── Stub the notifier ────────────────────────────────────────────────────────
+// Recording rather than a no-op: the "Send Confirmation Email" route's whole
+// job is choosing whether to call this and with what, so a test that cannot
+// see the call cannot tell a working route from one that silently does nothing.
+const notifierStub = {
+  sent: [],
+  reset() {
+    this.sent = [];
+  },
+};
+require.cache[require.resolve('../lib/notifier')] = {
+  exports: {
+    send: async (msg) => {
+      notifierStub.sent.push(msg);
+      return { ok: true };
+    },
+    TEMPLATES: require('../lib/notifier').TEMPLATES,
+  },
+};
+
+// ── Stub object storage ──────────────────────────────────────────────────────
+// Records what was actually stored, keyed the same way the real MinIO client
+// is — so a test can tell "the route uploaded the right bytes" from "the route
+// silently no-oped", which a bare no-op stub could not.
+const storageStub = {
+  objects: new Map(),
+  reset() {
+    this.objects.clear();
+  },
+};
+require.cache[require.resolve('../lib/storage')] = {
+  exports: {
+    ensureBucket: async () => {},
+    objectKeyFor: (reservationId, filename) => `reservations/${reservationId}/${Date.now()}-${filename}`,
+    putDocument: async (key, buf, contentType) => {
+      storageStub.objects.set(key, { buf, contentType });
+    },
+    getDocumentStream: async (key) => {
+      if (!storageStub.objects.has(key)) throw new Error('object not found');
+      const { Readable } = require('node:stream');
+      return Readable.from(storageStub.objects.get(key).buf);
+    },
+    removeDocument: async (key) => {
+      storageStub.objects.delete(key);
+    },
+  },
+};
+
 const router = require('./reservation.routes');
 
 function makeApp() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '15mb' }));
   app.use('/api', router);
   return app;
 }
@@ -339,6 +434,31 @@ function call(app, method, path, body, headers = {}) {
         resolve({ status: 0 });
       });
       if (data) req.write(data);
+      req.end();
+    });
+  });
+}
+
+// Like `call`, but keeps the response as raw bytes instead of JSON.parse-ing
+// it — needed for the document-download route, which streams a file body.
+function callRaw(app, method, path) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => {
+      const req = http.request(
+        { host: '127.0.0.1', port: server.address().port, method, path },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => {
+            server.close();
+            resolve({ status: res.statusCode, headers: res.headers, buf: Buffer.concat(chunks) });
+          });
+        }
+      );
+      req.on('error', () => {
+        server.close();
+        resolve({ status: 0, buf: Buffer.alloc(0) });
+      });
       req.end();
     });
   });
@@ -828,4 +948,250 @@ test('back-to-back bookings in the same room do not collide', async () => {
   });
   assert.strictEqual(second.status, 201, `same-day turnover must be allowed: ${second.body?.error || ''}`);
   assert.ok(new Date(first.body.checkOut) <= new Date(second.body.checkIn));
+});
+
+// ── POST /api/reservations/:id/send-confirmation-email ──────────────────────
+
+test('sends the confirmation email for a confirmed reservation', async () => {
+  const app = makeApp();
+  notifierStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  await call(app, 'POST', `/api/reservations/${id}/confirm`, {});
+
+  const r = await call(app, 'POST', `/api/reservations/${id}/send-confirmation-email`, {});
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(notifierStub.sent.length, 1);
+  assert.strictEqual(notifierStub.sent[0].to, sample.guestEmail);
+  assert.match(notifierStub.sent[0].subject, /confirmed/i);
+  assert.match(notifierStub.sent[0].body, new RegExp(created.body.confirmationNumber));
+});
+
+test('refuses a reservation with no guest email on file', async () => {
+  const app = makeApp();
+  notifierStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', { ...sample, guestEmail: '' });
+  const id = created.body.id;
+  await call(app, 'POST', `/api/reservations/${id}/confirm`, {});
+
+  const r = await call(app, 'POST', `/api/reservations/${id}/send-confirmation-email`, {});
+  assert.strictEqual(r.status, 400);
+  assert.strictEqual(notifierStub.sent.length, 0);
+});
+
+test('refuses a still-pending reservation, since it is not actually confirmed', async () => {
+  const app = makeApp();
+  notifierStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+
+  const r = await call(app, 'POST', `/api/reservations/${id}/send-confirmation-email`, {});
+  assert.strictEqual(r.status, 409);
+  assert.strictEqual(notifierStub.sent.length, 0);
+});
+
+test('refuses a cancelled reservation', async () => {
+  const app = makeApp();
+  notifierStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  await call(app, 'POST', `/api/reservations/${id}/confirm`, {});
+  await call(app, 'POST', `/api/reservations/${id}/cancel`, { reason: 'Guest request' });
+
+  const r = await call(app, 'POST', `/api/reservations/${id}/send-confirmation-email`, {});
+  assert.strictEqual(r.status, 409);
+  assert.strictEqual(notifierStub.sent.length, 0);
+});
+
+test('a missing reservation is a 404', async () => {
+  const app = makeApp();
+  const r = await call(app, 'POST', '/api/reservations/nope/send-confirmation-email', {});
+  assert.strictEqual(r.status, 404);
+});
+
+// ── Reservation cards (guarantee on file, never a real card number) ─────────
+
+test('adds a card on file and lists it back', async () => {
+  const app = makeApp();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+
+  const add = await call(app, 'POST', `/api/reservations/${id}/cards`, {
+    brand: 'VISA',
+    last4: '4242',
+    expMonth: 12,
+    expYear: 2030,
+    cardholderName: 'Maria Santos',
+  });
+  assert.strictEqual(add.status, 201);
+  assert.strictEqual(add.body.last4, '4242');
+  assert.strictEqual(add.body.number, undefined, 'no field should ever carry a full card number');
+
+  const list = await call(app, 'GET', `/api/reservations/${id}/cards`, null);
+  assert.strictEqual(list.status, 200);
+  assert.strictEqual(list.body.length, 1);
+});
+
+test('rejects a last4 that is not exactly four digits', async () => {
+  const app = makeApp();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  const r = await call(app, 'POST', `/api/reservations/${id}/cards`, {
+    brand: 'VISA',
+    last4: '42',
+    expMonth: 12,
+    expYear: 2030,
+    cardholderName: 'Maria Santos',
+  });
+  assert.strictEqual(r.status, 400);
+});
+
+test('rejects an already-expired card', async () => {
+  const app = makeApp();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  const r = await call(app, 'POST', `/api/reservations/${id}/cards`, {
+    brand: 'VISA',
+    last4: '4242',
+    expMonth: 1,
+    expYear: 2000,
+    cardholderName: 'Maria Santos',
+  });
+  assert.strictEqual(r.status, 400);
+});
+
+test('removes a card on file', async () => {
+  const app = makeApp();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  const add = await call(app, 'POST', `/api/reservations/${id}/cards`, {
+    brand: 'VISA',
+    last4: '4242',
+    expMonth: 12,
+    expYear: 2030,
+    cardholderName: 'Maria Santos',
+  });
+  const del = await call(app, 'DELETE', `/api/reservations/${id}/cards/${add.body.id}`, null);
+  assert.strictEqual(del.status, 204);
+  const list = await call(app, 'GET', `/api/reservations/${id}/cards`, null);
+  assert.strictEqual(list.body.length, 0);
+});
+
+test('cannot remove a card through a different reservation', async () => {
+  const app = makeApp();
+  const r1 = await call(app, 'POST', '/api/reservations', sample);
+  const r2 = await call(app, 'POST', '/api/reservations', sample);
+  const add = await call(app, 'POST', `/api/reservations/${r1.body.id}/cards`, {
+    brand: 'VISA',
+    last4: '4242',
+    expMonth: 12,
+    expYear: 2030,
+    cardholderName: 'Maria Santos',
+  });
+  const del = await call(app, 'DELETE', `/api/reservations/${r2.body.id}/cards/${add.body.id}`, null);
+  assert.strictEqual(del.status, 404);
+});
+
+// ── Documents (metadata in Postgres, bytes in MinIO) ─────────────────────────
+
+test('uploads a document and lists it back', async () => {
+  const app = makeApp();
+  storageStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+
+  const contentBase64 = Buffer.from('a scanned ID, in spirit').toString('base64');
+  const up = await call(app, 'POST', `/api/reservations/${id}/documents`, {
+    filename: 'guest-id.pdf',
+    contentType: 'application/pdf',
+    contentBase64,
+  });
+  assert.strictEqual(up.status, 201);
+  assert.strictEqual(up.body.filename, 'guest-id.pdf');
+  assert.strictEqual(up.body.sizeBytes, Buffer.from(contentBase64, 'base64').length);
+  assert.strictEqual(storageStub.objects.size, 1, 'the bytes should actually be stored');
+
+  const list = await call(app, 'GET', `/api/reservations/${id}/documents`, null);
+  assert.strictEqual(list.status, 200);
+  assert.strictEqual(list.body.length, 1);
+});
+
+test('rejects an upload with no filename', async () => {
+  const app = makeApp();
+  storageStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const r = await call(app, 'POST', `/api/reservations/${created.body.id}/documents`, {
+    contentType: 'application/pdf',
+    contentBase64: Buffer.from('x').toString('base64'),
+  });
+  assert.strictEqual(r.status, 400);
+});
+
+test('rejects a file over the size limit', async () => {
+  const app = makeApp();
+  storageStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const big = Buffer.alloc(11 * 1024 * 1024, 'x').toString('base64'); // 11MB > 10MB limit
+  const r = await call(app, 'POST', `/api/reservations/${created.body.id}/documents`, {
+    filename: 'huge.bin',
+    contentType: 'application/octet-stream',
+    contentBase64: big,
+  });
+  assert.strictEqual(r.status, 400);
+  assert.strictEqual(storageStub.objects.size, 0, 'an oversized file must never reach storage');
+});
+
+test('downloads a document with the original bytes and filename', async () => {
+  const app = makeApp();
+  storageStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  const original = 'a scanned ID, in spirit';
+  const up = await call(app, 'POST', `/api/reservations/${id}/documents`, {
+    filename: 'guest-id.pdf',
+    contentType: 'application/pdf',
+    contentBase64: Buffer.from(original).toString('base64'),
+  });
+
+  const dl = await callRaw(app, 'GET', `/api/reservations/${id}/documents/${up.body.id}/download`);
+  assert.strictEqual(dl.status, 200);
+  assert.strictEqual(dl.buf.toString('utf8'), original);
+  assert.match(dl.headers['content-disposition'], /guest-id\.pdf/);
+});
+
+test('removes a document from both the database and storage', async () => {
+  const app = makeApp();
+  storageStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const id = created.body.id;
+  const up = await call(app, 'POST', `/api/reservations/${id}/documents`, {
+    filename: 'guest-id.pdf',
+    contentType: 'application/pdf',
+    contentBase64: Buffer.from('x').toString('base64'),
+  });
+
+  const del = await call(app, 'DELETE', `/api/reservations/${id}/documents/${up.body.id}`, null);
+  assert.strictEqual(del.status, 204);
+  assert.strictEqual(storageStub.objects.size, 0, 'storage must be cleaned up too, not just the row');
+
+  const list = await call(app, 'GET', `/api/reservations/${id}/documents`, null);
+  assert.strictEqual(list.body.length, 0);
+});
+
+test('cannot download or remove a document through a different reservation', async () => {
+  const app = makeApp();
+  storageStub.reset();
+  const r1 = await call(app, 'POST', '/api/reservations', sample);
+  const r2 = await call(app, 'POST', '/api/reservations', sample);
+  const up = await call(app, 'POST', `/api/reservations/${r1.body.id}/documents`, {
+    filename: 'guest-id.pdf',
+    contentType: 'application/pdf',
+    contentBase64: Buffer.from('x').toString('base64'),
+  });
+
+  const dl = await callRaw(app, 'GET', `/api/reservations/${r2.body.id}/documents/${up.body.id}/download`);
+  assert.strictEqual(dl.status, 404);
+
+  const del = await call(app, 'DELETE', `/api/reservations/${r2.body.id}/documents/${up.body.id}`, null);
+  assert.strictEqual(del.status, 404);
 });

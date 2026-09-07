@@ -10,6 +10,14 @@ const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
 const { pickAssignableRoom, normaliseRoomId, MAX_ASSIGN_ATTEMPTS } = require('../lib/roomAssignment');
 const { makeFolioClient } = require('../lib/folioClient');
 const { stampWindow, DEFAULT_SERVICE_TIMES } = require('../lib/stayWindow');
+const { send: sendMail, TEMPLATES } = require('../lib/notifier');
+const storage = require('../lib/storage');
+
+// Uploaded as base64 JSON rather than multipart: this is a capstone build, and
+// a JSON body is trivially testable with the same request helper every other
+// route in this file uses, at the cost of the usual ~33% base64 overhead.
+// 10MB decoded is generous for a guest ID or a signed registration card.
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 
 // Inventory owns capacity. Every write path in this file that creates or moves a
 // booking must claim capacity through this client before committing.
@@ -559,7 +567,19 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
       changes.push(`Room ${before.assignedRoomId || 'unassigned'} → ${assignedRoomId}`);
     if (changes.length) await logActivity(r.id, req.user, 'modify', changes.join(' · '));
 
-    redis.publish('reservation:updated', JSON.stringify({ reservationId: r.id }));
+    // The window travels with the event. A Stay keeps its OWN
+    // expectedCheckIn/expectedCheckOut, and those are what the registration
+    // card prints, what Arrivals' early-check-in guard compares and what Reports
+    // shows next to the actual times — so a date edit here has to reach them or
+    // they quietly describe the booking as it used to be.
+    redis.publish(
+      'reservation:updated',
+      JSON.stringify({
+        reservationId: r.id,
+        checkIn: r.checkIn,
+        checkOut: r.checkOut,
+      })
+    );
     res.json(r);
   } catch (err) {
     console.error('[Reservation] Update error:', err.message);
@@ -598,6 +618,220 @@ router.post('/reservations/:id/confirm', requireRole(...STAFF), async (req, res)
   } catch (err) {
     console.error('[Reservation] Confirm error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// A card ON FILE as a booking guarantee, not a payment. No field here could
+// ever hold a full number or a CVV — see the ReservationCard model comment.
+const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'JCB', 'OTHER'];
+
+function validateCard(body) {
+  const { brand, last4, expMonth, expYear, cardholderName } = body || {};
+  if (!CARD_BRANDS.includes(brand)) return `brand must be one of ${CARD_BRANDS.join(', ')}.`;
+  if (!/^\d{4}$/.test(String(last4 || ''))) return 'last4 must be exactly 4 digits.';
+  const m = Number(expMonth);
+  const y = Number(expYear);
+  if (!Number.isInteger(m) || m < 1 || m > 12) return 'expMonth must be 1-12.';
+  if (!Number.isInteger(y)) return 'expYear must be a whole number.';
+  // The LAST day of the expiry month, since a card is good through the end of
+  // that month, not just its first instant.
+  if (new Date(y, m, 1) <= new Date()) return 'This card has already expired.';
+  if (!String(cardholderName || '').trim()) return 'cardholderName is required.';
+  return null;
+}
+
+// POST /api/reservations/:id/cards
+router.post('/reservations/:id/cards', requireRole(...STAFF), async (req, res) => {
+  try {
+    const existing = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+
+    const error = validateCard(req.body);
+    if (error) return res.status(400).json({ error });
+
+    const { brand, last4, expMonth, expYear, cardholderName } = req.body;
+    const card = await prisma.reservationCard.create({
+      data: {
+        reservationId: req.params.id,
+        brand,
+        last4: String(last4),
+        expMonth: Number(expMonth),
+        expYear: Number(expYear),
+        cardholderName: cardholderName.trim(),
+        createdBy: req.user?.username || req.user?.sub,
+      },
+    });
+    res.status(201).json(card);
+  } catch (err) {
+    console.error('[Reservation] Add card error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations/:id/cards
+router.get('/reservations/:id/cards', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const cards = await prisma.reservationCard.findMany({
+      where: { reservationId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(cards);
+  } catch (err) {
+    console.error('[Reservation] List cards error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// DELETE /api/reservations/:id/cards/:cardId
+router.delete('/reservations/:id/cards/:cardId', requireRole(...STAFF), async (req, res) => {
+  try {
+    // Scoped to the reservation in the path, same as the note-archive route —
+    // a card id alone must not be removable through a different reservation's
+    // URL.
+    const result = await prisma.reservationCard.deleteMany({
+      where: { id: req.params.cardId, reservationId: req.params.id },
+    });
+    if (result.count === 0) return res.status(404).json({ error: 'Card not found for this reservation.' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Reservation] Remove card error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/reservations/:id/documents — filename/contentType/contentBase64.
+// The bytes go to MinIO (see lib/storage.js); only metadata is stored here.
+router.post('/reservations/:id/documents', requireRole(...STAFF), async (req, res) => {
+  try {
+    const existing = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+
+    const { filename, contentType, contentBase64 } = req.body || {};
+    if (!filename || !String(filename).trim()) return res.status(400).json({ error: 'filename is required.' });
+    if (!contentBase64) return res.status(400).json({ error: 'contentBase64 is required.' });
+
+    let buffer;
+    try {
+      buffer = Buffer.from(contentBase64, 'base64');
+    } catch {
+      return res.status(400).json({ error: 'contentBase64 is not valid base64.' });
+    }
+    if (buffer.length === 0) return res.status(400).json({ error: 'The uploaded file is empty.' });
+    if (buffer.length > MAX_DOCUMENT_BYTES) {
+      return res.status(400).json({
+        error: `File is ${(buffer.length / (1024 * 1024)).toFixed(1)}MB, over the ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit.`,
+      });
+    }
+
+    const objectKey = storage.objectKeyFor(req.params.id, filename);
+    await storage.ensureBucket();
+    await storage.putDocument(objectKey, buffer, contentType);
+
+    const doc = await prisma.reservationDocument.create({
+      data: {
+        reservationId: req.params.id,
+        filename: String(filename),
+        contentType: contentType || 'application/octet-stream',
+        sizeBytes: buffer.length,
+        objectKey,
+        uploadedBy: req.user?.username || req.user?.sub,
+      },
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    console.error('[Reservation] Upload document error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations/:id/documents
+router.get('/reservations/:id/documents', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const docs = await prisma.reservationDocument.findMany({
+      where: { reservationId: req.params.id },
+      orderBy: { uploadedAt: 'desc' },
+    });
+    res.json(docs);
+  } catch (err) {
+    console.error('[Reservation] List documents error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/reservations/:id/documents/:docId/download — streams the file back
+// through this service rather than a direct MinIO link, so it stays behind the
+// same gateway auth as everything else; MinIO itself is never reachable from a
+// browser.
+router.get(
+  '/reservations/:id/documents/:docId/download',
+  requireRole(...ROLE_GROUPS.DESK_AUDIT),
+  async (req, res) => {
+    try {
+      const doc = await prisma.reservationDocument.findFirst({
+        where: { id: req.params.docId, reservationId: req.params.id },
+      });
+      if (!doc) return res.status(404).json({ error: 'Document not found for this reservation.' });
+
+      const stream = await storage.getDocumentStream(doc.objectKey);
+      res.setHeader('Content-Type', doc.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${doc.filename.replace(/"/g, '')}"`);
+      stream.on('error', (err) => {
+        console.error('[Reservation] Document stream error:', err.message);
+        if (!res.headersSent) res.status(502).json({ error: 'Could not read the stored file.' });
+      });
+      stream.pipe(res);
+    } catch (err) {
+      console.error('[Reservation] Download document error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
+
+// DELETE /api/reservations/:id/documents/:docId
+router.delete('/reservations/:id/documents/:docId', requireRole(...STAFF), async (req, res) => {
+  try {
+    const doc = await prisma.reservationDocument.findFirst({
+      where: { id: req.params.docId, reservationId: req.params.id },
+    });
+    if (!doc) return res.status(404).json({ error: 'Document not found for this reservation.' });
+
+    await storage.removeDocument(doc.objectKey);
+    await prisma.reservationDocument.deleteMany({ where: { id: doc.id, reservationId: req.params.id } });
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Reservation] Delete document error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/reservations/:id/send-confirmation-email — the desk's on-demand
+// resend, for when a guest says they never got it. Sent synchronously here
+// (like the folio receipt-email route) rather than through the Redis event
+// the /confirm route publishes, so the desk gets an honest pass/fail back
+// instead of a fire-and-forget that only ever logs to the console.
+router.post('/reservations/:id/send-confirmation-email', requireRole(...STAFF), async (req, res) => {
+  try {
+    const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!r) return res.status(404).json({ error: 'Not found.' });
+
+    // The template says "Your reservation is confirmed" — sending that on a
+    // booking that isn't (or no longer is) would tell the guest something
+    // false, which is worse than the "Coming soon" stub this replaces.
+    if (['PENDING', 'CANCELLED', 'NO_SHOW'].includes(r.status)) {
+      return res
+        .status(409)
+        .json({ error: `A confirmation email cannot be sent for a ${r.status.toLowerCase()} reservation.` });
+    }
+    if (!r.guestEmail) {
+      return res.status(400).json({ error: 'This reservation has no guest email on file.' });
+    }
+
+    const { subject, body } = TEMPLATES.reservation_confirmed(r);
+    await sendMail({ to: r.guestEmail, subject, body });
+    res.json({ sent: true, to: r.guestEmail });
+  } catch (err) {
+    console.error('[Reservation] Send confirmation email error:', err.message);
+    res.status(502).json({ error: 'Could not send the confirmation email.' });
   }
 });
 

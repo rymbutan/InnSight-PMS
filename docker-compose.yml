@@ -101,11 +101,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # NOTE: nothing in this codebase talks to MinIO — `minio` / `aws-sdk` /
-  # `S3Client` have zero hits across all 9 services. It is provisioned with a
-  # persistent volume and a root credential purely as unused infrastructure
-  # (finding M7). Its password is now required rather than defaulted; consider
-  # deleting the service outright.
+  # Backs reservation-service's Documents tab (guest IDs, signed registration
+  # cards). The root credential is fine here — a non-PCI-compliant capstone
+  # build, and MinIO is reachable only inside this compose network, never from
+  # a browser, the same trust boundary every service's own DATABASE_URL already
+  # crosses.
   minio:
     image: minio/minio:latest
     restart: unless-stopped
@@ -309,9 +309,17 @@ services:
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
       FOLIO_URL: http://folio-service:3007
+      # Reservation documents (guest IDs, signed registration cards) — see
+      # lib/storage.js. Same root credential MinIO's own container requires.
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-innsight}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?required}
+      MINIO_BUCKET: reservation-documents
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
 
   audit-service:
     build: ./services/audit

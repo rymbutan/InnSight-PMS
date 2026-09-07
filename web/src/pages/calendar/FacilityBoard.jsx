@@ -302,7 +302,18 @@ export default function FacilityBoard({ startDate, days }) {
                                   }}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate('/amenities');
+                                    // The specific booking, not just the desk.
+                                    // Clicking a bar and landing on a generic
+                                    // Amenities page left the user to find the
+                                    // row again by eye. The date goes with it so
+                                    // the schedule opens on the right day —
+                                    // localDay, not toISOString, because a bar
+                                    // that starts in the local evening is
+                                    // yesterday in UTC.
+                                    navigate(
+                                      `/amenities?booking=${encodeURIComponent(b.id)}` +
+                                        `&date=${localDay(new Date(b.startAt))}`
+                                    );
                                   }}
                                   title={
                                     `${b.label} · ${f.name}\n` +

@@ -10,6 +10,7 @@
 
 const { TAX_COMPONENTS } = require('./policies');
 const { centsToWords } = require('./receiptWords');
+const { splitNote } = require('./split');
 
 const DASH = '—';
 
@@ -101,6 +102,9 @@ function folioPrintModel({
   stay = null,
   reservation = null,
   hotel = {},
+  // The other folios on this stay, for the split note. Empty on an unsplit
+  // folio, which is why an ordinary document's Remark line stays blank.
+  counterparts = [],
 }) {
   const charges = transactions.filter((t) => t.type === 'CHARGE' || t.type === 'TRANSFER');
   const roomCharges = charges.filter((t) => t.__isRoom);
@@ -271,12 +275,23 @@ function folioPrintModel({
     },
     footer: {
       currency: folio.currency || 'PHP',
-      billTo: guestName,
+      // Who this folio BILLS, which after a bill split is not always the guest
+      // whose stay it is. Before payerName existed every folio on a stay printed
+      // the same name here, so the two halves of a split were two documents both
+      // claiming to bill the same person and differing only in their totals.
+      //
+      // meta.guestName above deliberately still names the guest: who occupied
+      // the room and who settles this folio are separate facts and the document
+      // carries a line for each.
+      billTo: folio.payerName || guestName,
       // Guest has no address field, and the reference's own Address line reads
       // only "Philippines". Nationality is the closest true fact this system holds.
       address: guest?.nationality || DASH,
       amountInWords: centsToWords(summary.balanceCents),
-      remark: '',
+      // Derived from this folio's own transfer rows at print time, not stored at
+      // split time, so it cannot drift from the transactions it describes and a
+      // payer renamed afterwards reprints correctly. '' on an unsplit folio.
+      remark: splitNote({ transactions, counterparts }),
     },
   };
 }

@@ -18,7 +18,10 @@ const app = express();
 const PORT = process.env.PORT || 3011;
 
 // cors handled by gateway
-app.use(express.json());
+// Documents are uploaded as base64 JSON (see routes/reservation.routes.js), so
+// the body-parser's tiny default limit has to grow past that encoding's ~33%
+// overhead on top of the 10MB document size cap the route itself enforces.
+app.use(express.json({ limit: '15mb' }));
 app.use(requestContext(logger));
 app.use(metricsMiddleware);
 app.get('/metrics', metricsHandler);
@@ -257,5 +260,12 @@ app.use(jsonErrorHandler);
 const server = app.listen(PORT, () => {
   console.log(`[InnSight] Reservation Service running on port ${PORT}`);
 });
+
+// Best-effort: a bucket that doesn't exist yet is created lazily on the first
+// upload attempt too (see routes), so a MinIO hiccup at boot doesn't crash a
+// service that has nothing to do with documents on its critical path.
+require('./lib/storage')
+  .ensureBucket()
+  .catch((e) => console.warn('[Reservation] Could not ensure MinIO bucket at startup:', e.message));
 
 gracefulShutdown(server, [() => subscriber?.disconnect?.()]);
