@@ -3,25 +3,18 @@
 
 import Icon from './Icon';
 
-// Dot colour plus the ink of the glyph inside it. The glyph was always white,
-// which on the four light fills below sat at 2.2-2.6:1 — under WCAG 1.4.11's
-// 3:1 floor for a meaningful non-text graphic, so the icon that distinguishes
-// "Confirmed" from "Modified" was the part you could not see. Dark ink on the
-// light fills, white on the dark ones. Fills are unchanged, so the timeline's
-// colour language is exactly as it was.
-const INK_DARK = '#0f172a';
 const ACTION_META = {
-  create: { color: '#3b82f6', ink: '#fff', icon: 'plus-circle', label: 'Created' },
-  confirm: { color: '#22c55e', ink: INK_DARK, icon: 'check-circle', label: 'Confirmed' },
-  modify: { color: '#f59e0b', ink: INK_DARK, icon: 'pencil', label: 'Modified' },
-  check_in: { color: '#06b6d4', ink: INK_DARK, icon: 'log-in', label: 'Checked in' },
-  check_out: { color: '#64748b', ink: '#fff', icon: 'log-out', label: 'Checked out' },
-  cancel: { color: '#ef4444', ink: '#fff', icon: 'ban', label: 'Cancelled' },
-  no_show: { color: '#ef4444', ink: '#fff', icon: 'alert-circle', label: 'No-show' },
-  charge: { color: '#8b5cf6', ink: '#fff', icon: 'plus', label: 'Charge' },
-  payment: { color: '#22c55e', ink: INK_DARK, icon: 'dollar-sign', label: 'Payment' },
-  refund: { color: '#f59e0b', ink: INK_DARK, icon: 'arrow-left', label: 'Refund' },
-  note: { color: '#94a3b8', ink: INK_DARK, icon: 'file-text', label: 'Note' },
+  create: { color: '#3b82f6', icon: 'plus-circle', label: 'Created' },
+  confirm: { color: '#22c55e', icon: 'check-circle', label: 'Confirmed' },
+  modify: { color: '#f59e0b', icon: 'pencil', label: 'Modified' },
+  check_in: { color: '#06b6d4', icon: 'log-in', label: 'Checked in' },
+  check_out: { color: '#64748b', icon: 'log-out', label: 'Checked out' },
+  cancel: { color: '#ef4444', icon: 'ban', label: 'Cancelled' },
+  no_show: { color: '#ef4444', icon: 'alert-circle', label: 'No-show' },
+  charge: { color: '#8b5cf6', icon: 'plus', label: 'Charge' },
+  payment: { color: '#22c55e', icon: 'dollar-sign', label: 'Payment' },
+  refund: { color: '#f59e0b', icon: 'arrow-left', label: 'Refund' },
+  note: { color: '#94a3b8', icon: 'file-text', label: 'Note' },
 };
 
 export default function Timeline({ items }) {
@@ -40,7 +33,7 @@ export default function Timeline({ items }) {
           <div key={it.id || i} className="timeline-row">
             <div className="timeline-rail">
               <span className="timeline-dot" style={{ background: meta.color }}>
-                <Icon name={meta.icon} size={11} color={meta.ink} />
+                <Icon name={meta.icon} size={11} color="#fff" />
               </span>
               {i < items.length - 1 && <span className="timeline-line" />}
             </div>

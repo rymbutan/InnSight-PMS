@@ -15,27 +15,14 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 
 const EDIT_ROLES = ['ADMIN', 'MANAGER'];
-// The four built-in layouts (Standard, Deluxe, Suite, Presidential) live in
-// web/src/sim/roomLayouts.js and need no registration here — a key is valid by
-// shape now, not by membership. See badTier.
+const TIERS = ['Standard', 'Deluxe', 'Suite', 'Presidential'];
 // A layout is ~60 fixtures of short numeric records. Well past anything real,
 // but bounded so a malformed client cannot post megabytes into the column.
 const MAX_FIXTURES = 400;
 const KEEP_VERSIONS = 50;
 
-// A layout key is a room-type name. It used to be a whitelist of the four
-// built-ins, which meant a property could never author a layout for a room type
-// it created itself — and room types ARE user-created (Rooms → Create room
-// type), so the whitelist quietly capped the feature at whatever shipped.
-//
-// Validated by SHAPE instead of membership. The key lands in a URL segment, a
-// filename in exports and a display label, so it is bounded in length and kept
-// to characters that need no escaping in any of those. Writes are still
-// ADMIN/MANAGER-only, so this widens what an authorised admin can name, not who
-// can write.
-const TIER_KEY = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/;
 function badTier(tier) {
-  return typeof tier !== 'string' || !TIER_KEY.test(tier);
+  return !TIERS.includes(tier);
 }
 
 // Reject anything that is not plan-shaped BEFORE it reaches the database — a
@@ -98,20 +85,10 @@ router.get('/room-layouts', verifyToken, async (_req, res) => {
 router.get('/room-layouts/:tier/versions', verifyToken, requireRole(...EDIT_ROLES), async (req, res) => {
   try {
     if (badTier(req.params.tier)) return res.status(400).json({ error: 'Unknown room tier.' });
-    // `?plan=1` adds the geometry, so the slot list can draw a floor-plan
-    // thumbnail of each version. Off by default: the metadata list is a few
-    // hundred bytes and is all most callers want, while the geometry is up to
-    // KEEP_VERSIONS × MAX_FIXTURES records. Opt-in keeps the cheap call cheap.
-    const withPlan = req.query.plan === '1';
     const rows = await prisma.roomLayout.findMany({
       where: { roomTier: req.params.tier },
       orderBy: { version: 'desc' },
-      select: {
-        version: true,
-        updatedBy: true,
-        createdAt: true,
-        ...(withPlan ? { room: true, furniture: true, walls: true, stations: true } : {}),
-      },
+      select: { version: true, updatedBy: true, createdAt: true },
     });
     res.json(rows);
   } catch (err) {

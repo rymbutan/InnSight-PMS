@@ -5,7 +5,7 @@ import { useToast, errMsg } from '../components/Toast';
 import Icon from '../components/Icon';
 import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso } from '../lib/money';
-import { statusMeta, STATUS_ORDER, ON_FILL_INK, ON_FILL_INK_SOFT } from '../sim/statusMeta';
+import { statusMeta, STATUS_ORDER } from '../sim/statusMeta';
 import { useRoomEvents } from '../sim/useRoomEvents';
 import { submitRun, ACTIVITY } from '../sim/trainingLog';
 import { computeLayout, MAP_W, MARGIN_X, CORRIDOR_H } from '../sim/hotelMap';
@@ -47,7 +47,7 @@ function RoomShape({ slot, selected, flashing, onSelect, onHover }) {
         textAnchor="middle"
         fontSize="17"
         fontWeight="700"
-        fill={ON_FILL_INK}
+        fill="var(--text)"
       >
         {room.number}
       </text>
@@ -55,7 +55,7 @@ function RoomShape({ slot, selected, flashing, onSelect, onHover }) {
           scaled down. This is what used to render as "Standar" — the name was
           drawn at whatever width was left over and simply overflowed its tile
           into the neighbouring room. */}
-      <text x={x + w / 2} y={y + h / 2 + 8} textAnchor="middle" fontSize="11" fill={ON_FILL_INK_SOFT}>
+      <text x={x + w / 2} y={y + h / 2 + 8} textAnchor="middle" fontSize="11" fill="var(--muted)">
         {w >= 88 ? room.roomType?.name || room.typeCode : room.typeCode}
       </text>
       {/* status code badge */}
@@ -381,12 +381,8 @@ export default function Housekeeping() {
 
   return (
     <div>
-      {/* Same title treatment as Rooms, so the two read as one destination with
-          two views. Navigation between them is the sidebar's job. */}
       <div className="hk-header">
-        <div className="page-head-title">
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>Map &amp; Housekeeping</h1>
-        </div>
+        <h2 style={{ margin: 0 }}>Hotel Map</h2>
         <span className="hk-occupancy">
           Occupancy: <strong>{occupancy}%</strong>
         </span>

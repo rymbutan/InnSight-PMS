@@ -23,12 +23,12 @@
  * place a continuous shade on a scale but can match a swatch.
  */
 const STEPS = [
-  { upTo: 0, fill: 'var(--heat-0)', ink: 'var(--heat-0-ink)', label: 'Empty' },
-  { upTo: 0.25, fill: 'var(--heat-1)', ink: 'var(--heat-1-ink)', label: '1–24%' },
-  { upTo: 0.5, fill: 'var(--heat-2)', ink: 'var(--heat-2-ink)', label: '25–49%' },
-  { upTo: 0.75, fill: 'var(--heat-3)', ink: 'var(--heat-3-ink)', label: '50–74%' },
-  { upTo: 0.999, fill: 'var(--heat-4)', ink: 'var(--heat-4-ink)', label: '75–99%' },
-  { upTo: Infinity, fill: 'var(--heat-5)', ink: 'var(--heat-5-ink)', label: 'Sold out' },
+  { upTo: 0, fill: 'var(--surface-2)', label: 'Empty' },
+  { upTo: 0.25, fill: '#cde2fb', label: '1–24%' },
+  { upTo: 0.5, fill: '#9ec5f4', label: '25–49%' },
+  { upTo: 0.75, fill: '#5598e7', label: '50–74%' },
+  { upTo: 0.999, fill: '#2a78d6', label: '75–99%' },
+  { upTo: Infinity, fill: '#184f95', label: 'Sold out' },
 ];
 
 /** The legend, in the order a reader scans it. */
@@ -54,19 +54,13 @@ export function heatFill(occ) {
 }
 
 /**
- * Ink for a cell.
- *
- * Each step now carries its own ink token rather than this function deciding by
- * matching the fill against two hard-coded hexes. That test could only ever
- * describe ONE ramp: the light steps fell through to `var(--text)`, which is
- * near-white under data-theme="dark", so in dark mode the pale-blue cells were
- * white-on-pale-blue. Ink belongs beside the fill it sits on, and both flip with
- * the theme — see the --heat-* tokens in styles.css.
+ * Ink for a cell. Only the top two steps are dark enough to need light text —
+ * hardcoded rather than computed because `var(--surface-2)` is not a hex and
+ * cannot be measured, and the four light steps all take the same dark ink.
  */
 export function heatInk(occ) {
-  const v = Number.isFinite(occ) ? Math.max(0, occ) : 0;
-  for (const s of STEPS) if (v <= s.upTo) return s.ink;
-  return STEPS[STEPS.length - 1].ink;
+  const fill = heatFill(occ);
+  return fill === '#2a78d6' || fill === '#184f95' ? '#ffffff' : 'var(--text)';
 }
 
 /** Plain-language summary for the cell's tooltip. */

@@ -27,14 +27,6 @@
   --danger-soft: #fee2e2;
   --warn: #f59e0b;
   --warn-soft: #fef3c7;
-  /* Informational blue. Defined HERE as well as in the dark block: a token that
-     exists only under data-theme="dark" is unset in light mode, and every
-     `var(--info)` consumer would silently lose its colour. Light mode takes the
-     darker blue-600 so it holds 4.5:1 as text on white; the dark block keeps the
-     specified #3B82F6. */
-  --info: #2563eb;
-  --info-soft: #dbeafe;
-  --on-info: #ffffff;
   --row-hover: #f5f8fc;
   --row-active: #eaf2ff;
   /* Surfaces. Everything that used to be a literal #fff now names its role, so
@@ -59,55 +51,6 @@
   --stage: #ced3da;
   --neutral-soft: #e5e7eb;
   --on-neutral-soft: #374151;
-  /* Empty-state illustration ramp, lightest → darkest. The inline SVGs in
-     EmptyState.jsx had this slate ramp hard-coded, which meant a near-white
-     #f1f5f9 panel fill sitting on a #111b2c card in dark mode — a glowing
-     rectangle in the middle of every empty table. Naming the ramp lets dark
-     mode invert it so the drawing keeps its internal light-to-dark ordering
-     against whichever background it is on. */
-  --art-fill: #f1f5f9;
-  --art-fill-2: #e2e8f0;
-  --art-shape: #cbd5e1;
-  --art-line: #94a3b8;
-  --art-line-strong: #64748b;
-  /* Status colours as TEXT on a panel — a different job from --green/--warn/
-     --danger, which are FILLS with a paired --on-* ink. A fill only needs 3:1
-     and can be bright; the same value used as a letterform needs 4.5:1 and on
-     white --warn (#f59e0b) manages 2.15:1. Keeping one set for both is what
-     makes a "readable" amber unreadable the moment it stops being a background.
-     These three are the on-surface tier, dark enough on white and light enough
-     on the dark panel. */
-  --text-success: #15803d;
-  --text-warn: #b45309;
-  --text-danger: #dc2626;
-  --text-info: #1d4ed8;
-  /* ── 14-day outlook heat ramp ─────────────────────────────────────────
-     Sequential, one hue, six steps, each paired with the ink that goes on it.
-     Light mode runs pale → deep as occupancy rises, which is the natural
-     reading on a white page. */
-  /* Floor-plan thumbnails (save slots). Ordered back-to-front: ground, floor,
-     wall, fixture, station, spawn. */
-  --plan-bg: #eef2f7;
-  --plan-floor: #ffffff;
-  --plan-wall: #94a3b8;
-  --plan-fixture: #cbd5e1;
-  --plan-station: #0a6b3d;
-  --plan-spawn: #2563eb;
-  --heat-0: var(--surface-2);
-  --heat-0-ink: var(--text);
-  --heat-1: #cde2fb;
-  --heat-1-ink: #0f172a;
-  --heat-2: #9ec5f4;
-  --heat-2-ink: #0f172a;
-  --heat-3: #5598e7;
-  --heat-3-ink: #0f172a;
-  /* One step down from the original #2A78D6, which carried white at 4.42:1 —
-     just under AA, and this cell holds a number someone acts on. Separation
-     from both neighbours is preserved (1.60 below, 1.69 above). */
-  --heat-4: #2772ce;
-  --heat-4-ink: #ffffff;
-  --heat-5: #184f95;
-  --heat-5-ink: #ffffff;
   --on-accent-soft: #054a2a;
   --on-green-soft: #166534;
   --on-warn-soft: #92400e;
@@ -135,25 +78,10 @@
   --control-gap: 8px;
   /* Scrollbars. Named so the thickness and colours are tuned in one place
      instead of being repeated across every ::-webkit-scrollbar rule, and so the
-     dark theme can restate only the colours.
-
-     `size` is the GUTTER — the grab target, and the width permanently reserved
-     beside every scrolling pane. `inset` is how far the painted capsule sits
-     inside it, so the visible bar is `size - 2 * inset`: a 6px capsule floating
-     in a 10px target here, widening to 8px under the pointer. Raising `size`
-     costs layout width everywhere; raising `inset` costs nothing but paint. */
-  --scrollbar-size: 10px;
-  --scrollbar-inset: 2px;
-  --scrollbar-inset-hover: 1px;
-  /* A mid-slate that clears WCAG 1.4.11's 3:1 non-text floor on every surface
-     in BOTH themes (worst case 3.16:1 on light #f1f5f9, 3.62:1 on dark
-     #273449), so the base colour does not need a dark override — only the
-     hover does, which goes darker on light and lighter on dark. The old
-     #b6c0cf measured 1.76:1 and the old dark thumb 1.21:1 on an elevated
-     card: at the previous 8px full-width bar that was merely faint, and at a
-     6px floating capsule it would have been invisible. */
-  --scrollbar-thumb: #7c8ba1;
-  --scrollbar-thumb-hover: #64748b;
+     dark theme can restate only the colours. */
+  --scrollbar-size: 8px;
+  --scrollbar-thumb: #b6c0cf;
+  --scrollbar-thumb-hover: #8592a4;
   --scrollbar-track: transparent;
 }
 
@@ -223,31 +151,20 @@ button.danger {
 }
 
 /* ==========================================================================
-   Scrollbars (app-wide)
+   Auto-hiding scrollbars (app-wide)
    ==========================================================================
-   An overlay-style floating capsule: no track, no arrows, invisible at rest,
-   fading in while scrolling and on hover. The same shape Windows 11 and macOS
-   draw for their own overlay scrollbars, so it reads as part of the OS rather
-   than as a widget the page invented.
+   Invisible at rest, visible while scrolling. `.is-scrolling` is applied to
+   whichever element is scrolling by lib/autoHideScrollbars.js — CSS has no
+   way to detect that on its own.
 
-   THE CAPSULE IS AN INSET, NOT A NARROW BAR. The thumb is drawn with a
-   transparent border plus `background-clip: padding-box`, so the gutter stays
-   `--scrollbar-size` wide — that is the grab target — while the paint is only
-   the middle of it. Shaving `--scrollbar-size` to get the same hairline would
-   leave a 5px target, which is genuinely hard to catch with a mouse.
-
-   THE GUTTER IS ALWAYS RESERVED and only the THUMB changes. Collapsing it
-   instead (`scrollbar-width: none`) would reflow a pane's content by ~10px
+   The GUTTER is always reserved and only the THUMB changes colour. Hiding the
+   gutter instead (scrollbar-width: none) would reflow a pane's content by ~8px
    every time scrolling started and stopped, which is far more distracting than
    a scrollbar.
 
    Firefox honours only scrollbar-width/scrollbar-color; Chromium and WebKit
    only the ::-webkit-scrollbar pseudo-elements. Both are declared because
-   between them they cover every browser this app targets. Firefox's `thin`
-   is already an arrowless hairline, so it needs nothing more.
-
-   `.is-scrolling` is applied to whichever element is scrolling by
-   lib/autoHideScrollbars.js — CSS has no way to detect that on its own.
+   between them they cover every browser this app targets.
    ========================================================================== */
 * {
   scrollbar-width: thin;
@@ -257,85 +174,63 @@ button.danger {
   width: var(--scrollbar-size);
   height: var(--scrollbar-size);
 }
-/* No track. A visible groove is what dates a scrollbar — the modern ones are a
-   thumb floating over the content. */
 *::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
-  border: 0;
-  box-shadow: none;
 }
 *::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: var(--pill-radius);
-  border: var(--scrollbar-inset) solid transparent;
-  background-clip: padding-box;
-  /* Fades out when .is-scrolling is removed, and thickens under the pointer.
-     Chromium animates both; Firefox swaps instantly, which is acceptable. */
-  transition:
-    background-color 0.2s ease,
-    border-width 0.12s ease;
+  /* Fades out when .is-scrolling is removed. Chromium animates the thumb's
+     background; Firefox swaps instantly, which is acceptable. */
+  transition: background 0.25s ease;
 }
 /* Chromium paints the corner where two scrollbars would meet even when only one
    exists, as a small grey notch. */
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
-/* NO STEPPER ARROWS. These rules are what remove them, and they have to be said
+/* NO STEPPER ARROWS. This rule is what removes them, and it has to be said
    explicitly: the moment a page styles ::-webkit-scrollbar at all, Chromium
    stops using the OS overlay scrollbar and falls back to the legacy one, which
-   draws an up and a down button at the ends of the track. Those buttons are not
-   something the app draws — they are what you get for styling the bar and
+   draws an up and a down button at the ends of the track. Those buttons were
+   the grey squares at the top and bottom of the sidebar rail — they are not
+   something the app was drawing, they are what you get for styling the bar and
    saying nothing about them.
-
-   Every variant is listed. `display: none` on the bare selector is enough on
-   current Chromium, but older WebKit matches only the specific pseudo-classes
-   and reserves the button's space regardless of `display`, which leaves a blank
-   square where the arrow was. The zeroed box covers that. */
-*::-webkit-scrollbar-button,
-*::-webkit-scrollbar-button:start,
-*::-webkit-scrollbar-button:end,
-*::-webkit-scrollbar-button:decrement,
-*::-webkit-scrollbar-button:increment,
-*::-webkit-scrollbar-button:vertical,
-*::-webkit-scrollbar-button:horizontal,
-*::-webkit-scrollbar-button:vertical:start:decrement,
-*::-webkit-scrollbar-button:vertical:end:increment,
-*::-webkit-scrollbar-button:horizontal:start:decrement,
-*::-webkit-scrollbar-button:horizontal:end:increment {
+   `display: none` alone is enough on current Chromium; the zeroed box is kept
+   for older WebKit, which reserves the button's space regardless. */
+*::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
-  background: transparent;
 }
 
-/* Visible while the pane is scrolling… */
 .is-scrolling {
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 .is-scrolling::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb);
+  background: var(--scrollbar-thumb);
 }
-/* …and whenever the pointer is on it, scrolling or not. Reaching for a
-   scrollbar that is not currently painted is the one real cost of hiding it at
-   rest; revealing it under the cursor pays that back, and it is what every
-   overlay scrollbar does. The thumb also grows here — a wider capsule is easier
-   to grab, and the gutter already reserves the space for it. */
-*::-webkit-scrollbar-thumb:hover,
-*::-webkit-scrollbar-thumb:active {
-  background-color: var(--scrollbar-thumb-hover);
-  border-width: var(--scrollbar-inset-hover);
+.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
-/* The rail is a narrow column, so its capsule is finer than the app default —
-   a hairline that reads as part of the rail rather than a control bolted to
-   its edge. Geometry only: the colour and the fade still come from the shared
-   rules above, so the rail cannot drift from the app's palette. */
+/* The rail is a narrow column, so its scrollbar is slimmer still and inset from
+   the edge rather than sitting on the border. */
 .side-nav {
-  --scrollbar-size: 9px;
-  --scrollbar-inset: 3px;
-  --scrollbar-inset-hover: 2px;
+  --scrollbar-size: 8px;
 }
-
+/* The inset is a TRANSPARENT BORDER plus `background-clip: padding-box`, not a
+   narrower `--scrollbar-size`. The track width is also the hit area, so shaving
+   the track to get a thinner line would leave a 4px target that is genuinely
+   hard to grab. This keeps an 8px grab area and paints a 4px capsule inside it —
+   a hairline that reads as part of the rail rather than a control bolted to its
+   edge. Only geometry is set here; the colour still comes from the shared
+   `.is-scrolling` rules above, so the rail cannot drift from the app's palette
+   or lose its fade. */
+.side-nav::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
 @media (prefers-reduced-motion: reduce) {
   *::-webkit-scrollbar-thumb {
     transition: none;
@@ -431,13 +326,6 @@ html[data-theme='dark'] .side-brand-mark {
   position: relative;
   flex: 1;
   max-width: 460px;
-  /* `flex: 1` alone does NOT let this shrink. A flex item's automatic minimum
-     size is its min-content width, and for an <input> that is the browser's
-     default field size (~170px) rather than zero — so the search box refused to
-     give ground and pushed the account button off the end of a narrow top bar
-     instead. Every other item up there has flex-shrink: 0, so this is the only
-     one that can yield. */
-  min-width: 0;
 }
 .cb-search {
   width: 100%;
@@ -575,13 +463,7 @@ html[data-theme='dark'] .side-brand-mark {
   flex-shrink: 0;
   padding: 3px 10px;
   border-radius: var(--pill-radius);
-  /* White, NOT var(--on-accent). The six role colours in lib/roles.js are fixed
-     hex in both themes — deliberately, so a role stays a stable identifier even
-     when the accent is recoloured — and all six are dark enough for white to
-     clear 4.5:1. --on-accent flips to near-black under data-theme="dark", which
-     put #0b1220 ink on #4338ca (2.1:1) and made every role pill in dark mode
-     unreadable, including the one in the top bar. */
-  color: #fff;
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.5;
@@ -874,11 +756,7 @@ html[data-theme='dark'] .side-brand-mark {
    the generic rule won, painting menu rows in the primary green. Naming them
    makes the styling deterministic instead of a function of rule order. */
 .cb-popmenu-item {
-  /* Flex, not block: items may carry a leading icon. Text-only items are
-     unaffected — a single flex child lays out exactly as it did. */
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: block;
   width: 100%;
   background: transparent;
   border: 0;
@@ -893,107 +771,10 @@ html[data-theme='dark'] .side-brand-mark {
 .cb-popmenu-item:hover {
   background: var(--row-hover);
 }
-.cb-popmenu-item.is-danger {
-  color: var(--danger);
-}
-.cb-popmenu-item.is-danger:hover {
-  background: var(--danger-soft);
-}
 .cb-popmenu-divider {
   height: 1px;
   background: var(--border);
   margin: 6px 0;
-}
-
-/* ── Top-bar account menu ─────────────────────────────────────────────────
-   The role pill is the trigger. It is the only part of the top bar that says
-   which account is signed in, so it is where people look for the account
-   actions — and on mobile the rail's user block is behind a hamburger tap,
-   which made sign-out a two-step journey from every screen. */
-.cb-acct {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.cb-acct-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 2px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--pill-radius);
-  cursor: pointer;
-  min-height: 0;
-}
-.cb-acct-trigger:hover {
-  background: var(--row-hover);
-  border-color: var(--border);
-}
-/* The pill already reads as a control on hover; the caret is what says "this
-   opens something" at rest, so it stays visible rather than appearing on hover. */
-.cb-acct-caret {
-  color: var(--muted-2);
-  transition: transform 0.15s ease;
-}
-.cb-acct-trigger[aria-expanded='true'] .cb-acct-caret {
-  transform: rotate(180deg);
-}
-.cb-acct-trigger:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.cb-acct-menu {
-  min-width: 232px;
-  transform-origin: top right;
-  animation: cb-acct-in 0.14s ease-out;
-}
-@keyframes cb-acct-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-/* Someone who has asked the OS for less motion gets the menu, just not the
-   movement — the fade alone still says "this appeared". */
-@media (prefers-reduced-motion: reduce) {
-  .cb-acct-menu {
-    animation-duration: 0.01ms;
-  }
-  .cb-acct-caret {
-    transition: none;
-  }
-}
-/* Keyboard focus must be visible INSIDE the menu — arrow-key navigation moves
-   focus between these buttons, and with only the :hover rule a keyboard user
-   would be moving an invisible cursor. */
-.cb-acct-menu .cb-popmenu-item:focus-visible {
-  background: var(--row-hover);
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.cb-acct-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 14px 12px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 6px;
-}
-.cb-acct-name {
-  font-weight: 650;
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.3;
-}
-.cb-acct-sub {
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.2;
 }
 
 /* ==========================================================================
@@ -2099,39 +1880,6 @@ button.secondary {
 button.secondary:hover {
   background: var(--row-hover);
 }
-/* Outline-green secondary — an affirmative action that is NOT the destructive
-   twin sitting next to it (Save Price vs Deactivate). Geometry still comes from
-   `.secondary`; only the colours change.
-   Written as `button.secondary.outline-success` (0,3,0) rather than
-   `button.outline-success` (0,2,0), which would tie with `button.secondary` and
-   leave source order to decide the winner — the same trap documented on
-   .cb-popmenu-item further up. */
-button.secondary.outline-success {
-  color: var(--text-success);
-  border-color: var(--green);
-}
-button.secondary.outline-success:hover:not(:disabled) {
-  background: var(--green-soft);
-  border-color: var(--green-hover);
-}
-/* The cautionary twin: an action that stops something without destroying it.
-   Outline, so it stays a step below `button.danger`'s solid fill — Disable and
-   Delete sit next to each other and must not read as the same weight. */
-button.secondary.outline-danger {
-  color: var(--text-danger);
-  border-color: var(--danger);
-}
-button.secondary.outline-danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-  border-color: var(--danger-hover);
-}
-/* A disabled outline button keeps its shape but drops the colour, or the
-   greyed-out control still shouts in green or red. */
-button.secondary.outline-success:disabled,
-button.secondary.outline-danger:disabled {
-  color: var(--muted-2);
-  border-color: var(--border-strong);
-}
 /* The affirmative half of a yes/no pair, opposite `button.danger`.
    `--green`, NOT `--accent`. The accent is the hotel's brand colour and is
    editable from Settings — a property that themes itself blue would turn every
@@ -2422,7 +2170,7 @@ tr.active td {
   color: var(--muted-2);
 }
 .kpi-tile.kpi-arrivals .kpi-num {
-  color: var(--text-success);
+  color: var(--green);
 }
 .kpi-tile.kpi-departures .kpi-num {
   color: var(--danger);
@@ -2787,7 +2535,7 @@ tr.active td {
   color: var(--danger);
 }
 .res-balance.zero {
-  color: var(--text-success);
+  color: var(--green);
 }
 /* `width: 100%` matters as much as the centring here: as a flex child this box
    would otherwise shrink to its content and "centre" the button inside its own
@@ -3184,65 +2932,6 @@ tr.active td {
   font-size: 12px;
 }
 
-/* The page head carries the view switcher, three date buttons and the CTA. On a
-   laptop that is wider than the space left beside the title, so it wraps as a
-   block rather than squeezing the segmented control until its labels clip. */
-.cal-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-/* ── Facility board ───────────────────────────────────────────────────────
-   Same grid, different unit: a room bar is a run of whole nights, a facility
-   bar is a slot with a clock time, positioned as a fraction of its day column.
-
-   MIN-WIDTH IS LOAD-BEARING, NOT COSMETIC. A 30-minute slot is 2% of a day —
-   a two-pixel sliver with nothing readable in it and nothing clickable either.
-   The 33.333% floor is the same number as MIN_SLOT_FRAC in lib/facilityBars.js,
-   which is what lane assignment measures overlap against. Change one and the
-   other has to move with it, or two short bookings an hour apart get the same
-   lane and are then drawn on top of each other. */
-.cal2-bar--slot {
-  height: 20px;
-  min-width: 33.333%;
-  padding: 0 6px;
-  gap: 3px;
-  font-size: 10.5px;
-  cursor: pointer;
-}
-.cal2-bar--slot .cal2-slot-time {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  opacity: 0.85;
-  flex: 0 0 auto;
-}
-/* The facility rail carries a name and an optional capacity; the name is the
-   part that must survive a narrow rail, so only it truncates. */
-.cal2-fac-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cal2-fac-cap {
-  margin-left: auto;
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-/* Spans the whole grid, so an empty board says why instead of showing a header
-   row with nothing under it. */
-.cal2-empty {
-  padding: 28px 18px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-}
-
 /* ==========================================================================
    Wizard (New Reservation)
    ========================================================================== */
@@ -3283,7 +2972,7 @@ tr.active td {
   color: var(--on-green);
 }
 .wizard-step.done {
-  color: var(--text-success);
+  color: var(--green);
 }
 
 .wizard-bottom {
@@ -4129,136 +3818,47 @@ kbd {
    Dark mode (data-theme="dark" on <html>)
    ========================================================================== */
 html[data-theme='dark'] {
-  /* Only the HOVER colour is restated. The resting thumb is a mid-slate chosen
-     to clear 3:1 on both themes, so it carries over unchanged; hover has to
-     flip direction, going lighter here where the light theme goes darker.
-     The geometry (--scrollbar-size / --scrollbar-inset) is theme-independent. */
-  --scrollbar-thumb-hover: #94a3b8;
-  /* ── SPECIFIED PALETTE ────────────────────────────────────────────────
-     The design tokens below are mapped onto this file's existing variable
-     names, so every rule already written picks the new values up with no
-     churn at the call sites.
-
-       bg-main          #0F172A  → --bg
-       bg-secondary     #111827  → --surface-2
-       surface-card     #1E293B  → --panel / --surface
-       surface-elevated #273449  → --overlay / --field / --row-hover
-       primary-green    #22C55E  → --accent
-       green-hover      #16A34A  → --accent-hover
-       secondary-green  #86EFAC  → --on-accent-soft (soft-tint ink)
-       text-main        #F8FAFC  → --text
-       text-secondary   #CBD5E1  → --muted
-       text-muted       #94A3B8  → --muted-2
-       border-color     #334155  → --border
-       status-success   #22C55E  → --green
-       status-warning   #F59E0B  → --warn
-       status-error     #EF4444  → --danger
-       status-info      #3B82F6  → --info (new)
-     ──────────────────────────────────────────────────────────────────── */
-  --bg: #0f172a;
-  --panel: #1e293b;
-  --border: #334155;
-  /* Not in the spec, and deliberately kept brighter than --border. This is the
-     CONTROL edge — WCAG 1.4.11 wants 3:1 for an input or button outline, and
-     #334155 on the #1E293B card is 1.35:1, an invisible field. --border stays
-     the specified value for dividers; controls keep this one. */
-  --border-strong: #64748b;
-  --text: #f8fafc;
-  --muted: #cbd5e1;
-  --muted-2: #94a3b8;
-  --accent: #22c55e;
-  --accent-hover: #16a34a;
-  --accent-soft: rgba(34, 197, 94, 0.18);
-  --green: #22c55e;
-  --green-hover: #16a34a;
-  --green-soft: rgba(34, 197, 94, 0.15);
+  /* Only the colours are restated; --scrollbar-size is theme-independent. */
+  --scrollbar-thumb: #3f4c60;
+  --scrollbar-thumb-hover: #5a6a83;
+  --bg: #0b1220;
+  --panel: #111b2c;
+  --border: #334155; /* was #1e293b — 1.18:1 vs panel, edges invisible */
+  --border-strong: #64748b; /* was #334155 — now 3.63:1, clears WCAG 1.4.11 */
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --muted-2: #8494a8; /* was #64748b — 3.93:1 on --bg, below the 4.5 AA floor */
+  /* Deeper and more teal than the pastel --green below, which is the status
+     colour on dark. The obvious light-emerald picks (#34d399, #2dd4a7) measure
+     ΔE 5-7 against it — indistinguishable even with full colour vision. This
+     one measures 19.3 and still clears 3:1 on the dark surface. */
+  --accent: #0f9d6e;
+  --accent-hover: #13b880;
+  --accent-soft: rgba(15, 157, 110, 0.18);
+  --green: #4ade80;
+  --green-hover: #22c55e;
+  --green-soft: rgba(74, 222, 128, 0.15);
   --brand-green: #2f9e6a;
   --brand-gold: #d4ac54;
-  --danger: #ef4444;
-  --danger-hover: #dc2626;
-  --danger-soft: rgba(239, 68, 68, 0.15);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.15);
-  /* Informational blue. The spec names a status-info role that this file had no
-     token for; adding it means the next blue is a token and not another
-     hard-coded #3b82f6. */
-  --info: #3b82f6;
-  --info-soft: rgba(59, 130, 246, 0.15);
-  --row-hover: #273449;
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --danger-soft: rgba(248, 113, 113, 0.15);
+  --warn: var(--warn);
+  --warn-soft: rgba(251, 191, 36, 0.15);
+  --row-hover: #16243a;
   --row-active: #1e3a8a40;
-  --surface: #1e293b;
-  --surface-2: #111827;
-  --overlay: #273449; /* elevated: lighter than --surface so menus read as floating */
-  --field: #273449;
-  /* Ink for text sitting ON those saturated fills. Every one of the specified
-     greens/ambers is a mid-to-light value — white on #22C55E is 2.19:1 and on
-     #F59E0B 2.15:1 — so the ink is the deep navy, not white. */
-  --on-accent: #0f172a;
-  --on-green: #0f172a;
-  --on-warn: #0f172a;
-  --on-neutral: #0f172a;
-  /* Deep navy, not white: white on the specified #3B82F6 is 3.68:1, under the
-     text floor. Dark ink on the same blue is 4.75:1. Light mode keeps white,
-     because its --info is the darker blue-600. */
-  --on-info: #0f172a;
-  --stage: #111827;
-  --neutral-soft: #273449;
+  --surface: #111b2c;
+  --surface-2: #0d1729;
+  --overlay: #1b2a41; /* lighter than --surface so menus read as floating */
+  --field: #16243a;
+  --on-accent: #0b1220; /* dark mode's accent/green/danger are light pastels — white text on them is 1.7-3.8:1 */
+  --on-green: #0b1220;
+  --on-warn: #0b1220;
+  --on-neutral: #0b1220;
+  --stage: #0d1729;
+  --neutral-soft: #1e293b;
   --on-neutral-soft: #cbd5e1;
-  /* The ramp inverted and re-seated on the new #1E293B card, so an illustration
-     reads as raised off the dark panel exactly as it read as recessed into the
-     light one. Ordering is preserved, not just flipped lightness — the stroke
-     tiers stay the two brightest so outlines survive. */
-  --art-fill: #273449;
-  --art-fill-2: #2f3e57;
-  --art-shape: #3c4d68;
-  /* Both stroke tiers stepped up one: the elevated #273449 fill is lighter than
-     the surface these sat on before, and #64748B against it is 2.64:1 — under
-     the 3:1 an illustration's outline needs to stay a shape rather than a smudge. */
-  --art-line: #94a3b8;
-  --art-line-strong: #cbd5e1;
-  /* On-surface TEXT tier — the same hue as the status fill above, but sized for
-     letterforms on the card rather than for a background.
-     Success and warning are the specified values unchanged: both clear AA as
-     text on #1E293B. Error does NOT — the specified #EF4444 measures 3.39:1 on
-     the card, under the 4.5 floor — so error text steps one shade lighter while
-     the #EF4444 FILL stays exactly as specified. Same hue, legible sentence. */
-  --text-success: #22c55e;
-  --text-warn: #f59e0b;
-  --text-danger: #f87171;
-  --text-info: #60a5fa;
-  /* The heat ramp INVERTED for dark mode: dim navy → bright sky as occupancy
-     rises. Two reasons it cannot simply reuse the light ramp.
-       1. Direction. Light mode's "sold out" is #184F95, a deep blue that on a
-          #0F172A page is nearly the page — the fullest day would read as the
-          emptiest. On dark, intensity has to grow with the value.
-       2. Those pale blues. #CDE2FB against deep navy is a glare panel, and it
-          was carrying near-white text, so the number in the cell was the least
-          legible thing on the dashboard.
-     Ink flips partway up the ramp, which is why it is a per-step token. */
-  /* Plan thumbnails, dark. The floor stays LIGHTER than the card it sits on —
-     a floor plan reads as a lit surface seen from above, and inverting it to
-     near-black turned the drawing into a hole in the card. The ink tiers above
-     it darken to compensate. */
-  --plan-bg: #16202f;
-  --plan-floor: #2f3e57;
-  --plan-wall: #8ea3bd;
-  --plan-fixture: #56698a;
-  --plan-station: #4ade80;
-  --plan-spawn: #7fb8f5;
-  --heat-0: var(--surface-2);
-  --heat-0-ink: var(--muted);
-  --heat-1: #1e3a5f;
-  --heat-1-ink: #e2e8f0;
-  --heat-2: #2f5f9e;
-  --heat-2-ink: #f8fafc;
-  --heat-3: #5a9bea;
-  --heat-3-ink: #0f172a;
-  --heat-4: #7fb8f5;
-  --heat-4-ink: #0f172a;
-  --heat-5: #a8d3fd;
-  --heat-5-ink: #0f172a;
-  /* secondary-green #86EFAC — the ink on soft green tints. */
-  --on-accent-soft: #86efac;
+  --on-accent-soft: #6ee7b7;
   --on-green-soft: #86efac;
   --on-warn-soft: #fde68a;
   --on-danger-soft: #fecaca;
@@ -4268,821 +3868,8 @@ html[data-theme='dark'] .cb-search {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
 }
 html[data-theme='dark'] .skel {
-  /* Re-seated on the new surfaces: the shimmer runs from the card colour to the
-     elevated one, so a loading placeholder still reads as part of its card. */
-  background: linear-gradient(90deg, #1e293b 0%, #273449 50%, #1e293b 100%);
+  background: linear-gradient(90deg, #15233a 0%, #1c2a44 50%, #15233a 100%);
   background-size: 200% 100%;
-}
-
-/* ==========================================================================
-   Rooms & Housekeeping — page layout
-   ==========================================================================
-   Two columns on a desk, one on a tablet. The split is by ROLE OF THE CONTENT,
-   not by size: the left column is what you operate (the room list and its
-   filters), the right is what you consult or configure. */
-.rooms-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-@media (min-width: 1100px) {
-  .rooms-grid {
-    /* minmax(0,…) on the main track, or a wide table refuses to shrink and
-       pushes the aside off the edge — the default `min-width: auto` on a grid
-       item is the usual cause of a "responsive" layout that will not narrow. */
-    grid-template-columns: minmax(0, 1.9fr) minmax(300px, 0.9fr);
-  }
-}
-.rooms-main,
-.rooms-aside {
-  min-width: 0;
-}
-/* The aside is reference material, so it scrolls with the page until it runs
-   out and then stays put beside a long room list. */
-@media (min-width: 1100px) {
-  .rooms-aside {
-    position: sticky;
-    top: calc(var(--topbar-h) + 16px);
-  }
-}
-/* Field rows inside the aside stack instead of sitting side by side — at 300px
-   a three-field `.row` degenerates into one field per line anyway, but with the
-   flex basis still fighting it. */
-.rooms-aside .row > * {
-  flex: 1 1 100%;
-  min-width: 0;
-}
-.rooms-note {
-  margin-top: 0;
-  margin-bottom: 16px;
-}
-
-/* ── Status board ─────────────────────────────────────────────────────────
-   One chip per housekeeping state: the count, and a filter for it. Auto-fit
-   rather than a fixed six-up, so the row reflows instead of overflowing. */
-.filter-board {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.filter-chip {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  grid-template-areas:
-    'dot num code'
-    'label label label';
-  align-items: center;
-  gap: 2px 8px;
-  padding: 10px 12px;
-  text-align: left;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  cursor: pointer;
-  min-height: 0;
-  transition:
-    border-color 0.12s ease,
-    background 0.12s ease;
-}
-.filter-chip:hover {
-  background: var(--row-hover);
-  border-color: var(--border-strong);
-}
-/* The pressed state has to survive greyscale and colour-blindness, so it is a
-   border weight and a tinted ground, not only a colour change. */
-.filter-chip.is-on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-.filter-chip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.filter-chip-dot {
-  grid-area: dot;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.filter-chip-num {
-  grid-area: num;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--text);
-}
-.filter-chip-code {
-  grid-area: code;
-  justify-self: end;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--muted-2);
-  /* Amenities puts a phrase here ("4 bookable") where Rooms puts a three-letter
-     code, so it must be allowed to shrink and clip rather than shove the count
-     out of the cell. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.filter-chip-label {
-  grid-area: label;
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.3;
-}
-
-/* Two fields that stay on one line even inside the narrow aside, where the
-   plain `.row` rule stacks everything. A grid rather than flex overrides, and
-   written as `.row.row-split` (0,2,0) so it beats `.row` on specificity instead
-   of relying on which rule comes later in the file.
-   Not 50/50: a promo code is a word, a percentage is at most three digits. */
-.row.row-split {
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.row.row-split > * {
-  min-width: 0;
-}
-
-/* ── Rooms: one scrolling region ──────────────────────────────────────────
-   The page fills the viewport and does not scroll; the room list scrolls
-   inside its panel. The status board, the filter row and the whole right rail
-   therefore stay put, which is the point — the board is a filter for the list
-   below it, and scrolling it off the screen to reach row 40 meant losing the
-   control you were filtering with.
-
-   Desk widths only. Below the two-column breakpoint the rail sits under the
-   list, and pinning the page height there would trap the rail in a second
-   scroll region inside a screen that is already short. */
-@media (min-width: 1100px) {
-  .rooms-fixed {
-    display: flex;
-    flex-direction: column;
-    /* Viewport minus the sticky top bar and .cb-main's 24px top and bottom
-       padding. Anything taller and the window itself starts scrolling again,
-       which is the behaviour being removed. */
-    height: calc(100vh - var(--topbar-h) - 48px);
-  }
-  .rooms-fixed .rooms-grid {
-    flex: 1;
-    /* Grid and flex children default to min-height:auto, so without this the
-       track grows to its content and pushes the page tall again instead of
-       handing the overflow to the scroller inside. */
-    min-height: 0;
-  }
-  .rooms-fixed .rooms-main {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    height: 100%;
-  }
-  /* The Rooms panel is the only one in the main column, so it takes the height
-     and lets its table area do the scrolling. */
-  .rooms-fixed .rooms-main > .panel {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    flex: 1;
-    margin-bottom: 0;
-  }
-  .rooms-fixed .rooms-table-scroll {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-  /* The rail does not scroll. Everything below tightens it until promo codes
-     and four room types fit the frame on their own — a rail whose whole job is
-     to stay put should not have a scrollbar of its own. */
-  .rooms-fixed .rooms-aside {
-    position: static;
-    max-height: 100%;
-    overflow: visible;
-  }
-
-  /* ── Compact rail ──────────────────────────────────────────────────────
-     Scoped to .rooms-aside, so the same components keep their normal size
-     wherever else they appear. The saving is ~180px across the two panels,
-     which is what takes them from overflowing a 768px-tall window to fitting
-     one. */
-  .rooms-fixed .rooms-aside .panel {
-    padding: 12px 14px;
-    margin-bottom: 12px;
-  }
-  .rooms-fixed .rooms-aside .panel:last-child {
-    margin-bottom: 0;
-  }
-  .rooms-fixed .rooms-aside .panel h3 {
-    margin-bottom: 10px;
-    font-size: 13.5px;
-  }
-  .rooms-fixed .rooms-aside .panel-head {
-    margin-bottom: 10px;
-  }
-  /* Form furniture: the stacked uppercase label plus a full-height control is
-     two-thirds label. Small controls, tighter rows. */
-  .rooms-fixed .rooms-aside label {
-    margin-bottom: 2px;
-  }
-  .rooms-fixed .rooms-aside .row {
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  .rooms-fixed .rooms-aside .row.row-split {
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  .rooms-fixed .rooms-aside input,
-  .rooms-fixed .rooms-aside select {
-    min-height: var(--control-h-sm);
-    height: var(--control-h-sm);
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-  .rooms-fixed .rooms-aside .row-action {
-    margin-bottom: 0;
-  }
-  .rooms-fixed .rooms-aside .rt-list {
-    gap: 6px;
-  }
-  .rooms-fixed .rooms-aside .rt-item {
-    padding: 7px 9px;
-  }
-  .rooms-fixed .rooms-aside .rt-name,
-  .rooms-fixed .rooms-aside .rt-rate {
-    font-size: 12.5px;
-  }
-  .rooms-fixed .rooms-aside .rt-meta {
-    margin-top: 1px;
-    font-size: 10.5px;
-  }
-  .rooms-fixed .rooms-aside .rt-edit {
-    gap: 5px;
-    margin-top: 6px;
-  }
-}
-/* The one case the tightening cannot solve: a genuinely short window. Rather
-   than clip the last room type out of reach, the rail gets a scrollbar back
-   below 820px of viewport height. */
-@media (min-width: 1100px) and (max-height: 820px) {
-  .rooms-fixed .rooms-aside {
-    overflow-y: auto;
-  }
-}
-/* The header row stays visible while the body scrolls under it — a status
-   column you cannot name is a column of unlabelled dropdowns. */
-.rooms-table-scroll thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--panel);
-}
-
-/* ── Amenities & Facilities layout ────────────────────────────────────────
-   Same split as Rooms, for the same reason: the wide column is what you read
-   and work down (a day's bookings, then the catalogue), the rail holds the
-   short forms — two point-of-sale tickets and the admin create form. Those
-   three were full-width panels stacked above the catalogue, which pushed the
-   thing most people open this page for about three screens down. */
-/* ── Book a facility ──────────────────────────────────────────────────────
-   It sits in a .panel like everything else on the page. It was briefly
-   unboxed — the reasoning being that a box inside a column inside a row is
-   nested borders — but the column has no border of its own, so the form was
-   the only thing on the page floating on the bare page background instead of
-   on a surface. */
-.bf-panel {
-  /* Fills its column so the pair either side of the row stay level; see
-     .am-row-stretch. */
-  height: 100%;
-}
-.bf-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.bf-head h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-}
-.bf-sub {
-  font-size: 11.5px;
-}
-.bf-form {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.bf-form > label {
-  margin-top: 8px;
-}
-.bf-form .seg {
-  align-self: flex-start;
-  margin-bottom: 4px;
-}
-.bf-form .row {
-  margin: 0;
-}
-.bf-form .btn-cta {
-  margin-top: 12px;
-  width: 100%;
-}
-.bf-total {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-top: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--on-accent-soft);
-  font-size: 12.5px;
-}
-.bf-total strong {
-  font-size: 16px;
-}
-
-/* The collapsed catalogue. A full-width button rather than a small link: it is
-   standing in for a panel, so it occupies the panel's slot. */
-.am-catalog-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.am-catalog-toggle:hover {
-  border-style: solid;
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--on-accent-soft);
-}
-.am-catalog-toggle .muted {
-  margin-left: auto;
-  font-weight: 500;
-  font-size: 11.5px;
-}
-.am-catalog-close {
-  order: -1;
-}
-
-/* Two independent rows rather than one two-column grid. Each row pairs a wide
-   panel with its own narrow companion — bookings with the month that navigates
-   them, the catalogue with the till that sells from it — and a row sizes to its
-   own contents instead of every panel inheriting one long column's height. */
-.am-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  /* The row owns the space beneath itself. Panels normally carry their own
-     16px bottom margin, but .am-row-stretch zeroes it so the two columns can
-     end level — which left whatever follows the row sitting flush against it. */
-  margin-bottom: 16px;
-}
-@media (min-width: 1180px) {
-  .am-row {
-    /* Wider breakpoint than Rooms: the catalogue carries more columns, so it
-       needs more room before a second column is an improvement rather than a
-       squeeze. */
-    grid-template-columns: minmax(0, 2fr) minmax(300px, 0.85fr);
-  }
-}
-.am-col-main,
-.am-col-side {
-  min-width: 0;
-}
-/* Equal-height pair. `align-items: start` above sizes each column to its own
-   content, which left the bookings table stopping halfway up the booking form
-   and a block of dead space beside it. Stretching both and letting the panel
-   fill its column makes the table grow to meet the form. */
-@media (min-width: 1180px) {
-  .am-row-stretch {
-    align-items: stretch;
-  }
-  .am-row-stretch > * {
-    display: flex;
-    flex-direction: column;
-  }
-  .am-row-stretch .panel {
-    flex: 1;
-    margin-bottom: 0;
-    /* The table area, not the panel, absorbs the extra height — otherwise a
-       short day's list would sit against the top with the border miles below. */
-    display: flex;
-    flex-direction: column;
-  }
-  /* The table keeps its natural height and the slack falls BELOW it. Growing
-     the table instead looks like it should work — the panel fills its column
-     either way — but a stretched <table> distributes the extra height across
-     its rows, so a day with one booking drew that row three hundred pixels
-     tall with its text floating in the middle of the panel. A list reads from
-     the top; only the space under it is free. */
-  .am-row-stretch .panel > table {
-    flex: 0 0 auto;
-  }
-  /* The empty state is the exception, and deliberately so: it is one centred
-     illustration, not a list, and pinning it to the top of a tall panel leaves
-     a bigger hole than centring it in one. */
-  .am-row-stretch .panel > .empty-state {
-    flex: 1;
-  }
-}
-/* Field rows in the narrow column stack rather than sitting side by side — at
-   300px a three-field row degenerates into one per line anyway, with the flex
-   basis still fighting it. */
-.am-col-side .row > * {
-  flex: 1 1 100%;
-  min-width: 0;
-}
-
-/* ── Training & Competency layout ─────────────────────────────────────────
-   Records left, summary right. Same split as the Rooms page: the wide column
-   is what you read row by row, the rail is what you glance at. */
-.tr-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-@media (min-width: 1100px) {
-  .tr-grid {
-    /* minmax(0,…) on the main track or the wide tables refuse to shrink and
-       push the rail off the edge — grid items default to min-width:auto. */
-    grid-template-columns: minmax(0, 2.2fr) minmax(260px, 0.9fr);
-  }
-  .tr-rail {
-    position: sticky;
-    top: calc(var(--topbar-h) + 16px);
-  }
-}
-.tr-main,
-.tr-rail {
-  min-width: 0;
-}
-
-/* Rank list. An ordered list, so the position is real to a screen reader and
-   not just a number drawn beside a name. */
-.rank-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.rank-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--surface-2);
-  font-size: 12.5px;
-}
-.rank-pos {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--neutral-soft);
-  color: var(--on-neutral-soft);
-  font-size: 11px;
-  font-weight: 700;
-}
-/* Top three carry weight, and the first carries the accent. Ranks below three
-   stay neutral — colouring all of them would make the podium meaningless. */
-.rank-pos.is-top1 {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-.rank-pos.is-top2,
-.rank-pos.is-top3 {
-  background: var(--accent-soft);
-  color: var(--on-accent-soft);
-}
-.rank-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rank-score {
-  flex: none;
-  font-weight: 700;
-  color: var(--text);
-}
-
-/* Floor-plan thumbnail on a layout picker card. */
-.layout-thumb {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 2px 0 10px;
-  padding: 8px;
-  background: var(--plan-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-/* Scenario card actions: Activate/Disable/Delete grouped left, Edit hard right
-   — the same shape as a layout card's foot, so the two grids read alike. */
-.se-card-foot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-/* One line for the whole add-layout form: name/type takes what is left, the two
-   dimensions are sized to the two characters they hold, and the submit sits
-   hard right. Wraps to stacked below 760px rather than crushing a 5m into a
-   three-pixel field. */
-.new-layout-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: 12px 0;
-}
-.new-layout-row > * {
-  margin: 0;
-}
-.nl-name {
-  flex: 1 1 240px;
-  min-width: 0;
-}
-.nl-dim {
-  flex: 0 0 104px;
-}
-.nl-go {
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-.new-layout-row label {
-  display: block;
-}
-.new-layout-row input,
-.new-layout-row select {
-  width: 100%;
-}
-@media (max-width: 760px) {
-  .nl-go {
-    margin-left: 0;
-    flex: 1 1 100%;
-  }
-  .nl-go button {
-    width: 100%;
-  }
-}
-
-/* The "add a room layout" form, revealed by the + on the layout picker. */
-.new-layout {
-  padding: 14px;
-  margin-bottom: 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-2);
-}
-
-/* ── Save slots as cube cards ─────────────────────────────────────────────
-   A grid of containers, each holding a top-down plan of that saved version.
-   The plan is SVG, not a 3D view: only one WebGL context may exist at a time,
-   so one <Canvas> per card is not an option (see sim/LayoutPlan.jsx). */
-.slot-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 12px;
-}
-.slot-cube {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-2);
-  overflow: hidden;
-  transition:
-    border-color 0.12s ease,
-    transform 0.12s ease;
-}
-.slot-cube:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-}
-.slot-cube.is-live {
-  border-color: var(--accent);
-}
-/* The "cube" face the plan sits on. A fixed aspect box so cards line up in a
-   grid regardless of whether a room is long or square — the plan itself scales
-   inside via preserveAspectRatio rather than stretching. */
-.slot-face {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
-  background: var(--plan-bg);
-  border-bottom: 1px solid var(--border);
-  min-height: 132px;
-}
-.plan-svg {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-}
-.slot-body {
-  padding: 9px 11px 11px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.slot-title {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 650;
-  color: var(--text);
-}
-.slot-sub {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.35;
-}
-.slot-actions {
-  margin-top: 7px;
-}
-.slot-actions button {
-  width: 100%;
-}
-@media (prefers-reduced-motion: reduce) {
-  .slot-cube {
-    transition: none;
-  }
-  .slot-cube:hover {
-    transform: none;
-  }
-}
-
-/* "Live" marker on the newest save slot — the version the sim is actually
-   serving. Sits inline after the version number, so it needs to sit down on the
-   baseline rather than stretch the heading row. */
-.badge.slot-live {
-  margin-left: 8px;
-  vertical-align: middle;
-  background: var(--accent-soft);
-  color: var(--on-accent-soft);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-/* The + beside the "Room types & rates" heading, opening the setup forms.
-   A round accent disc rather than a labelled button: it sits on a heading line
-   where a full-height control would outweigh the heading itself. */
-.rt-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
-  cursor: pointer;
-}
-.rt-add:hover {
-  background: var(--accent-hover);
-}
-.rt-add:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Setup panel head: the tab pill on the left, the close control on the right. */
-.setup-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-/* Segmented control. Same capsule as .page-switch, but these are BUTTONS
-   switching a panel in place, not links to another route — so it is its own
-   class rather than a NavLink component bent into a tab. */
-.seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--pill-radius);
-  background: var(--surface-2);
-  min-width: 0;
-}
-.seg button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control-h-sm);
-  min-height: 0;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--pill-radius);
-  background: transparent;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--muted);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.seg button:hover {
-  color: var(--text);
-  background: transparent;
-}
-.seg button.is-on {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-.seg button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-/* ── Room types, as a list rather than a table ────────────────────────────
-   Six columns of table do not fit a 300px aside. The same fields read better
-   stacked: name and rate on the headline row, the rest as one quiet line. */
-.rt-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.rt-item {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-.rt-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-.rt-name {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text);
-}
-.rt-rate {
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--text);
-  white-space: nowrap;
-}
-.rt-meta {
-  margin-top: 3px;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.rt-edit {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-/* The rate box keeps at least enough width to read a five-figure price; below
-   that it takes its own line and the buttons wrap under it, rather than all
-   four controls shrinking together until none of them is usable. */
-.rt-edit input {
-  flex: 1 1 110px;
-  min-width: 0;
-}
-.rt-edit button {
-  flex: 0 0 auto;
 }
 
 /* ==========================================================================
@@ -6592,14 +5379,6 @@ html[data-theme='dark'] .hk-tooltip {
 /* The full-width strip: one bar across the top of the workspace, with its
    groups pushed apart rather than centred by hand. */
 .tool-bar--strip {
-  /* GRID, not flex-with-auto-margins. With three groups and `margin: 0 auto` on
-     the middle one plus `margin-left: auto` on the end one, the leftover space
-     is divided between THREE auto margins — so the "centre" group settled at
-     about a third across and the gaps either side of it were visibly unequal.
-     Three columns puts the middle group at the real centre regardless of how
-     wide its neighbours are. */
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
   gap: 2px;
   flex-wrap: nowrap;
   height: 44px;
@@ -6625,10 +5404,10 @@ html[data-theme='dark'] .hk-tooltip {
   flex: none;
 }
 .tool-group--mid {
-  justify-self: center;
+  margin: 0 auto;
 }
 .tool-group--end {
-  justify-self: end;
+  margin-left: auto;
 }
 .tool-group--mid + .tool-group--end {
   margin-left: 0;
@@ -6653,20 +5432,6 @@ html[data-theme='dark'] .hk-tooltip {
   transition:
     background 0.12s ease,
     color 0.12s ease;
-}
-/* A tool button that carries a WORD as well as a glyph. The base tile above is
-   34×34 with no room for text, so a label inside one wrapped mid-word and
-   pushed the whole strip out of shape — which is what "Save as" was doing.
-   Declared AFTER .tool-btn deliberately: same specificity, so source order is
-   what lets it win on width and padding. */
-.tool-btn--text {
-  width: auto;
-  min-width: 34px;
-  padding: 0 10px;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  white-space: nowrap;
 }
 /* Sized by the button, not per icon, so one change rescales every tool in both
    editors. */
@@ -7223,143 +5988,6 @@ html[data-theme='dark'] .hk-tooltip {
   font-size: 11.5px;
   margin: 4px 0 0;
 }
-/* ── Saved scenarios list ─────────────────────────────────────────────────
-   Each entry is a small card, not a single row of buttons: four actions plus a
-   name and a state do not fit on one line in a 300px panel without every
-   control shrinking to an unlabelled icon. */
-.se-new {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  margin: 8px 0 10px;
-  min-height: var(--control-h-sm);
-  padding: 0 12px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--control-radius);
-  background: transparent;
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.se-new:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  border-style: solid;
-  color: var(--on-accent-soft);
-}
-.se-new:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-/* Wide variant: the same entries on a full-width panel rather than in a 300px
-   side rail. Grid, so name/meta and the action group sit side by side without
-   the JSX needing a second wrapper element it does not need in the narrow one. */
-@media (min-width: 720px) {
-  .se-list--wide .se-item {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      'head actions'
-      'sub actions';
-    align-items: center;
-    column-gap: 14px;
-    padding: 10px 12px;
-  }
-  .se-list--wide .se-item-head {
-    grid-area: head;
-    justify-content: flex-start;
-    gap: 10px;
-  }
-  .se-list--wide .se-item-sub {
-    grid-area: sub;
-  }
-  .se-list--wide .se-item-actions {
-    grid-area: actions;
-    margin-top: 0;
-    flex-wrap: nowrap;
-  }
-  /* On a wide row the buttons size to their labels; stretching them to fill
-     leftover width is what makes a toolbar look like a form. */
-  .se-list--wide .se-item-actions button {
-    flex: 0 0 auto;
-  }
-  .se-list--wide .se-new {
-    width: auto;
-    padding: 0 16px;
-  }
-}
-
-.se-item {
-  margin-top: 6px;
-  padding: 8px 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-/* The row currently loaded in the editor. An outline rather than a fill, so it
-   does not compete with the status pill inside it. */
-/* The row currently loaded in the editor carries no outline. It used to take a
-   full accent border plus an inset ring, which boxed the card inside a card and
-   competed with the status pill and the four buttons already inside it. The
-   "· editing" in the sub-line says the same thing without drawing a container. */
-.se-item-open .se-item-sub {
-  color: var(--text-success);
-  font-weight: 600;
-}
-.se-item-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-}
-.se-item-name {
-  font-size: 12.5px;
-  font-weight: 650;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.se-status {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 1px 7px;
-  border-radius: var(--pill-radius);
-}
-.se-status.is-active {
-  background: var(--green-soft);
-  color: var(--on-green-soft);
-}
-.se-status.is-disabled {
-  background: var(--neutral-soft);
-  color: var(--on-neutral-soft);
-}
-.se-item-sub {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.se-item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 7px;
-}
-.se-item-actions button {
-  flex: 1 1 auto;
-}
-/* The delete button does not stretch — a destructive action sized to fill
-   whatever space is left invites the misclick the confirm exists to catch. */
-.se-item-actions button.danger {
-  flex: 0 0 auto;
-}
-
 .se-row {
   display: flex;
   align-items: center;
@@ -7437,16 +6065,32 @@ html[data-theme='dark'] .hk-tooltip {
   color: var(--muted);
   margin-bottom: 6px;
 }
+/* The inline editor for a category the teacher is writing. Inset and tinted so
+   it reads as belonging to the fault dropdown above it, rather than as another
+   run of sidebar fields. */
+.se-cat {
+  margin: 8px 0 4px;
+  padding: 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--accent-soft);
+}
+.se-cat label {
+  margin-top: 8px;
+}
+.se-cat > label:first-child {
+  margin-top: 0;
+}
+.se-cat button {
+  margin-top: 8px;
+}
 /* An authoring mistake that will not fail the save but will quietly change what
    the scenario teaches. Amber, not red: nothing is broken yet. */
 .se-warn {
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.4;
-  /* The on-surface amber, not the fill amber — this is a sentence, and #f59e0b
-     as 12px text on a white panel is 2.15:1. Still amber, still "nothing is
-     broken yet", now legible. */
-  color: var(--text-warn);
+  color: var(--warn);
 }
 /* Live 3D preview of the asset about to be added. Picking from a list of names
    still means guessing which "messy bed" is which; seeing it does not. */
@@ -7667,66 +6311,35 @@ html[data-theme='dark'] .hk-tooltip {
 
 /* ── Scenario builder: the shared fault-category library ─────────────────── */
 .se-hint {
-  /* Was 8px, which put the explanatory paragraph nearer the list it describes
-     than to the heading it belongs under — the group read as three loose things
-     rather than heading + note + list. */
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   font-size: 11px;
   line-height: 1.5;
   color: var(--muted);
 }
-/* The first section in a panel has nothing above it to be separated from. */
-.se-side .se-section:first-child,
-.se-panel-body > .se-section:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-}
 .se-cat-list {
   list-style: none;
-  margin: 0 0 14px;
-  /* Room for the scrollbar, so a long library does not overlay its own labels. */
-  padding: 0 2px 0 0;
-  max-height: 240px;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 168px;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
-/* Each category is its own row rather than a line separated by a hairline. The
-   labels are sentences ("Room set-up does not match the booking") and they wrap
-   at this width, so 5px of vertical padding and a bottom border ran the second
-   line straight into the next category. */
 .se-cat {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 9px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
   font-size: 12px;
-  line-height: 1.35;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
 }
 .se-cat-label {
   flex: 1;
   min-width: 0;
-  /* Wraps on words, never mid-word — a broken "book-ing" reads as a typo. */
-  overflow-wrap: break-word;
 }
-/* The tag sits on the first line of a wrapped label and never shrinks into
-   "BUILT-" — it is the shortest thing in the row and was losing the fight. */
 .se-cat-builtin {
-  flex: none;
-  margin-top: 1px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted-2);
-}
-.se-cat-retire {
-  flex: none;
+  color: var(--muted);
 }
 .se-cat.is-custom .se-cat-label {
   font-weight: 600;
