@@ -5,7 +5,9 @@ const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
 const { makeServiceCaller } = require('../lib/serviceCall');
 const { qrPngBuffer } = require('../lib/qr');
 const { publicUrl } = require('../lib/publicUrl');
-const { makeInventoryClient } = require('../lib/inventoryClient');
+const { makeInventoryClient, INVENTORY_URL } = require('../lib/inventoryClient');
+const { regCardModel } = require('../lib/regCardModel');
+const { renderRegCard, CARD } = require('../lib/regCardRender');
 const { localDayBounds, parseLocalDay, utcDayStart, utcDayKey } = require('../lib/date');
 const { arrivalsWindow } = require('../lib/arrivalsWindow');
 
@@ -29,6 +31,27 @@ const reservationCall = makeServiceCaller({
   name: 'stay',
   roles: ['FRONT_DESK'],
   permissions: ['reservation.read'],
+});
+// The registration card is now filled in from system data rather than printed
+// blank, so it reads the guest profile, the property's own details and the rate
+// card. Three more narrow callers rather than one broad one: each token can do
+// exactly the one read it needs. Nothing here is allowed to fail the card —
+// every call is wrapped at the call site.
+const GUEST_URL = process.env.GUEST_URL || 'http://guest-service:3008';
+const guestCall = makeServiceCaller({
+  name: 'stay',
+  roles: ['FRONT_DESK'],
+  permissions: ['guest.read'],
+});
+const settingsCall = makeServiceCaller({
+  name: 'stay',
+  roles: ['FRONT_DESK'],
+  permissions: ['settings.read'],
+});
+const roomTypeCall = makeServiceCaller({
+  name: 'stay',
+  roles: ['FRONT_DESK'],
+  permissions: ['room.read'],
 });
 // Without an 'error' listener, ioredis throws on a connection blip and takes
 // the whole process down — which for this service means the capacity gate
@@ -660,114 +683,82 @@ router.get('/stays/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res
 });
 
 // GET /api/stays/:id/registration-card — renders registration card as PDF
+//
+// Laid out as the printed form the desk is trained on: bordered field rows, a
+// venue block beside the duration tick-boxes, the rate card, the policy note and
+// an arrival/departure grid. Every value is filled from system data — the point
+// of the card is that the guest checks and signs it, not that they transcribe
+// what the system already knows.
+//
+// Drawn with absolute x/y throughout. pdfkit's cursor does not survive
+// doc.image() or a doc.text() given an explicit width, and this file has been
+// bitten by both: a QR pushed the acknowledgement paragraph into a narrow strip
+// down the right margin. Tracking `y` by hand is the only layout here that stays
+// put as content grows.
 router.get('/stays/:id/registration-card', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
   try {
     const stay = await prisma.stay.findUnique({ where: { id: req.params.id } });
     if (!stay) return res.status(404).json({ error: 'Not found.' });
 
-    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    // Fetched together and each allowed to fail on its own. A card missing the
+    // rate table is still a card the desk can check a guest in with; no card at
+    // all is a stopped front desk.
+    const soft = async (label, fn) => {
+      try {
+        return await fn();
+      } catch (err) {
+        console.error(`[Stay] Reg card: could not load ${label}:`, err.message);
+        return null;
+      }
+    };
+    const [reservation, guest, hotel, roomTypes] = await Promise.all([
+      stay.reservationId
+        ? soft('reservation', () =>
+            reservationCall.call(
+              `${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`
+            )
+          )
+        : null,
+      stay.guestId
+        ? soft('guest', () =>
+            guestCall.call(`${GUEST_URL}/api/guests/${encodeURIComponent(stay.guestId)}`)
+          )
+        : null,
+      soft('hotel settings', () => settingsCall.call(`${FOLIO_URL}/api/settings/hotel`)),
+      soft('room types', () => roomTypeCall.call(`${INVENTORY_URL}/api/room-types`)),
+    ]);
+
+    const model = regCardModel({
+      stay,
+      reservation,
+      guest,
+      hotel,
+      roomTypes: Array.isArray(roomTypes) ? roomTypes : roomTypes?.roomTypes || [],
+    });
+
+    // The portal keys strictly on the confirmation number, which a Stay does not
+    // carry — only reservationId. If it could not be resolved, issue the card
+    // with no code rather than one that leads to "Not found".
+    let qrPng = null;
+    let qrCaption = '';
+    if (model.confirmationNumber) {
+      try {
+        const portalLink = publicUrl(`/portal/${encodeURIComponent(model.confirmationNumber)}`);
+        qrPng = await qrPngBuffer(portalLink);
+        qrCaption = publicUrl.isScannableByPhone
+          ? 'Scan for your digital copy'
+          : 'Digital copy (demo link — this machine only)';
+      } catch (qrErr) {
+        // Never fail the guest's document over the convenience feature on it.
+        console.error('[Stay] QR render failed, card issued without one:', qrErr.message);
+      }
+    }
+
+    const doc = new PDFDocument({ size: 'A4', margin: CARD.margin });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="regcard-${stay.id}.pdf"`);
     doc.pipe(res);
-
-    doc.fontSize(20).text('InnSight PMS', { align: 'left' });
-    doc.fontSize(12).fillColor('#555').text('Guest Registration Card', { align: 'left' });
-    doc.moveDown();
-    doc.fillColor('black').fontSize(10);
-
-    const row = (label, value) => {
-      doc.font('Helvetica-Bold').text(label, { continued: true, width: 150 });
-      doc.font('Helvetica').text(`  ${value ?? '—'}`);
-    };
-
-    row('Stay ID:', stay.id);
-    row('Reservation:', stay.reservationId);
-    row('Guest Name:', stay.guestName);
-    row('Guest ID:', stay.guestId);
-    row('Assigned Room:', stay.assignedRoomId);
-    row('Status:', stay.status);
-    row('Expected Check-In:', stay.expectedCheckIn?.toISOString().slice(0, 16).replace('T', ' '));
-    row('Expected Check-Out:', stay.expectedCheckOut?.toISOString().slice(0, 16).replace('T', ' '));
-    row('Actual Check-In:', stay.actualCheckInAt?.toISOString().slice(0, 16).replace('T', ' '));
-    row('Key Cards Issued:', stay.keyCardsIssued);
-    row('Deposit (cents):', stay.depositAmount);
-
-    // The guest's digital copy. Encodes the guest portal, which already exists at
-    // /portal/:confirmationNumber, so scanning gives them their booking without an
-    // account or an app.
-    //
-    // Drawn at a fixed position rather than in the text flow: doc.image() does not
-    // advance the cursor predictably, and the acknowledgement paragraph below has
-    // to keep its place on the page. Absolute x/y is the only way this stays put as
-    // the row list above grows or shrinks.
-    // The portal keys strictly on the confirmation number, which a Stay does not
-    // carry — only reservationId. Resolve it, and if that fails, print NO code:
-    // a QR that leads to "Not found" is worse than a card without one.
-    let confirmationNumber = null;
-    if (stay.reservationId) {
-      try {
-        const r = await reservationCall.call(
-          `${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`
-        );
-        confirmationNumber = r?.confirmationNumber || null;
-      } catch (err) {
-        console.error('[Stay] Could not resolve confirmation number for QR:', err.message);
-      }
-    }
-
-    // doc.text() with explicit x/width leaves BOTH the cursor and the wrap width
-    // where it put them, so everything after the QR caption inherited the code's
-    // 108pt column — the acknowledgement paragraph rendered as a narrow strip down
-    // the right margin. Remember where the detail rows ended and restore it.
-    const yAfterRows = doc.y;
-    try {
-      if (!confirmationNumber) throw new Error('no confirmation number to link to');
-      const portalLink = publicUrl(`/portal/${encodeURIComponent(confirmationNumber)}`);
-      doc.image(await qrPngBuffer(portalLink), 420, 96, { width: 108 });
-      doc.fontSize(7.5).fillColor('#666').text('Scan for your digital copy', 420, 208, {
-        width: 108,
-        align: 'center',
-      });
-      if (!publicUrl.isScannableByPhone) {
-        // Says so on the paper rather than letting a student blame their phone.
-        doc.fontSize(6.5).text('(demo link — reachable on this machine only)', 420, 220, {
-          width: 108,
-          align: 'center',
-        });
-      }
-      doc.fillColor('black').fontSize(10);
-    } catch (qrErr) {
-      // A registration card without a QR is still a valid registration card. Never
-      // fail the guest's document over the convenience feature on it.
-      console.error('[Stay] QR render failed, card issued without one:', qrErr.message);
-    }
-
-    // Back to the left margin, below the rows, at full width.
-    doc.fontSize(10).fillColor('black').text('', 48, Math.max(yAfterRows, doc.y), { width: 500 });
-    doc.moveDown();
-
-    doc
-      .fontSize(9)
-      .fillColor('#555')
-      .text(
-        'I, the undersigned, acknowledge that the information above is correct and agree to the house rules, ' +
-          'applicable rates, and policies of the hotel.',
-        { align: 'justify' }
-      );
-    doc.moveDown(3);
-    doc.fillColor('black').fontSize(10);
-    doc.text('Guest Signature: ______________________________', 48);
-    doc.moveDown();
-    doc.text('Date: ______________________________', 48);
-
-    doc.moveDown(2);
-    doc
-      .fontSize(8)
-      .fillColor('#888')
-      .text(`Printed ${new Date().toISOString().slice(0, 19).replace('T', ' ')} — InnSight PMS`, {
-        align: 'center',
-      });
-
+    renderRegCard(doc, model, { qrPng, qrCaption });
     doc.end();
   } catch (err) {
     console.error('[Stay] Reg card print error:', err.message);
