@@ -277,17 +277,6 @@ const PATHS = {
       <path d="M16 18h.01" />
     </>
   ),
-  // The reservations rail entry. Deliberately NOT a calendar: the top bar's
-  // calendar button sits a few pixels away and went to a different place, so two
-  // identical glyphs in one row of chrome made the rail entry read as a duplicate
-  // of it. A booking ledger is the thing being opened, and its silhouette — a
-  // spine with a ribbon — shares no outline with the calendar's ruled box.
-  'book-marked': (
-    <>
-      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
-      <polyline points="10 2 10 10 13 7 16 10 16 2" />
-    </>
-  ),
   bed: (
     <>
       <path d="M2 4v16" />

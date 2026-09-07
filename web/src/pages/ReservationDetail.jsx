@@ -530,11 +530,7 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
       <div className="folio-list">
         <div className="folio-list-item active">
           <span>{folio.folioNumber || 'Folio 1'}</span>
-          {/* Inherits the row's colour instead of forcing white. The row is
-              `background: var(--accent); color: var(--on-accent)`, and --on-accent
-              is dark ink under data-theme="dark" — so a hard-coded white pencil
-              sat on a light-green row and all but disappeared. */}
-          <button className="icon" style={{ color: 'inherit' }} aria-label="Edit folio">
+          <button className="icon" style={{ color: '#fff' }} aria-label="Edit folio">
             <Icon name="pencil" size={12} />
           </button>
         </div>
@@ -1454,9 +1450,7 @@ function QuickEditModal({ open, onClose, res, stay, onDone }) {
                     {inOriginal && !inSelected && (
                       <div style={{ fontSize: 9, color: 'var(--danger)' }}>−</div>
                     )}
-                    {!inOriginal && inSelected && (
-                      <div style={{ fontSize: 9, color: 'var(--text-success)' }}>+</div>
-                    )}
+                    {!inOriginal && inSelected && <div style={{ fontSize: 9, color: 'var(--green)' }}>+</div>}
                   </td>
                 );
               })}
