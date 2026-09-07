@@ -15,28 +15,20 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 
 const EDIT_ROLES = ['ADMIN', 'MANAGER'];
-// The four built-in layouts (Standard, Deluxe, Suite, Presidential) live in
-// web/src/sim/roomLayouts.js and need no registration here — a key is valid by
-// shape now, not by membership. See badTier.
+
+// What counts as a layout key. The four built-ins (Standard, Deluxe, Suite,
+// Presidential) live in web/src/sim/roomLayouts.js and need no registration
+// here — a key is valid by SHAPE, not by membership, so a property can author a
+// layout for a room type it created itself. The rule sits in its own tested
+// module because it regressed once: a wholesale file revert put the old
+// four-tier whitelist back, and nothing failed until a user tried to save.
+const { badTier } = require('../lib/tierKey');
+
 // A layout is ~60 fixtures of short numeric records. Well past anything real,
 // but bounded so a malformed client cannot post megabytes into the column.
 const MAX_FIXTURES = 400;
 const KEEP_VERSIONS = 50;
 
-// A layout key is a room-type name. It used to be a whitelist of the four
-// built-ins, which meant a property could never author a layout for a room type
-// it created itself — and room types ARE user-created (Rooms → Create room
-// type), so the whitelist quietly capped the feature at whatever shipped.
-//
-// Validated by SHAPE instead of membership. The key lands in a URL segment, a
-// filename in exports and a display label, so it is bounded in length and kept
-// to characters that need no escaping in any of those. Writes are still
-// ADMIN/MANAGER-only, so this widens what an authorised admin can name, not who
-// can write.
-const TIER_KEY = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/;
-function badTier(tier) {
-  return typeof tier !== 'string' || !TIER_KEY.test(tier);
-}
 
 // Reject anything that is not plan-shaped BEFORE it reaches the database — a
 // layout that fails to parse client-side would otherwise brick every room.
