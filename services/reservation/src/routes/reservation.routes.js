@@ -372,6 +372,8 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
       expectedArrivalTime,
       paymentType,
       source,
+      origin,
+      ratePlan,
     } = req.body;
     const before = await prisma.reservation.findUnique({ where: { id: req.params.id } });
     if (!before) return res.status(404).json({ error: 'Not found.' });
@@ -402,6 +404,11 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
     if (expectedArrivalTime !== undefined) data.expectedArrivalTime = expectedArrivalTime;
     if (paymentType !== undefined) data.paymentType = paymentType;
     if (source !== undefined) data.source = source;
+    // Both are columns the reservation header displays and Quick Edit edits.
+    // `ratePlan` is the free-text label shown as "Rate Plan(s)"; `ratePlanId` is
+    // the FK above and is set independently.
+    if (origin !== undefined) data.origin = origin;
+    if (ratePlan !== undefined) data.ratePlan = ratePlan;
 
     // ── Re-hold on a date change ─────────────────────────────────────────────
     // Moving a booking's dates invalidates the inventory hold that was taken for

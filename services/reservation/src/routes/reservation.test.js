@@ -401,6 +401,31 @@ test('PATCH /api/reservations/:id updates dates and recomputes nights', async ()
   assert.strictEqual(patched.body.nights, 4);
 });
 
+// The reservation header shows Origin and Rate Plan(s), and Quick Edit offers
+// both for editing. They are columns on the model but were missing from this
+// route's whitelist, so the modal would have saved nothing and reported success.
+test('PATCH /api/reservations/:id persists origin', async () => {
+  const app = makeApp();
+  inventoryStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const patched = await call(app, 'PATCH', `/api/reservations/${created.body.id}`, {
+    origin: 'Booking.com',
+  });
+  assert.strictEqual(patched.status, 200);
+  assert.strictEqual(patched.body.origin, 'Booking.com');
+});
+
+test('PATCH /api/reservations/:id persists ratePlan', async () => {
+  const app = makeApp();
+  inventoryStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const patched = await call(app, 'PATCH', `/api/reservations/${created.body.id}`, {
+    ratePlan: 'Corporate Rate',
+  });
+  assert.strictEqual(patched.status, 200);
+  assert.strictEqual(patched.body.ratePlan, 'Corporate Rate');
+});
+
 // ── Two-phase capacity claim ────────────────────────────────────────────────
 // This route previously inserted a reservation with NO availability check at
 // all. These tests pin the new contract: capacity is claimed BEFORE the insert,
