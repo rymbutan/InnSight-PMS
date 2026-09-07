@@ -36,7 +36,18 @@ function makeFolioClient({ name, baseUrl = FOLIO_URL }) {
     return call(`${baseUrl}/api/settings/tax-rates`);
   }
 
-  return { getTaxRates };
+  // The property's check-in/check-out clock times, stamped onto every booking's
+  // stored window. Same fallback discipline as the rates: callers treat a
+  // failure as "use the shipped defaults" rather than refusing the booking.
+  async function getHotelTimes() {
+    const hotel = await call(`${baseUrl}/api/settings/hotel`);
+    return {
+      checkInTime: hotel?.checkInTime,
+      checkOutTime: hotel?.checkOutTime,
+    };
+  }
+
+  return { getTaxRates, getHotelTimes };
 }
 
 module.exports = { makeFolioClient };

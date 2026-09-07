@@ -123,6 +123,8 @@ router.get('/guests/:id', requireRole(...ROLE_GROUPS.DESK), async (req, res) => 
 });
 
 // PATCH /api/guests/:id
+const { nextDisplayName } = require('../lib/displayName');
+
 const GUEST_EDITABLE = [
   'firstName',
   'middleName',
@@ -144,8 +146,24 @@ router.patch('/guests/:id', requireRole(...STAFF), async (req, res) => {
         data[k] = k === 'dateOfBirth' && req.body[k] ? new Date(req.body[k]) : req.body[k];
     }
     if (!Object.keys(data).length) return res.status(400).json({ error: 'No editable fields provided.' });
+
+    // A rename has to carry displayName with it, or every document that prints
+    // `guest.displayName` keeps the old name. See lib/displayName.js for why an
+    // author-written display name is left alone.
+    const before = await prisma.guest.findUnique({ where: { id: req.params.id } });
+    if (!before) return res.status(404).json({ error: 'Not found.' });
+    const derived = nextDisplayName(before, data);
+    if (derived) data.displayName = derived;
+
     const guest = await prisma.guest.update({ where: { id: req.params.id }, data });
-    redis.publish('guest:profile_updated', JSON.stringify({ guestId: guest.id }));
+    // The new name travels WITH the event. Reservation and Stay both keep a
+    // denormalised `guestName` (it is what the calendar, the records list and
+    // arrivals render), and their subscribers would otherwise have to call back
+    // here just to learn what changed.
+    redis.publish(
+      'guest:profile_updated',
+      JSON.stringify({ guestId: guest.id, displayName: guest.displayName || null })
+    );
     res.json(guest);
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Guest not found.' });

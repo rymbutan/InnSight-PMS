@@ -8,10 +8,43 @@ const { makeInventoryClient, NoInventoryError } = require('../lib/inventoryClien
 const { nightsBetween: nightsBetweenDates, utcDayKey } = require('../lib/date');
 const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
 const { pickAssignableRoom, normaliseRoomId, MAX_ASSIGN_ATTEMPTS } = require('../lib/roomAssignment');
+const { makeFolioClient } = require('../lib/folioClient');
+const { stampWindow, DEFAULT_SERVICE_TIMES } = require('../lib/stayWindow');
 
 // Inventory owns capacity. Every write path in this file that creates or moves a
 // booking must claim capacity through this client before committing.
 const inventory = makeInventoryClient({ name: 'reservation', secret: JWT_SECRET });
+
+// The property's check-in/check-out clock times, which get stamped onto every
+// booking's stored window so the no-double-booking range means what it says.
+// See lib/stayWindow.js.
+const folio = makeFolioClient({ name: 'reservation' });
+
+// Cached for a minute. These change about once in the life of a property, and a
+// booking must not wait on a settings round trip — nor make one per attempt in
+// the room-assignment retry loop. A failure serves the shipped defaults rather
+// than refusing the booking: the wrong clock time on a held room is recoverable,
+// a front desk that cannot take a booking is not.
+let serviceTimesCache = { at: 0, value: DEFAULT_SERVICE_TIMES };
+const SERVICE_TIMES_TTL_MS = 60_000;
+async function serviceTimes() {
+  if (Date.now() - serviceTimesCache.at < SERVICE_TIMES_TTL_MS) return serviceTimesCache.value;
+  try {
+    const t = await folio.getHotelTimes();
+    const value = {
+      checkInTime: t?.checkInTime || DEFAULT_SERVICE_TIMES.checkInTime,
+      checkOutTime: t?.checkOutTime || DEFAULT_SERVICE_TIMES.checkOutTime,
+    };
+    serviceTimesCache = { at: Date.now(), value };
+    return value;
+  } catch (err) {
+    console.warn('[Reservation] Could not read service times, using defaults:', err.message);
+    // Cache the fallback too, so a folio outage does not add a failed round trip
+    // to every booking taken during it.
+    serviceTimesCache = { at: Date.now(), value: DEFAULT_SERVICE_TIMES };
+    return DEFAULT_SERVICE_TIMES;
+  }
+}
 
 const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK'];
 
@@ -131,15 +164,28 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
       return res.status(400).json({ error: 'guestName, roomTypeCode, checkIn, checkOut required.' });
     }
 
-    const ci = new Date(checkIn);
-    const co = new Date(checkOut);
-    if (Number.isNaN(ci.getTime()) || Number.isNaN(co.getTime())) {
+    const rawCi = new Date(checkIn);
+    const rawCo = new Date(checkOut);
+    if (Number.isNaN(rawCi.getTime()) || Number.isNaN(rawCo.getTime())) {
       return res.status(400).json({ error: 'checkIn and checkOut must be valid dates.' });
     }
-    if (co <= ci) {
+    if (rawCo <= rawCi) {
       return res.status(400).json({ error: 'checkOut must be after checkIn.' });
     }
+    // Nights come from the calendar dates, BEFORE the clock times go on, so what
+    // the guest is billed for cannot move when the property changes its
+    // check-out time.
     const nights = nightsBetweenDates(checkIn, checkOut);
+
+    // Stamp the property's service times. Everything downstream — the capacity
+    // hold, the room-assignment overlap query and the stored row — then works
+    // from the same window, which is what makes "the previous guest has not left
+    // yet" a detectable conflict.
+    const { checkIn: ci, checkOut: co } = stampWindow({
+      checkIn: rawCi,
+      checkOut: rawCo,
+      ...(await serviceTimes()),
+    });
 
     // '' means "no room chosen", not "the room whose id is the empty string".
     // See normaliseRoomId — storing '' defeated the double-booking constraint's
@@ -389,8 +435,14 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
     }
 
     const data = {};
-    if (checkIn) data.checkIn = new Date(checkIn);
-    if (checkOut) data.checkOut = new Date(checkOut);
+    // Patched dates get the same service-time stamp as a new booking, so an
+    // edited window is comparable with every other one. nights is still counted
+    // from the calendar dates.
+    if (checkIn || checkOut) {
+      const times = await serviceTimes();
+      if (checkIn) data.checkIn = stampWindow({ checkIn: new Date(checkIn), ...times }).checkIn;
+      if (checkOut) data.checkOut = stampWindow({ checkOut: new Date(checkOut), ...times }).checkOut;
+    }
     if (checkIn && checkOut) data.nights = nightsBetweenDates(checkIn, checkOut);
     if (adults !== undefined) data.adults = adults;
     if (children !== undefined) data.children = children;

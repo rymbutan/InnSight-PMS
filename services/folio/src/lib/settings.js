@@ -33,7 +33,23 @@ const HOTEL_KEYS = {
   fax: 'hotel_fax',
   email: 'hotel_email',
   url: 'hotel_url',
+  // The property's service times. Not cosmetic: the reservation service stamps
+  // these onto checkIn/checkOut, and the no-double-booking constraint compares
+  // tsrange(checkIn, checkOut), so these two values are what makes a same-day
+  // turnover a clean handover instead of a conflict.
+  checkInTime: 'hotel_checkin_time',
+  checkOutTime: 'hotel_checkout_time',
 };
+
+// Fields that are a 24-hour HH:MM clock time rather than free text.
+const HOTEL_TIME_FIELDS = ['checkInTime', 'checkOutTime'];
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function minutesOfDay(hhmm) {
+  const m = HHMM.exec(String(hhmm ?? ''));
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
 
 // Deliberately generic. The reference invoice belongs to a real hotel, and
 // shipping its name, phone and e-mail as defaults would make every folio this
@@ -45,6 +61,10 @@ const HOTEL_DEFAULTS = {
   fax: '',
   email: '',
   url: '',
+  // The near-universal hotel shape: rooms are vacated in the morning and
+  // released again in the afternoon, leaving housekeeping the gap between.
+  checkInTime: '14:00',
+  checkOutTime: '12:00',
 };
 
 function parseTaxRates(rows = []) {
@@ -94,8 +114,26 @@ function validateHotel(body = {}) {
   for (const field of Object.keys(HOTEL_KEYS)) {
     if (!(field in body)) continue;
     const v = String(body[field] ?? '');
+    if (HOTEL_TIME_FIELDS.includes(field)) {
+      if (minutesOfDay(v) === null) {
+        return { ok: false, error: `${field} must be a 24-hour time like 14:00.` };
+      }
+      hotel[field] = v;
+      continue;
+    }
     if (v.length > 200) return { ok: false, error: `${field} must be 200 characters or fewer.` };
     hotel[field] = v;
+  }
+
+  // A stay runs from check-in on one day to check-out on a later one, so on the
+  // clock the check-out must come FIRST. Equal or later would make a one-night
+  // booking zero-length or negative, and the exclusion constraint would then
+  // read every back-to-back pair in a room as an overlap.
+  if (minutesOfDay(hotel.checkOutTime) >= minutesOfDay(hotel.checkInTime)) {
+    return {
+      ok: false,
+      error: 'checkOutTime must be earlier in the day than checkInTime.',
+    };
   }
   return { ok: true, hotel };
 }
@@ -104,6 +142,8 @@ module.exports = {
   TAX_RATE_KEYS,
   HOTEL_KEYS,
   HOTEL_DEFAULTS,
+  HOTEL_TIME_FIELDS,
+  minutesOfDay,
   parseTaxRates,
   validateTaxRates,
   parseHotel,
