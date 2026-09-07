@@ -11,6 +11,7 @@ function startSubscriber() {
     'reservation:cancelled',
     'payment:authorized',
     'folio:created',
+    'guest:profile_updated',
     (err) => {
       if (err) {
         console.error('[Stay] Redis subscribe error:', err);
@@ -23,6 +24,23 @@ function startSubscriber() {
   subscriber.on('message', async (channel, message) => {
     try {
       const data = JSON.parse(message);
+
+      // `guestName` on a Stay is a denormalised copy, and it is what the
+      // arrivals and housekeeping screens render. A guest renamed on their
+      // profile would otherwise stay misspelled on those boards for the whole
+      // stay. Only live stays are touched — a DEPARTED or NO_SHOW row records
+      // what the guest was called at the time.
+      if (channel === 'guest:profile_updated' && data.guestId && data.displayName) {
+        const { count } = await prisma.stay.updateMany({
+          where: {
+            guestId: data.guestId,
+            guestName: { not: data.displayName },
+            status: { notIn: ['DEPARTED', 'NO_SHOW'] },
+          },
+          data: { guestName: data.displayName },
+        });
+        if (count) console.log(`[Stay] Renamed guest ${data.guestId} on ${count} stay(s)`);
+      }
 
       if (channel === 'reservation:confirmed') {
         console.log(`[Stay] Pre-populating arrival for reservation ${data.reservationId}`);
