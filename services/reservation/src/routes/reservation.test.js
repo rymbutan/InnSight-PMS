@@ -769,3 +769,63 @@ test('PATCH clearing the room stores null, not an empty string', async () => {
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.body.assignedRoomId, null);
 });
+
+// ── Service times on the stored window ──────────────────────────────────────
+// Reservation.checkIn/checkOut have always been timestamps compared as a range
+// by Reservation_no_double_booking, but every row stored midnight, so the times
+// carried no information. They now carry the property's service times. These
+// tests pin the two properties that matter: the clock goes on, and the billed
+// night count does NOT move because of it.
+//
+// No folio service is running under test, so serviceTimes() falls back to the
+// shipped 14:00/12:00 defaults — which is itself the behaviour to guarantee.
+test('a new booking stores the property check-in and check-out times', async () => {
+  const app = makeApp();
+  inventoryStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  assert.strictEqual(created.status, 201);
+  assert.strictEqual(new Date(created.body.checkIn).toISOString(), '2026-05-01T14:00:00.000Z');
+  assert.strictEqual(new Date(created.body.checkOut).toISOString(), '2026-05-03T12:00:00.000Z');
+});
+
+test('stamping the times does not change the billed nights', async () => {
+  const app = makeApp();
+  inventoryStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  // 1 May to 3 May is two nights whatever the clock says.
+  assert.strictEqual(created.body.nights, 2);
+});
+
+test('a patched checkout is stamped too, so windows stay comparable', async () => {
+  const app = makeApp();
+  inventoryStub.reset();
+  const created = await call(app, 'POST', '/api/reservations', sample);
+  const patched = await call(app, 'PATCH', `/api/reservations/${created.body.id}`, {
+    checkOut: '2026-05-05',
+  });
+  assert.strictEqual(patched.status, 200);
+  assert.strictEqual(new Date(patched.body.checkOut).toISOString(), '2026-05-05T12:00:00.000Z');
+  assert.strictEqual(patched.body.nights, 4);
+});
+
+// The reason the whole change is safe: a room vacated at noon and re-let at 2pm
+// on the same date is a clean handover, not a double booking.
+test('back-to-back bookings in the same room do not collide', async () => {
+  const app = makeApp();
+  inventoryStub.reset();
+  const first = await call(app, 'POST', '/api/reservations', {
+    ...sample,
+    assignedRoomId: 'room-1',
+    checkIn: '2026-06-01',
+    checkOut: '2026-06-02',
+  });
+  assert.strictEqual(first.status, 201);
+  const second = await call(app, 'POST', '/api/reservations', {
+    ...sample,
+    assignedRoomId: 'room-1',
+    checkIn: '2026-06-02',
+    checkOut: '2026-06-03',
+  });
+  assert.strictEqual(second.status, 201, `same-day turnover must be allowed: ${second.body?.error || ''}`);
+  assert.ok(new Date(first.body.checkOut) <= new Date(second.body.checkIn));
+});

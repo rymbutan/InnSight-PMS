@@ -6,6 +6,7 @@ import StatusPill from '../components/StatusPill';
 import Icon from '../components/Icon';
 import { labelize } from '../lib/labels';
 import { useToast, errMsg } from '../components/Toast';
+import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 
 export default function Guests() {
   const [q, setQ] = useState('');
@@ -216,6 +217,12 @@ export default function Guests() {
     search('', 'browse');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // This page had no live refresh at all, so a profile edited anywhere else —
+  // Quick Edit on a reservation, most often — left this list showing the old
+  // name until it was reloaded by hand. Re-runs the current search rather than
+  // resetting to browse, so a filtered view stays filtered.
+  useLiveRefresh(() => search(q, 'browse'), { channels: channels('guests') });
 
   return (
     <div>

@@ -56,7 +56,16 @@ export default function Settings() {
   const [busy, setBusy] = useState('');
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
   const [taxRates, setTaxRates] = useState({ vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 });
-  const [hotel, setHotel] = useState({ name: '', address: '', phone: '', fax: '', email: '', url: '' });
+  const [hotel, setHotel] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    fax: '',
+    email: '',
+    url: '',
+    checkInTime: '14:00',
+    checkOutTime: '12:00',
+  });
 
   const canTheme = hasRole('ADMIN', 'MANAGER');
   // Both Billing endpoints (PUT /api/settings/tax-rates, PUT /api/settings/hotel)
@@ -598,6 +607,35 @@ export default function Settings() {
                     />
                   </Field>
                 ))}
+              </div>
+
+              {/* Not cosmetic. These two times are stamped onto every booking's
+                  stored window, and the no-double-booking constraint compares
+                  those windows — so they are what makes a room vacated at noon
+                  and re-let at 2pm a clean handover rather than a conflict.
+                  Check-out must be earlier in the day than check-in; the server
+                  refuses any other pair. */}
+              <div className="set-row-3" style={{ marginTop: 12 }}>
+                <Field label="Check-in time">
+                  <input
+                    type="time"
+                    value={hotel.checkInTime || '14:00'}
+                    onChange={(e) => setHotel({ ...hotel, checkInTime: e.target.value })}
+                  />
+                </Field>
+                <Field label="Check-out time">
+                  <input
+                    type="time"
+                    value={hotel.checkOutTime || '12:00'}
+                    onChange={(e) => setHotel({ ...hotel, checkOutTime: e.target.value })}
+                  />
+                </Field>
+                <Field label="">
+                  <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
+                    Applies to new and edited bookings. Existing bookings keep the
+                    window they were taken with.
+                  </p>
+                </Field>
               </div>
             </div>
             <div className="set-card-foot">
