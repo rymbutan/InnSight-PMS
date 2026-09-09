@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
-import { STATUS_ORDER as ROOM_STATUSES, statusMeta } from '../sim/statusMeta';
+import { STATUS_ORDER as ROOM_STATUSES } from '../sim/statusMeta';
 import { labelize } from '../lib/labels';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
@@ -37,15 +37,6 @@ export default function Rooms() {
     [rooms, typeFilter, statusFilter]
   );
   // How many rooms sit in each housekeeping state, in the syllabus' own order.
-  // Derived, never stored: the room list is already the source of truth and a
-  // second copy would be one live update away from disagreeing with the table
-  // underneath it.
-  const statusCounts = useMemo(() => {
-    const by = Object.fromEntries(ROOM_STATUSES.map((s) => [s, 0]));
-    for (const r of rooms) if (r.status in by) by[r.status] += 1;
-    return by;
-  }, [rooms]);
-
   // The aside's second slot shows EITHER the rates or the setup forms, never
   // both — `setupOpen` is which, `setupTab` is which form. Two booleans would
   // allow "open but no tab selected"; a string cannot express that.
