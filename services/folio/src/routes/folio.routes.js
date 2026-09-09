@@ -17,6 +17,8 @@ const { publicUrl } = require('../lib/publicUrl');
 const { validateTaxRates, validateHotel } = require('../lib/settings');
 const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
 const { computeTax } = require('../lib/policies');
+const { postRefund } = require('../lib/refund');
+const { PAYMENT_METHODS, isEWallet } = require('../lib/paymentMethods');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
@@ -362,24 +364,34 @@ router.post('/folios/laundry-sale', requireRole(...CASHIER), async (req, res) =>
 // /api/settings/tax-rates and /api/settings/hotel; the bare /api/settings prefix
 // still proxies to the reservation service.
 
-// GET /api/settings/tax-rates — every desk role, because the folio screen shows
-// the rates a charge will attract.
-router.get('/settings/tax-rates', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (_req, res) => {
+// GET /api/settings/tax-rates?country=XX — every desk role, because the folio
+// screen shows the rates a charge will attract.
+//
+// `country` is optional. Omitted, this returns the rates that actually apply
+// to a real charge today — the PROPERTY's own jurisdiction (`hotel_country`),
+// never a guest's nationality; see policies.js for why. Passed explicitly, it
+// returns that country's rates instead, so Settings can browse or edit a
+// jurisdiction other than the one currently active without touching it. The
+// response always carries which country it answered for, in `country`.
+router.get('/settings/tax-rates', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
   try {
-    res.json(await getTaxRates());
+    res.json(await getTaxRates(req.query.country));
   } catch (err) {
     console.error('[Folio] Get tax rates error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
-// PUT /api/settings/tax-rates — management only. These change what guests are
-// billed.
+// PUT /api/settings/tax-rates?country=XX — management only. These change what
+// guests are billed WHEN that country is the property's active jurisdiction;
+// saving a non-active country's rates in advance is harmless (nothing reads
+// them until the property is switched to it).
 router.put('/settings/tax-rates', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
   try {
-    const result = validateTaxRates(req.body || {});
+    const country = req.query.country || (await getHotel()).country;
+    const result = validateTaxRates(country, req.body || {});
     if (!result.ok) return res.status(400).json({ error: result.error });
-    res.json(await saveTaxRates(result.rates));
+    res.json(await saveTaxRates(country, result.rates));
   } catch (err) {
     console.error('[Folio] Set tax rates error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -651,7 +663,14 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
       ? await fetchJsonOrNull(`${RESERVATION_URL}/api/reservations/${encodeURIComponent(stay.reservationId)}`)
       : null;
 
-    res.json({ ...folio, adults: reservation?.adults ?? null });
+    // `guestName` here is the reservation's, NOT a Guest-service profile join
+    // (Folio.guestId is null on almost every folio — that field links an
+    // actual Guest record, which is optional and usually absent — so a
+    // lookup keyed on it came up empty for nearly every folio that has a
+    // real, named guest attached via its stay). The reservation's guestName
+    // is a required, always-present string, so this is reliable wherever a
+    // folio has a stayId at all.
+    res.json({ ...folio, adults: reservation?.adults ?? null, guestName: reservation?.guestName ?? null });
   } catch (err) {
     console.error('[Folio] Get folio error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -867,58 +886,206 @@ router.post('/folios/:id/refund', requireRole(...FINANCE), async (req, res) => {
     if (!originalTxId || refundCents === null) {
       return res.status(400).json({ error: 'originalTxId and a valid integer amountCents are required.' });
     }
-    const original = await prisma.folioTransaction.findUnique({ where: { id: originalTxId } });
-    if (!original) return res.status(404).json({ error: 'Original transaction not found.' });
-    if (original.type !== 'PAYMENT') return res.status(400).json({ error: 'Original must be a payment.' });
-    // Cap cumulative refunds at the original payment amount, not just this one.
-    const priorRefunds = await prisma.folioTransaction.aggregate({
-      where: { type: 'REFUND', refundOfId: originalTxId },
-      _sum: { amountCents: true },
-    });
-    const alreadyRefunded = priorRefunds._sum.amountCents || 0n;
-    if (alreadyRefunded + refundCents > original.amountCents) {
-      return res.status(400).json({
-        error: 'Cumulative refunds cannot exceed the original payment amount.',
-        alreadyRefundedCents: alreadyRefunded.toString(),
-        originalAmountCents: original.amountCents.toString(),
-      });
+    // Wrapped in a transaction so the refund row + payment status flip are
+    // atomic — postRefund itself does not open one, so a caller already
+    // inside a transaction (PaymentDispute approval, below) can share it.
+    const result = await prisma.$transaction((px) =>
+      postRefund(px, {
+        folioId: req.params.id,
+        originalTxId,
+        amountCents: refundCents,
+        reason,
+        postedBy: req.user?.username || req.user?.sub,
+      })
+    );
+    if (!result.ok) {
+      const { ok, status, error, ...extra } = result;
+      return res.status(status).json({ error, ...extra });
     }
-    // Wrap in a transaction so the refund row + payment status flip are atomic.
-    const tx = await prisma.$transaction(async (px) => {
-      const refundTx = await px.folioTransaction.create({
-        data: {
-          folioId: req.params.id,
-          type: 'REFUND',
-          description: `Refund (${reason || 'no reason'})`,
-          amountCents: refundCents,
-          paymentMethod: original.paymentMethod,
-          refundOfId: originalTxId,
-          refundReason: reason,
-          postedBy: req.user?.username || req.user?.sub,
-        },
-      });
-      // Mark the original Payment row REFUNDED if a matching one exists. This
-      // keeps reports consistent — un-reconciled refunds were a real bug.
-      if (original.reference) {
-        await px.payment.updateMany({
-          where: { id: original.reference, status: { in: ['AUTHORIZED', 'CAPTURED'] } },
-          data: { status: 'REFUNDED' },
-        });
-      }
-      return refundTx;
-    });
     redis.publish(
       'folio:refund_posted',
       JSON.stringify({
         folioId: req.params.id,
-        txId: tx.id,
+        txId: result.tx.id,
         originalTxId,
-        amountCents: tx.amountCents.toString(),
+        amountCents: result.tx.amountCents.toString(),
       })
     );
-    res.status(201).json(tx);
+    res.status(201).json(result.tx);
   } catch (err) {
     console.error('[Folio] Refund error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/payment-methods — the single list every payment-method dropdown
+// and every classification decision (e.g. "is this an e-wallet") reads,
+// rather than each screen hardcoding its own copy. See lib/paymentMethods.js.
+router.get('/payment-methods', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (_req, res) => {
+  res.json(Object.entries(PAYMENT_METHODS).map(([code, m]) => ({ code, ...m })));
+});
+
+// ── E-wallet refund/chargeback disputes ─────────────────────────────────────
+// A claim against a GCash or Maya payment. Distinct from the plain /refund
+// route above because a wallet claim can arrive from the gateway itself (a
+// chargeback), and unlike a desk-initiated refund its outcome is not always
+// known the moment it is filed — see the PaymentDisputeStatus comment in
+// schema.prisma for the state machine this enforces.
+const DISPUTE_TYPES = ['REFUND_REQUEST', 'CHARGEBACK'];
+// Which decisions are reachable from which status. PENDING is the only entry
+// point (there is no route that creates a case in any other status), and
+// APPROVED/REJECTED are terminal — neither appears as a FROM key.
+const DISPUTE_TRANSITIONS = {
+  PENDING: ['APPROVED', 'REJECTED', 'DISPUTED'],
+  DISPUTED: ['APPROVED', 'REJECTED'],
+};
+
+// POST /api/folios/:id/payments/:paymentId/disputes — file a new case.
+router.post(
+  '/folios/:id/payments/:paymentId/disputes',
+  requireRole(...FINANCE),
+  async (req, res) => {
+    try {
+      const { type, reason } = req.body;
+      if (!DISPUTE_TYPES.includes(type)) {
+        return res.status(400).json({ error: `type must be one of: ${DISPUTE_TYPES.join(', ')}.` });
+      }
+      const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+      if (!payment || payment.folioId !== req.params.id) {
+        return res.status(404).json({ error: 'Payment not found on this folio.' });
+      }
+      if (!isEWallet(payment.method)) {
+        return res.status(400).json({
+          error: `${payment.method} is not an e-wallet payment. Use /folios/:id/refund for cash, card, or bank transfer.`,
+        });
+      }
+      const amountCents = req.body.amountCents === undefined
+        ? payment.amountCents
+        : parseCents(req.body.amountCents);
+      if (amountCents === null || amountCents <= 0n || amountCents > payment.amountCents) {
+        return res.status(400).json({
+          error: 'amountCents must be a positive integer no greater than the original payment.',
+        });
+      }
+      const dispute = await prisma.paymentDispute.create({
+        data: {
+          folioId: req.params.id,
+          paymentId: payment.id,
+          method: payment.method,
+          type,
+          amountCents,
+          reason,
+          filedBy: req.user?.username || req.user?.sub,
+        },
+      });
+      redis.publish(
+        'folio:dispute_filed',
+        JSON.stringify({ folioId: req.params.id, disputeId: dispute.id, type, method: payment.method })
+      );
+      res.status(201).json(dispute);
+    } catch (err) {
+      console.error('[Folio] File dispute error:', err.message);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
+
+// GET /api/payment-disputes?status=&folioId= — every desk role can see the
+// queue; only FINANCE can file or resolve one (below).
+router.get('/payment-disputes', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const { status, folioId } = req.query;
+    const where = {};
+    if (status) where.status = status;
+    if (folioId) where.folioId = folioId;
+    const disputes = await prisma.paymentDispute.findMany({ where, orderBy: { filedAt: 'desc' } });
+    res.json(disputes);
+  } catch (err) {
+    console.error('[Folio] List disputes error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/payment-disputes/:disputeId/resolve — move a case to APPROVED,
+// REJECTED, or DISPUTED. APPROVED posts the actual refund, reusing the exact
+// same lib/refund.js logic the plain /refund route calls, so a wallet claim
+// cannot invent a second way to move money against the amount already
+// refunded.
+router.post('/payment-disputes/:disputeId/resolve', requireRole(...FINANCE), async (req, res) => {
+  try {
+    const { decision, resolutionNote } = req.body;
+    const dispute = await prisma.paymentDispute.findUnique({ where: { id: req.params.disputeId } });
+    if (!dispute) return res.status(404).json({ error: 'Dispute not found.' });
+
+    const allowed = DISPUTE_TRANSITIONS[dispute.status] || [];
+    if (!allowed.includes(decision)) {
+      return res.status(400).json({
+        error: allowed.length
+          ? `A ${dispute.status} dispute can only move to: ${allowed.join(', ')}.`
+          : `A ${dispute.status} dispute is already resolved and cannot be changed.`,
+      });
+    }
+
+    const resolvedBy = req.user?.username || req.user?.sub;
+
+    if (decision === 'APPROVED') {
+      // Find the payment's own PAYMENT-type transaction to refund against —
+      // postRefund refunds against a FolioTransaction, and Payment/
+      // FolioTransaction are linked by FolioTransaction.reference === Payment.id
+      // (see the /payments route above, and /refund's originalTxId).
+      const originalTx = await prisma.folioTransaction.findFirst({
+        where: { folioId: dispute.folioId, type: 'PAYMENT', reference: dispute.paymentId },
+      });
+      if (!originalTx) {
+        return res.status(409).json({ error: 'Could not find the ledger transaction for this payment.' });
+      }
+      const result = await prisma.$transaction(async (px) => {
+        const refund = await postRefund(px, {
+          folioId: dispute.folioId,
+          originalTxId: originalTx.id,
+          amountCents: dispute.amountCents,
+          reason: `${dispute.type === 'CHARGEBACK' ? 'Chargeback' : 'E-wallet refund'} — ${dispute.reason || 'no reason'}`,
+          postedBy: resolvedBy,
+        });
+        if (!refund.ok) return refund;
+        const updated = await px.paymentDispute.update({
+          where: { id: dispute.id },
+          data: {
+            status: 'APPROVED',
+            resolvedBy,
+            resolvedAt: new Date(),
+            resolutionNote,
+            refundTxId: refund.tx.id,
+          },
+        });
+        return { ok: true, dispute: updated, refundTx: refund.tx };
+      });
+      if (!result.ok) {
+        const { ok, status, error, ...extra } = result;
+        return res.status(status).json({ error, ...extra });
+      }
+      redis.publish(
+        'folio:dispute_resolved',
+        JSON.stringify({ folioId: dispute.folioId, disputeId: dispute.id, status: 'APPROVED' })
+      );
+      return res.json(result.dispute);
+    }
+
+    // REJECTED or DISPUTED — a status change only, no money moves.
+    const updated = await prisma.paymentDispute.update({
+      where: { id: dispute.id },
+      data:
+        decision === 'DISPUTED'
+          ? { status: 'DISPUTED' }
+          : { status: 'REJECTED', resolvedBy, resolvedAt: new Date(), resolutionNote },
+    });
+    redis.publish(
+      'folio:dispute_resolved',
+      JSON.stringify({ folioId: dispute.folioId, disputeId: dispute.id, status: decision })
+    );
+    res.json(updated);
+  } catch (err) {
+    console.error('[Folio] Resolve dispute error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -1321,6 +1488,17 @@ router.post('/folios/:id/payment-intents', requireRole(...CASHIER), async (req, 
     }
     if (amountCents <= 0n) return res.status(400).json({ error: 'A payment amount is required.' });
 
+    // A QR code is scanned into an e-wallet app, so only e-wallet-flavoured
+    // methods make sense here — this was previously accepted from the client
+    // (ReservationDetail.jsx's "Send Pay by Link" dialog) and silently
+    // dropped, so every intent was QR_WALLET regardless of what the desk
+    // picked. GCash and Maya are now real, distinct choices.
+    const QR_METHODS = ['QR_WALLET', 'GCASH', 'MAYA'];
+    const method = req.body?.method || 'QR_WALLET';
+    if (!QR_METHODS.includes(method)) {
+      return res.status(400).json({ error: `method must be one of: ${QR_METHODS.join(', ')}.` });
+    }
+
     const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
     if (!folio) return res.status(404).json({ error: 'Folio not found.' });
     if (folio.status !== 'OPEN') return res.status(409).json({ error: 'This folio is not open.' });
@@ -1335,6 +1513,7 @@ router.post('/folios/:id/payment-intents', requireRole(...CASHIER), async (req, 
         token: newToken(),
         folioId: folio.id,
         amountCents,
+        method,
         expiresAt: new Date(Date.now() + (to ? LINK_TTL_MS : INTENT_TTL_MS)),
         createdBy: req.user?.username || req.user?.sub,
         sentTo: to,
