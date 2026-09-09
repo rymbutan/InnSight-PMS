@@ -71,7 +71,13 @@ function regCardModel({ stay, reservation = null, guest = null, hotel = null, ro
   const nights = nightsOf(reservation, stay);
 
   const fields = [
-    { label: 'Country', value: guest?.nationality || '' },
+    // Country used to print here from guest?.nationality, but nothing in the
+    // booking flow ever collects or stores a guest's nationality — New
+    // Reservation's "Country" input is the guest's ADDRESS country, and per
+    // the Address row below, address fields are dropped by POST /api/guests
+    // entirely. The row printed blank on every single card, never a real
+    // answer, so it's removed rather than joining Address as a write-in line
+    // for a fact nothing in the system has ever actually captured.
     { label: 'Name', value: guestName(guest, stay) },
     // Nothing in the system stores a guest address: Guest has no column for it
     // and New Reservation's address inputs are dropped by POST /api/guests. A
