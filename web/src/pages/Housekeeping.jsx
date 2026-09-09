@@ -9,7 +9,7 @@ import { statusMeta, STATUS_ORDER, ON_FILL_INK, ON_FILL_INK_SOFT } from '../sim/
 import { useRoomEvents } from '../sim/useRoomEvents';
 import { submitRun, ACTIVITY } from '../sim/trainingLog';
 import { passesInspection } from '../sim/inspection/inspectionScore';
-import { computeLayout, MAP_W, MARGIN_X, CORRIDOR_H } from '../sim/hotelMap';
+import { computeLayout, MARGIN_X, CORRIDOR_H } from '../sim/hotelMap';
 
 // Heavy sim code only downloads when a supervisor actually starts an inspection.
 const InspectionShift = lazy(() => import('../sim/inspection/InspectionShift'));
@@ -327,7 +327,7 @@ export default function Housekeeping() {
 
   // Live updates: any status change anywhere in the PMS (front-desk checkout,
   // another student cleaning, an instructor override) repaints the map.
-  const { connected } = useRoomEvents(({ roomId, status }) => {
+  useRoomEvents(({ roomId, status }) => {
     setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, status } : r)));
     flashRoom(roomId);
   });
