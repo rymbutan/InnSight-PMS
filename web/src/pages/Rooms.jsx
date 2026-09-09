@@ -214,7 +214,7 @@ export default function Rooms() {
 
   return (
     <div>
-      <h2>Hotel Room Information Editor</h2>
+      <h2>{isAdmin ? 'Hotel Room Information Editor' : 'Hotel Rooms'}</h2>
 
       {!isAdmin && (
         <p className="muted rooms-note">
