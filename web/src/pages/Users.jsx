@@ -4,9 +4,18 @@ import RoleBadge from '../components/RoleBadge';
 import Modal from '../components/Modal';
 import Icon from '../components/Icon';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useAuth } from '../auth';
 
 export default function Users() {
   const confirm = useConfirm();
+  // MANAGER can reach this page (route guard allows ADMIN + MANAGER) but is
+  // strictly read-only on account data — every create/edit/disable/reset/role
+  // control below is hidden rather than merely disabled, since the API refuses
+  // all of them for MANAGER anyway (services/auth/src/routes/users.routes.js,
+  // WRITE_ROLES). A visible-but-rejected button reads as broken; not showing
+  // it reads as "not yours to do."
+  const { hasRole, user: me } = useAuth();
+  const canManage = hasRole('ADMIN');
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [form, setForm] = useState({ username: '', password: '', displayName: '', email: '', roles: [] });
@@ -237,16 +246,22 @@ export default function Users() {
                   <td className="muted">{r.note || '—'}</td>
                   <td className="muted t-c">{new Date(r.createdAt).toLocaleDateString()}</td>
                   <td className="t-actions">
-                    {/* Green/red, because these two are opposites and the row
-                        offers no other reading of which is which. Approve was
-                        the accent colour and Reject was a plain outline, so the
-                        destructive choice looked like the neutral one. */}
-                    <button className="small success" onClick={() => openApprove(r)}>
-                      Approve
-                    </button>{' '}
-                    <button className="small danger" onClick={() => rejectRequest(r)}>
-                      Reject
-                    </button>
+                    {canManage ? (
+                      <>
+                        {/* Green/red, because these two are opposites and the row
+                            offers no other reading of which is which. Approve was
+                            the accent colour and Reject was a plain outline, so the
+                            destructive choice looked like the neutral one. */}
+                        <button className="small success" onClick={() => openApprove(r)}>
+                          Approve
+                        </button>{' '}
+                        <button className="small danger" onClick={() => rejectRequest(r)}>
+                          Reject
+                        </button>
+                      </>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -255,6 +270,7 @@ export default function Users() {
         </div>
       )}
 
+      {canManage && (
       <div className="panel">
         <h3>Create user</h3>
         <form onSubmit={create}>
@@ -317,6 +333,7 @@ export default function Users() {
           </div>
         </form>
       </div>
+      )}
 
       <div className="panel">
         <h3>Users</h3>
@@ -356,25 +373,40 @@ export default function Users() {
                         No roles
                       </span>
                     )}
-                    <button
-                      type="button"
-                      className="role-edit-btn"
-                      onClick={() => openRoleEditor(u)}
-                      title={`Edit roles for ${u.username}`}
-                    >
-                      <Icon name="pencil" size={11} />
-                      Edit
-                    </button>
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="role-edit-btn"
+                        onClick={() => openRoleEditor(u)}
+                        title={`Edit roles for ${u.username}`}
+                      >
+                        <Icon name="pencil" size={11} />
+                        Edit
+                      </button>
+                    )}
                   </div>
                 </td>
                 <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
                 <td className="t-actions">
-                  <button className="small secondary" onClick={() => openReset(u)}>
-                    Reset Password
-                  </button>{' '}
-                  <button className="small danger" onClick={() => toggle(u)}>
-                    {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                  </button>
+                  {canManage ? (
+                    <>
+                      <button className="small secondary" onClick={() => openReset(u)}>
+                        Reset Password
+                      </button>{' '}
+                      {/* Your own row never gets this button: the server refuses
+                          to disable the signed-in account either way (the
+                          self-lockout guard on PATCH/disable), so a button that
+                          can only ever fail is just not shown rather than shown
+                          and then rejected. */}
+                      {u.id !== me?.id && (
+                        <button className="small danger" onClick={() => toggle(u)}>
+                          {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
               </tr>
             ))}
