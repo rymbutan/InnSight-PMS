@@ -8,7 +8,8 @@ import { formatPeso } from '../lib/money';
 import { statusMeta, STATUS_ORDER, ON_FILL_INK, ON_FILL_INK_SOFT } from '../sim/statusMeta';
 import { useRoomEvents } from '../sim/useRoomEvents';
 import { submitRun, ACTIVITY } from '../sim/trainingLog';
-import { computeLayout, MAP_W, MARGIN_X, CORRIDOR_H } from '../sim/hotelMap';
+import { passesInspection } from '../sim/inspection/inspectionScore';
+import { computeLayout, MARGIN_X, CORRIDOR_H } from '../sim/hotelMap';
 
 // Heavy sim code only downloads when a supervisor actually starts an inspection.
 const InspectionShift = lazy(() => import('../sim/inspection/InspectionShift'));
@@ -99,12 +100,17 @@ function panelActions(room, act, launchGame, canPlay) {
       return (
         <>
           <p className="muted">
-            Turn the room over, then mark it clean — a supervisor inspects it against the booking at the next
-            step.
+            The room is only marked clean once it is inspected against the booking and every fault is
+            correctly fixed — there is no manual shortcut.
           </p>
-          <button className="btn-primary hk-action" onClick={() => act('CLEAN', 'Room cleaned.')}>
-            Mark as Clean
-          </button>
+          {canPlay ? (
+            <button className="btn-primary hk-action" onClick={() => launchGame('INSPECTION', room)}>
+              <Icon name="search" size={14} strokeWidth={2} />
+              Inspect Room Against Booking
+            </button>
+          ) : (
+            <GameLockNotice />
+          )}
           <button className="secondary" onClick={() => act('OUT_OF_SERVICE', 'Room placed out of service.')}>
             Mark Out of Service
           </button>
@@ -124,10 +130,6 @@ function panelActions(room, act, launchGame, canPlay) {
           ) : (
             <GameLockNotice />
           )}
-          <button onClick={() => act('CLEAN_INSPECTED', 'Inspection passed — room is guest-ready.')}>
-            <Icon name="check" size={14} strokeWidth={2.4} />
-            Pass Inspection (manual)
-          </button>
           <button className="secondary" onClick={() => act('DIRTY', 'Room degraded to Vacant Dirty.')}>
             Report Inadequate Cleaning
           </button>
@@ -325,7 +327,7 @@ export default function Housekeeping() {
 
   // Live updates: any status change anywhere in the PMS (front-desk checkout,
   // another student cleaning, an instructor override) repaints the map.
-  const { connected } = useRoomEvents(({ roomId, status }) => {
+  useRoomEvents(({ roomId, status }) => {
     setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, status } : r)));
     flashRoom(roomId);
   });
@@ -390,18 +392,6 @@ export default function Housekeeping() {
         <span className="hk-occupancy">
           Occupancy: <strong>{occupancy}%</strong>
         </span>
-      </div>
-
-      <div className="hk-legend">
-        {STATUS_ORDER.map((s) => {
-          const m = statusMeta(s);
-          return (
-            <span key={s} className="hk-legend-item" title={m.hint}>
-              <span className="hk-legend-swatch" style={{ background: m.fill, borderColor: m.color }} />
-              <strong>{m.code}</strong> {m.label} <span className="muted">({counts[s] || 0})</span>
-            </span>
-          );
-        })}
       </div>
 
       <div className="hk-layout">
@@ -476,7 +466,26 @@ export default function Housekeeping() {
           )}
         </div>
 
-        {selected && (
+        <div className="hk-side">
+          <div className="panel hk-legend-panel">
+            <h3>Legend</h3>
+            <div className="hk-legend">
+              {STATUS_ORDER.map((s) => {
+                const m = statusMeta(s);
+                return (
+                  <span key={s} className="hk-legend-item" title={m.hint}>
+                    <span className="hk-legend-swatch" style={{ background: m.fill, borderColor: m.color }} />
+                    <span className="hk-legend-text">
+                      <strong>{m.code}</strong> {m.label}
+                    </span>
+                    <span className="muted">({counts[s] || 0})</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {selected && (
           <div className="panel hk-detail">
             <div className="hk-detail-head">
               <h3 style={{ margin: 0 }}>Room {selected.number}</h3>
@@ -560,7 +569,8 @@ export default function Housekeeping() {
               )}
             </div>
           </div>
-        )}
+          )}
+        </div>
       </div>
 
       {game && (
@@ -607,7 +617,15 @@ export default function Housekeeping() {
                   const tier = room.roomType?.name || 'Standard';
                   logRun(ACTIVITY.INSPECTION, tier, items, `Room ${room.number} inspection recorded.`);
                   setGame(null);
-                  act(room.id, 'CLEAN_INSPECTED', `Room ${room.number} inspected — now guest-ready.`);
+                  // Guest-ready only if every fault was found and correctly
+                  // categorised, and nothing clean was condemned — partial
+                  // credit sends the room back for another turnover rather
+                  // than through on a best-effort pass.
+                  if (passesInspection(items)) {
+                    act(room.id, 'CLEAN_INSPECTED', `Room ${room.number} inspected — now guest-ready.`);
+                  } else {
+                    act(room.id, 'DIRTY', `Room ${room.number} inspection found problems — needs re-cleaning.`);
+                  }
                 }}
               />
             );

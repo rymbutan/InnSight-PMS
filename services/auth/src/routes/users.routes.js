@@ -7,12 +7,70 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
-const ADMIN_ROLES = ['ADMIN', 'MANAGER'];
+// Account data is read/write for both ADMIN and MANAGER — the one carve-out
+// is that MANAGER can neither modify an account that already has the ADMIN
+// role, nor grant ADMIN to any account (including a brand new one). Every
+// route below is guarded with STAFF_ROLES and then, where a target account or
+// a roles list is involved, an explicit check against the two helpers below.
+const STAFF_ROLES = ['ADMIN', 'MANAGER'];
 
 const { sanitizeUser: sanitize } = require('../lib/sanitizeUser');
 
+function requesterIsAdmin(req) {
+  return (req.user?.roles || []).includes('ADMIN');
+}
+
+// For routes that act on an EXISTING account. `targetRoles` is the target's
+// CURRENT roles, freshly queried — never the requester's own token, and
+// never assumed — so a stale cache can't let this be bypassed. Sends the
+// 403 itself and returns true when it did, so a call site can just
+// `if (await blockIfAdminTarget(...)) return;`.
+async function blockIfAdminTarget(req, res, targetRoles) {
+  if (requesterIsAdmin(req)) return false;
+  if ((targetRoles || []).some((r) => r.roleCode === 'ADMIN')) {
+    res.status(403).json({ error: 'Only an ADMIN can modify an admin account.' });
+    return true;
+  }
+  return false;
+}
+
+// For routes that SET a roles list (creating a user, or replacing one's
+// roles) — blocks a non-ADMIN from handing out the ADMIN role at all, not
+// just from touching an account that already has it. Without this, a
+// MANAGER who cannot edit an existing admin could still mint a fresh one.
+function blockIfGrantingAdmin(req, res, roles) {
+  if (requesterIsAdmin(req)) return false;
+  if (Array.isArray(roles) && roles.includes('ADMIN')) {
+    res.status(403).json({ error: 'Only an ADMIN can grant the ADMIN role.' });
+    return true;
+  }
+  return false;
+}
+
+// The lockout guard: refuses to take ADMIN access away from an account when
+// doing so would leave either that requester, or the whole system, unable to
+// get back in. Shared by every route that can flip a user out of ACTIVE
+// status, so the rule cannot drift between call sites the way it did before
+// this existed — see the PUT /roles guard below for the sibling check that
+// covers losing the ADMIN role rather than losing account access outright.
+async function lockoutError(targetId, requesterId, targetRoles) {
+  if (!targetRoles.some((r) => r.roleCode === 'ADMIN')) return null;
+  if (targetId === requesterId) {
+    return 'You cannot disable your own account. Ask another admin to do it.';
+  }
+  // ACTIVE only: another ADMIN who is themselves disabled is not a way back
+  // in, so counting them would let the last usable admin be switched off.
+  const otherActiveAdmins = await prisma.user.count({
+    where: { id: { not: targetId }, status: 'ACTIVE', roles: { some: { roleCode: 'ADMIN' } } },
+  });
+  if (otherActiveAdmins === 0) {
+    return 'This is the only active account with the ADMIN role. Disabling it would lock everyone out of user management. Create or enable another admin first.';
+  }
+  return null;
+}
+
 // GET /api/users
-router.get('/users', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.get('/users', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       include: { roles: true },
@@ -26,7 +84,7 @@ router.get('/users', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) 
 });
 
 // POST /api/users
-router.post('/users', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.post('/users', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const { username, email, password, displayName, roles } = req.body;
     if (!username || !password || !displayName) {
@@ -35,6 +93,7 @@ router.post('/users', verifyToken, requireRole(...ADMIN_ROLES), async (req, res)
     if (password.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters.' });
     }
+    if (blockIfGrantingAdmin(req, res, roles)) return;
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
       data: {
@@ -59,7 +118,7 @@ router.post('/users', verifyToken, requireRole(...ADMIN_ROLES), async (req, res)
 });
 
 // GET /api/users/:id
-router.get('/users/:id', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.get('/users/:id', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
@@ -74,13 +133,32 @@ router.get('/users/:id', verifyToken, requireRole(...ADMIN_ROLES), async (req, r
 });
 
 // PATCH /api/users/:id
-router.patch('/users/:id', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.patch('/users/:id', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const { displayName, email, status } = req.body;
     const data = {};
     if (displayName !== undefined) data.displayName = displayName;
     if (email !== undefined) data.email = email;
     if (status !== undefined) data.status = status;
+
+    // Fetched unconditionally now, not just for a status change: a MANAGER
+    // must not edit an admin's displayName/email either, and the lockout
+    // check below still needs these same roles when status IS changing.
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { roles: true },
+    });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (await blockIfAdminTarget(req, res, target.roles)) return;
+
+    // This route used to reach the same dead end as POST /disable — flipping
+    // `status` here bypassed that route's lockout guard entirely, since this
+    // one had none. Same rule, same helper.
+    if (data.status !== undefined && data.status !== 'ACTIVE') {
+      const err = await lockoutError(req.params.id, req.user?.sub, target.roles);
+      if (err) return res.status(400).json({ error: err });
+    }
+
     const user = await prisma.user.update({ where: { id: req.params.id }, data });
     res.json(sanitize(user));
   } catch (err) {
@@ -90,12 +168,15 @@ router.patch('/users/:id', verifyToken, requireRole(...ADMIN_ROLES), async (req,
 });
 
 // POST /api/users/:id/reset-password
-router.post('/users/:id/reset-password', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.post('/users/:id/reset-password', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const { newPassword } = req.body;
     if (!newPassword || newPassword.length < 8) {
       return res.status(400).json({ error: 'newPassword must be at least 8 characters.' });
     }
+    const target = await prisma.user.findUnique({ where: { id: req.params.id }, include: { roles: true } });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (await blockIfAdminTarget(req, res, target.roles)) return;
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id: req.params.id },
@@ -112,43 +193,24 @@ router.post('/users/:id/reset-password', verifyToken, requireRole(...ADMIN_ROLES
 });
 
 // POST /api/users/:id/disable
-router.post('/users/:id/disable', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.post('/users/:id/disable', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     // The lockout guard. Disabling the last working ADMIN locks EVERYONE out of
     // user management permanently — including the person doing it — and the
     // only way back is a hand-written UPDATE against the database. A dialog in
     // the browser does not prevent this; it only asks. This does.
     //
-    // Mirrors the same guard on PUT /users/:id/roles, which stops the other
-    // route to the same dead end: stripping the last ADMIN role.
+    // Mirrors the same guard on PATCH /users/:id and PUT /users/:id/roles,
+    // which stop the other two routes to the same dead end.
     const target = await prisma.user.findUnique({
       where: { id: req.params.id },
       include: { roles: true },
     });
     if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (await blockIfAdminTarget(req, res, target.roles)) return;
 
-    if (target.roles.some((r) => r.roleCode === 'ADMIN')) {
-      if (req.params.id === req.user?.sub) {
-        return res
-          .status(400)
-          .json({ error: 'You cannot disable your own account. Ask another admin to do it.' });
-      }
-      // ACTIVE only: another ADMIN who is themselves disabled is not a way back
-      // in, so counting them would let the last usable admin be switched off.
-      const otherActiveAdmins = await prisma.user.count({
-        where: {
-          id: { not: req.params.id },
-          status: 'ACTIVE',
-          roles: { some: { roleCode: 'ADMIN' } },
-        },
-      });
-      if (otherActiveAdmins === 0) {
-        return res.status(400).json({
-          error:
-            'This is the only active account with the ADMIN role. Disabling it would lock everyone out of user management. Create or enable another admin first.',
-        });
-      }
-    }
+    const err = await lockoutError(req.params.id, req.user?.sub, target.roles);
+    if (err) return res.status(400).json({ error: err });
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
@@ -165,8 +227,11 @@ router.post('/users/:id/disable', verifyToken, requireRole(...ADMIN_ROLES), asyn
 });
 
 // POST /api/users/:id/enable
-router.post('/users/:id/enable', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.post('/users/:id/enable', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id }, include: { roles: true } });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (await blockIfAdminTarget(req, res, target.roles)) return;
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: { status: 'ACTIVE', failedAttempts: 0 },
@@ -179,7 +244,7 @@ router.post('/users/:id/enable', verifyToken, requireRole(...ADMIN_ROLES), async
 });
 
 // PUT /api/users/:id/roles
-router.put('/users/:id/roles', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.put('/users/:id/roles', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const { roles } = req.body;
     if (!Array.isArray(roles)) {
@@ -193,18 +258,14 @@ router.put('/users/:id/roles', verifyToken, requireRole(...ADMIN_ROLES), async (
     const wasAdmin = current.roles.some((r) => r.roleCode === 'ADMIN');
     const staysAdmin = roles.includes('ADMIN');
 
-    // Privilege-escalation guard: a MANAGER may manage staff roles but must not
-    // be able to grant the ADMIN role or take over an existing admin account.
-    // Only an ADMIN can do either.
-    const requesterIsAdmin = (req.user?.roles || []).includes('ADMIN');
-    if (!requesterIsAdmin) {
-      if (staysAdmin) {
-        return res.status(403).json({ error: 'Only an ADMIN can grant the ADMIN role.' });
-      }
-      if (wasAdmin) {
-        return res.status(403).json({ error: 'Only an ADMIN can modify an admin account.' });
-      }
-    }
+    // Privilege-escalation guard: a MANAGER may manage any other account's
+    // roles freely, but must neither grant the ADMIN role nor touch an
+    // account that already has it. Checked against CURRENT rows, not the
+    // requester's own token — irrelevant for the requester's identity, but
+    // consistent with the lockout guard below, which has to be for the same
+    // staleness reason.
+    if (blockIfGrantingAdmin(req, res, roles)) return;
+    if (await blockIfAdminTarget(req, res, current.roles)) return;
 
     // ── Do not let the ADMIN role leave the system ──────────────────────────
     // This is a REPLACE, so a save that simply omits 'ADMIN' strips it. Nothing
@@ -264,7 +325,7 @@ router.put('/users/:id/roles', verifyToken, requireRole(...ADMIN_ROLES), async (
 // creates the User; until then the request grants nothing.
 
 // GET /api/access-requests?status=PENDING
-router.get('/access-requests', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.get('/access-requests', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const status = String(req.query.status || 'PENDING').toUpperCase();
     const where = status === 'ALL' ? {} : { status };
@@ -286,7 +347,7 @@ router.get('/access-requests', verifyToken, requireRole(...ADMIN_ROLES), async (
 // and a random unguessable hash is stored so the password path can never be used
 // against the account. Roles are whatever the admin ticks — the request itself
 // never implies any.
-router.post('/access-requests/:id/approve', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.post('/access-requests/:id/approve', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const reqRow = await prisma.accessRequest.findUnique({ where: { id: req.params.id } });
     if (!reqRow) return res.status(404).json({ error: 'Request not found.' });
@@ -295,6 +356,7 @@ router.post('/access-requests/:id/approve', verifyToken, requireRole(...ADMIN_RO
     }
 
     const roles = Array.isArray(req.body?.roles) ? req.body.roles : [];
+    if (blockIfGrantingAdmin(req, res, roles)) return;
     const username = String(req.body?.username || reqRow.email.split('@')[0])
       .trim()
       .toLowerCase();
@@ -337,7 +399,7 @@ router.post('/access-requests/:id/approve', verifyToken, requireRole(...ADMIN_RO
 });
 
 // POST /api/access-requests/:id/reject
-router.post('/access-requests/:id/reject', verifyToken, requireRole(...ADMIN_ROLES), async (req, res) => {
+router.post('/access-requests/:id/reject', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const row = await prisma.accessRequest.findUnique({ where: { id: req.params.id } });
     if (!row) return res.status(404).json({ error: 'Request not found.' });

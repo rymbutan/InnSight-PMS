@@ -12,6 +12,34 @@ import Icon from '../components/Icon';
 
 const STEPS = ['Dates', 'Room', 'Guest', 'Confirm'];
 
+// Built-in special request — a fixed checklist of the requests a front desk
+// hears most often, plus free text for anything else. Selections are sent to
+// the property right after the guest books (folded into the reservation's
+// specialRequests text; see submit() below), same as the promise this list's
+// own heading makes.
+const SPECIAL_REQUEST_OPTIONS = [
+  "I'd like a room on a high floor",
+  "I'd like a quiet room",
+  "I'd like luggage storage",
+  "I'd like to be away from the elevator",
+  "I'd like to be near the elevator",
+  "I'd like car parking",
+  "I'd like honeymoon arrangements",
+  "I'd like to have a baby cot (additional charges may apply)",
+  "I'd like an airport transfer",
+];
+
+const ARRIVAL_TIME_OPTIONS = [
+  "I don't know",
+  'Before 12:00 PM',
+  '12:00 PM – 2:00 PM',
+  '2:00 PM – 4:00 PM',
+  '4:00 PM – 6:00 PM',
+  '6:00 PM – 8:00 PM',
+  '8:00 PM – 10:00 PM',
+  'After 10:00 PM',
+];
+
 export default function PublicBooking() {
   const _navigate = useNavigate();
   const [step, setStep] = useState(0);
@@ -30,6 +58,10 @@ export default function PublicBooking() {
   // Step 3
   const [guest, setGuest] = useState({ firstName: '', lastName: '', email: '', phone: '' });
   const [promoCode, setPromoCode] = useState('');
+  // Built-in special request.
+  const [specialChecks, setSpecialChecks] = useState([]);
+  const [additionalRequests, setAdditionalRequests] = useState('');
+  const [arrivalTime, setArrivalTime] = useState(ARRIVAL_TIME_OPTIONS[0]);
 
   // Step 4
   const [submitting, setSubmitting] = useState(false);
@@ -62,13 +94,27 @@ export default function PublicBooking() {
     setStep(2);
   }
 
+  function toggleSpecialRequest(opt) {
+    setSpecialChecks((prev) => (prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]));
+  }
+
   async function submit() {
     setErr('');
-    if (!guest.firstName || !guest.lastName || !guest.email) {
-      return setErr('Please fill in your name and email.');
+    if (!guest.firstName || !guest.lastName || !guest.email || !guest.phone) {
+      return setErr('Please fill in your name, email address, and contact number.');
     }
     setSubmitting(true);
     try {
+      // The checked boxes and the free-text field are one note by the time
+      // they reach the front desk — the reservation has a single
+      // specialRequests text field, not a structured list.
+      const specialRequestsText = [
+        specialChecks.length ? specialChecks.join('; ') : null,
+        additionalRequests.trim() || null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
       // Pricing and deposit are computed server-side; no payment is collected
       // here, so we don't send (or imply) any amounts.
       const payload = {
@@ -83,6 +129,10 @@ export default function PublicBooking() {
         source: 'DIRECT',
         origin: 'Public booking engine',
         ...(promoCode.trim() ? { promoCode: promoCode.trim() } : {}),
+        ...(specialRequestsText ? { specialRequests: specialRequestsText } : {}),
+        // Sent even as "I don't know" — that is a real answer (the guest was
+        // asked), distinct from never having been asked at all.
+        expectedArrivalTime: arrivalTime,
       };
       const { data: r } = await api.post('/api/public/reservations', payload);
       setConfirmed(r);
@@ -233,14 +283,20 @@ export default function PublicBooking() {
               <div>
                 <label>Email *</label>
                 <input
+                  required
                   type="email"
                   value={guest.email}
                   onChange={(e) => setGuest({ ...guest, email: e.target.value })}
                 />
               </div>
               <div>
-                <label>Phone</label>
-                <input value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} />
+                <label>Phone *</label>
+                <input
+                  required
+                  type="tel"
+                  value={guest.phone}
+                  onChange={(e) => setGuest({ ...guest, phone: e.target.value })}
+                />
               </div>
               <div>
                 <label>Promo code</label>
@@ -251,6 +307,50 @@ export default function PublicBooking() {
                 />
               </div>
             </div>
+
+            <div className="pb-special-requests">
+              <div className="pb-special-requests-title">Special requests</div>
+              <div className="pb-special-requests-sub">
+                Subject to availability. Your selections will be sent to the property right after you
+                book.
+              </div>
+              <div className="pb-check-list">
+                {SPECIAL_REQUEST_OPTIONS.map((opt) => (
+                  <label key={opt} className="pb-check-row">
+                    <input
+                      type="checkbox"
+                      checked={specialChecks.includes(opt)}
+                      onChange={() => toggleSpecialRequest(opt)}
+                    />
+                    <span>{opt}</span>
+                  </label>
+                ))}
+              </div>
+
+              <label style={{ marginTop: 4 }}>Any additional requests?</label>
+              <div className="pb-special-requests-sub" style={{ marginBottom: 6 }}>
+                Let us know in English or Korean
+              </div>
+              <textarea
+                rows={3}
+                value={additionalRequests}
+                onChange={(e) => setAdditionalRequests(e.target.value)}
+                placeholder="Enter any additional requests"
+              />
+
+              <label style={{ marginTop: 14 }}>Let us know when you are arriving</label>
+              <select value={arrivalTime} onChange={(e) => setArrivalTime(e.target.value)}>
+                {ARRIVAL_TIME_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <div className="pb-special-requests-sub" style={{ marginTop: 4 }}>
+                We'll let the property or host know when to expect you.
+              </div>
+            </div>
+
             <div style={{ background: 'var(--accent-soft)', padding: 14, borderRadius: 8, marginTop: 14 }}>
               <strong>{picked.name}</strong>
               <br />
@@ -312,6 +412,9 @@ export default function PublicBooking() {
                 setCheckIn('');
                 setCheckOut('');
                 setGuest({ firstName: '', lastName: '', email: '', phone: '' });
+                setSpecialChecks([]);
+                setAdditionalRequests('');
+                setArrivalTime(ARRIVAL_TIME_OPTIONS[0]);
               }}
               style={{ marginTop: 12 }}
             >

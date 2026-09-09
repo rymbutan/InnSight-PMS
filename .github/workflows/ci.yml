@@ -119,6 +119,34 @@ jobs:
             if [ "$i" = 30 ]; then docker compose logs --tail=200; exit 1; fi
           done
 
+      # Gateway's /health above answers immediately regardless of backend state —
+      # it does not proxy the check anywhere. Each app service's own db-init.sh
+      # applies its raw-SQL constraint migrations one at a time via a fresh
+      # `npx prisma db execute` process per file, so a service with several
+      # migrations can still be mid-startup well after gateway reports healthy.
+      # Without this wait, "Prove the double-booking race is closed" below can
+      # hit /api/auth/login before auth-service is listening and get a 502 from
+      # nginx — every app service below has a Dockerfile HEALTHCHECK, so wait on
+      # those directly instead of guessing a sleep.
+      - name: Wait for backend services healthy
+        run: |
+          services="auth-service reservation-service stay-service folio-service guest-service maintenance-service inventory-service audit-service reports-service"
+          for i in $(seq 1 90); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc")
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "$cid" 2>/dev/null || echo missing)
+              [ "$status" = "healthy" ] || pending="$pending $svc:$status"
+            done
+            [ -z "$pending" ] && { echo "OK: all backend services healthy"; break; }
+            sleep 2
+            if [ "$i" = 90 ]; then
+              echo "::error::backend services never became healthy —$pending"
+              docker compose logs --tail=200
+              exit 1
+            fi
+          done
+
       # Seeding is no longer part of any container's CMD, so roles, room types and
       # the admin account have to be created explicitly before anything can log in.
       - name: Seed reference data
