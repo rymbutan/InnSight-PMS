@@ -1,16 +1,49 @@
 const Redis = require('ioredis');
 const { send, TEMPLATES } = require('../lib/notifier');
+const { sendSms, sendViber, logNotification, SMS_TEMPLATES } = require('../lib/notifyChannels');
 
 const prisma = require('../lib/prisma');
 
+// Every channel this booking has an address for gets tried, independently —
+// a guest with a phone but a typo'd email should still get their SMS/Viber,
+// and vice versa. Each attempt (success or failure) is its own row in
+// NotificationLog, so "did the guest actually get their confirmation" has one
+// place to look regardless of which channel carried it.
 async function notify(template, reservation) {
-  if (!reservation?.guestEmail) return;
-  try {
-    const { subject, body } = TEMPLATES[template](reservation);
-    await send({ to: reservation.guestEmail, subject, body });
-    console.log(`[Reservation] sent "${template}" email to ${reservation.guestEmail}`);
-  } catch (e) {
-    console.warn(`[Reservation] email failed (${template}):`, e.message);
+  if (!reservation) return;
+
+  if (reservation.guestEmail) {
+    try {
+      const { subject, body } = TEMPLATES[template](reservation);
+      await send({ to: reservation.guestEmail, subject, body });
+      await logNotification(prisma, {
+        reservationId: reservation.id,
+        channel: 'EMAIL',
+        to: reservation.guestEmail,
+        subject,
+        body,
+      });
+      console.log(`[Reservation] sent "${template}" email to ${reservation.guestEmail}`);
+    } catch (e) {
+      console.warn(`[Reservation] email failed (${template}):`, e.message);
+      await logNotification(prisma, {
+        reservationId: reservation.id,
+        channel: 'EMAIL',
+        to: reservation.guestEmail,
+        body: '',
+        status: 'FAILED',
+        error: e.message,
+      });
+    }
+  }
+
+  // SMS and Viber — mocked (see lib/notifyChannels.js). Only dispatched for
+  // events that have a text template; not every email TEMPLATES key needs a
+  // text-message equivalent.
+  const smsBody = SMS_TEMPLATES[template]?.(reservation);
+  if (smsBody) {
+    await sendSms(prisma, reservation, smsBody);
+    await sendViber(prisma, reservation, smsBody);
   }
 }
 

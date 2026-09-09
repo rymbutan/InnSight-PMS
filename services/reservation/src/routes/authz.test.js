@@ -38,8 +38,8 @@ const OPEN = [
   // role added later is not silently served the wrong palette, and because the
   // values are already visible to anyone who can load the page.
   //
-  // The WRITE side is guarded: PUT /settings/theme is MGMT only, because changing it
-  // changes what everyone sees.
+  // The WRITE side is guarded: PUT /settings/theme is ADMIN only, because changing
+  // it changes what everyone sees.
   'GET /settings/theme',
 ];
 
