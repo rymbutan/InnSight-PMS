@@ -9,6 +9,8 @@ import { pesosToCents, formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
 import SplitBillDialog from '../components/SplitBillDialog';
+import Modal from '../components/Modal';
+import { paymentMethodGroups, isEWallet } from '../lib/paymentMethods';
 
 export default function Folios() {
   const [searchParams] = useSearchParams();
@@ -33,6 +35,16 @@ export default function Folios() {
   const [stayGuestName, setStayGuestName] = useState('');
   // The QR payment code currently on screen, if any.
   const [qr, setQr] = useState(null);
+  // E-wallet refund/chargeback disputes filed against this folio's payments.
+  const [disputes, setDisputes] = useState([]);
+  const [disputeFor, setDisputeFor] = useState(null); // the Payment being disputed
+  const [disputeForm, setDisputeForm] = useState({ type: 'REFUND_REQUEST', reason: '', amount: '' });
+  const [disputeBusy, setDisputeBusy] = useState(false);
+  const [resolvingId, setResolvingId] = useState(null);
+  // Which of the three "take an action" forms the sidebar shows. They used to
+  // be three stacked full-width panels; one at a time in a tab is the same
+  // three forms without scrolling past two you are not about to use.
+  const [actionTab, setActionTab] = useState('charge');
 
   // The folio list, mirroring the Guest Profiles pattern:
   //   browse      resting state — the most recent folios
@@ -66,8 +78,69 @@ export default function Folios() {
       setFolio(f.data);
       setStatement(s.data);
       setFolioId(target);
+      loadDisputes(target);
     } catch (e) {
       toast.error(errMsg(e));
+    }
+  }
+
+  async function loadDisputes(target) {
+    try {
+      const { data } = await api.get('/api/payment-disputes', { params: { folioId: target } });
+      setDisputes(data);
+    } catch {
+      // Non-fatal: the folio itself already loaded. A dead disputes fetch
+      // should not block viewing the statement.
+    }
+  }
+
+  function openDispute(p) {
+    setDisputeFor(p);
+    setDisputeForm({ type: 'REFUND_REQUEST', reason: '', amount: (Number(p.amountCents) / 100).toFixed(2) });
+  }
+
+  async function submitDispute(e) {
+    e.preventDefault();
+    if (!disputeFor) return;
+    setDisputeBusy(true);
+    try {
+      await api.post(`/api/folios/${folioId}/payments/${disputeFor.id}/disputes`, {
+        type: disputeForm.type,
+        reason: disputeForm.reason || undefined,
+        amountCents: pesosToCents(disputeForm.amount),
+      });
+      toast.success('Dispute filed.');
+      setDisputeFor(null);
+      loadDisputes(folioId);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setDisputeBusy(false);
+    }
+  }
+
+  async function resolveDispute(disputeId, decision) {
+    if (decision === 'APPROVED') {
+      const ok = await confirm({
+        title: 'Approve dispute',
+        message: 'Approve this claim and refund the guest?',
+        detail: 'This posts a real refund against the original payment, same as the Refund action.',
+        confirmLabel: 'Approve & refund',
+      });
+      if (!ok) return;
+    }
+    setResolvingId(disputeId);
+    try {
+      await api.post(`/api/payment-disputes/${disputeId}/resolve`, { decision });
+      toast.success(
+        decision === 'APPROVED' ? 'Dispute approved — refund posted.' : `Dispute marked ${decision.toLowerCase()}.`
+      );
+      loadDisputes(folioId);
+      load(folioId);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setResolvingId(null);
     }
   }
 
@@ -347,6 +420,32 @@ export default function Folios() {
     }
   }
 
+  // Who this folio bills, for the summary header. The folio's own payer (set
+  // by a split — see folio.payerName) takes priority over the stay's overall
+  // guest, since a split folio bills a specific person, not necessarily
+  // whoever occupies the room. A walk-in folio has neither.
+  const headerGuestName = folio?.payerName || folio?.guestName || stayGuestName || 'Walk-in / no guest on file';
+
+  // Shared between the Payment and Deposit tabs — one method list, one place
+  // that renders it as <option>s or <optgroup>s.
+  function renderMethodOptions() {
+    return paymentMethodGroups().map((g) =>
+      g.kind === 'group' ? (
+        <optgroup key={g.label} label={g.label}>
+          {g.methods.map((m) => (
+            <option key={m.code} value={m.code}>
+              {m.label}
+            </option>
+          ))}
+        </optgroup>
+      ) : (
+        <option key={g.code} value={g.code}>
+          {g.label}
+        </option>
+      )
+    );
+  }
+
   return (
     <div>
       <h2>Folios</h2>
@@ -461,13 +560,23 @@ export default function Folios() {
 
       {folio && (
         <>
+          {/* ── Summary: who this folio bills, its status, and its totals ──
+              The folio's payer (set by a split) takes priority over the
+              stay's overall guest, since a split folio bills a specific
+              person, not necessarily whoever occupies the room. */}
           <div className="panel">
-            <div className="panel-head">
-              <h3 style={{ margin: 0 }}>
-                Folio {folio.folioNumber} ·{' '}
-                <span className={`badge ${folio.status.toLowerCase()}`}>{folio.status}</span>
-              </h3>
-              <div style={{ display: 'flex', gap: 8 }}>
+            <div className="folio-summary-top">
+              <div className="folio-summary-guest">
+                <Avatar name={headerGuestName} size={40} />
+                <div>
+                  <div className="folio-summary-name">{headerGuestName}</div>
+                  <div className="folio-summary-sub">
+                    Folio {folio.folioNumber}
+                    <span className={`badge ${folio.status.toLowerCase()}`}>{folio.status}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="folio-summary-actions">
                 <button className="secondary" onClick={printPdf}>
                   Print PDF
                 </button>
@@ -522,261 +631,342 @@ export default function Folios() {
                 <div className="value">{statement?.totalPayments ?? 0}</div>
               </div>
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th className="t-c">Type</th>
-                  <th>Code</th>
-                  <th>Description</th>
-                  <th style={{ textAlign: 'right' }}>Amount</th>
-                  {/* Tax was invisible here while every charge carried zero of
-                      it. Now that charges attract VAT and service charge, a
-                      cashier posting 1,000.00 watched Balance move 1,220.00
-                      with nothing on screen accounting for the 220.00. The
-                      ledger has to add up on its face. */}
-                  <th style={{ textAlign: 'right' }}>Tax</th>
-                  {siblings.length > 0 && <th />}
-                </tr>
-              </thead>
-              <tbody>
-                {folio.transactions.map((t) => (
-                  <tr key={t.id}>
-                    <td>{new Date(t.postedAt).toLocaleDateString()}</td>
-                    <td className="t-c">
-                      <span className={`badge ${t.type.toLowerCase()}`}>{t.type}</span>
-                    </td>
-                    <td>{t.chargeCode || '—'}</td>
-                    <td>{t.description}</td>
-                    <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
-                    {/* taxAmountCents arrives as a decimal STRING (BigInt has no
-                        JSON form); formatPeso takes either. Compared as a
-                        string rather than parsed — there is no arithmetic to do
-                        here, and money must never touch a float. A row with no
-                        tax shows a dash rather than 0.00, so a genuinely
-                        untaxed line reads as untaxed at a glance. */}
-                    <td style={{ textAlign: 'right' }}>
-                      {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
-                        ? '—'
-                        : formatPeso(t.taxAmountCents)}
-                    </td>
-                    {siblings.length > 0 && (
-                      <td style={{ textAlign: 'right' }}>
-                        {/* Payments stay where they were taken, and a transfer cannot
-                            itself be transferred — the service refuses both, so the
-                            control is not offered for them. */}
-                        {folio.status === 'OPEN' &&
-                          t.type !== 'PAYMENT' &&
-                          t.type !== 'REFUND' &&
-                          t.type !== 'TRANSFER' &&
-                          (moving === t.id ? (
-                            <select
-                              autoFocus
-                              defaultValue=""
-                              onBlur={() => setMoving(null)}
-                              onChange={(e) => moveTransaction(t.id, e.target.value)}
-                            >
-                              <option value="">Move to…</option>
-                              {siblings.map((f) => (
-                                <option key={f.id} value={f.id}>
-                                  {f.folioNumber}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <button className="secondary small" onClick={() => setMoving(t.id)}>
-                              Move
-                            </button>
-                          ))}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
 
-          {statement?.folio?.payments?.length > 0 && (
-            <div className="panel">
-              <h3>Payments received</h3>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Method</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {statement.folio.payments.map((p) => (
-                    <tr key={p.id}>
-                      <td>{new Date(p.createdAt).toLocaleDateString()}</td>
-                      <td>{p.method}</td>
-                      <td>
-                        <span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>{formatPeso(p.amountCents)}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        {/* A voided or failed payment has no receipt — the service
-                            refuses it, so the button is not offered. */}
-                        {p.status !== 'VOIDED' && p.status !== 'FAILED' && (
-                          <span style={{ display: 'inline-flex', gap: 6 }}>
-                            <button className="secondary small" onClick={() => printReceipt(p.id)}>
-                              Receipt
-                            </button>
-                            <button className="secondary small" onClick={() => emailReceipt(p.id)}>
-                              Email
-                            </button>
-                          </span>
-                        )}
-                      </td>
+          <div className="folio-layout">
+            {/* ── Main: the ledger and what it produced ── */}
+            <div className="folio-main">
+              <div className="panel">
+                <h3>Ledger</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th className="t-c">Type</th>
+                      <th>Code</th>
+                      <th>Description</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      {/* Tax was invisible here while every charge carried zero
+                          of it. Now that charges attract VAT and service
+                          charge, a cashier posting 1,000.00 watched Balance
+                          move 1,220.00 with nothing on screen accounting for
+                          the 220.00. The ledger has to add up on its face. */}
+                      <th style={{ textAlign: 'right' }}>Tax</th>
+                      {siblings.length > 0 && <th />}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {folio.transactions.map((t) => (
+                      <tr key={t.id}>
+                        <td>{new Date(t.postedAt).toLocaleDateString()}</td>
+                        <td className="t-c">
+                          <span className={`badge ${t.type.toLowerCase()}`}>{t.type}</span>
+                        </td>
+                        <td>{t.chargeCode || '—'}</td>
+                        <td>{t.description}</td>
+                        <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                        {/* taxAmountCents arrives as a decimal STRING (BigInt has no
+                            JSON form); formatPeso takes either. Compared as a
+                            string rather than parsed — there is no arithmetic to do
+                            here, and money must never touch a float. A row with no
+                            tax shows a dash rather than 0.00, so a genuinely
+                            untaxed line reads as untaxed at a glance. */}
+                        <td style={{ textAlign: 'right' }}>
+                          {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
+                            ? '—'
+                            : formatPeso(t.taxAmountCents)}
+                        </td>
+                        {siblings.length > 0 && (
+                          <td style={{ textAlign: 'right' }}>
+                            {/* Payments stay where they were taken, and a transfer cannot
+                                itself be transferred — the service refuses both, so the
+                                control is not offered for them. */}
+                            {folio.status === 'OPEN' &&
+                              t.type !== 'PAYMENT' &&
+                              t.type !== 'REFUND' &&
+                              t.type !== 'TRANSFER' &&
+                              (moving === t.id ? (
+                                <select
+                                  autoFocus
+                                  defaultValue=""
+                                  onBlur={() => setMoving(null)}
+                                  onChange={(e) => moveTransaction(t.id, e.target.value)}
+                                >
+                                  <option value="">Move to…</option>
+                                  {siblings.map((f) => (
+                                    <option key={f.id} value={f.id}>
+                                      {f.folioNumber}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <button className="secondary small" onClick={() => setMoving(t.id)}>
+                                  Move
+                                </button>
+                              ))}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {statement?.folio?.payments?.length > 0 && (
+                <div className="panel">
+                  <h3>Payments received</h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Method</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: 'right' }}>Amount</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statement.folio.payments.map((p) => (
+                        <tr key={p.id}>
+                          <td>{new Date(p.createdAt).toLocaleDateString()}</td>
+                          <td>{p.method}</td>
+                          <td>
+                            <span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>{formatPeso(p.amountCents)}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {/* A voided or failed payment has no receipt — the service
+                                refuses it, so the button is not offered. */}
+                            {p.status !== 'VOIDED' && p.status !== 'FAILED' && (
+                              <span style={{ display: 'inline-flex', gap: 6 }}>
+                                <button className="secondary small" onClick={() => printReceipt(p.id)}>
+                                  Receipt
+                                </button>
+                                <button className="secondary small" onClick={() => emailReceipt(p.id)}>
+                                  Email
+                                </button>
+                                {isEWallet(p.method) && p.status !== 'REFUNDED' && (
+                                  <button className="secondary small" onClick={() => openDispute(p)}>
+                                    Dispute
+                                  </button>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {disputes.length > 0 && (
+                <div className="panel">
+                  <h3>E-Wallet Disputes</h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Filed</th>
+                        <th>Wallet</th>
+                        <th>Type</th>
+                        <th style={{ textAlign: 'right' }}>Amount</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {disputes.map((d) => (
+                        <tr key={d.id}>
+                          <td>{new Date(d.filedAt).toLocaleDateString()}</td>
+                          <td>{d.method}</td>
+                          <td>{d.type === 'CHARGEBACK' ? 'Chargeback' : 'Refund request'}</td>
+                          <td style={{ textAlign: 'right' }}>{formatPeso(d.amountCents)}</td>
+                          <td className="muted">{d.reason || '—'}</td>
+                          <td>
+                            <span className={`badge ${d.status.toLowerCase()}`}>{d.status}</span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {(d.status === 'PENDING' || d.status === 'DISPUTED') && (
+                              <span style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  className="secondary small"
+                                  disabled={resolvingId === d.id}
+                                  onClick={() => resolveDispute(d.id, 'APPROVED')}
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className="secondary small"
+                                  disabled={resolvingId === d.id}
+                                  onClick={() => resolveDispute(d.id, 'REJECTED')}
+                                >
+                                  Reject
+                                </button>
+                                {d.status === 'PENDING' && (
+                                  <button
+                                    className="secondary small"
+                                    disabled={resolvingId === d.id}
+                                    onClick={() => resolveDispute(d.id, 'DISPUTED')}
+                                  >
+                                    Escalate
+                                  </button>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          )}
 
-          <div className="panel">
-            <h3>Post charge</h3>
-            <form onSubmit={postCharge}>
-              <div className="row">
-                <div>
-                  <label>Charge code</label>
-                  <select
-                    value={charge.chargeCode}
-                    onChange={(e) => setCharge({ ...charge, chargeCode: e.target.value })}
+            {/* ── Side: the three ways to move money on this folio, one at a
+                time instead of three stacked full-width forms ── */}
+            <div className="folio-side">
+              <div className="panel">
+                <div className="tabs-pill">
+                  <button
+                    type="button"
+                    className={actionTab === 'charge' ? 'active' : ''}
+                    onClick={() => setActionTab('charge')}
                   >
-                    <option value="">—</option>
-                    {codes.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.code} — {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label>Description</label>
-                  <input
-                    required
-                    value={charge.description}
-                    onChange={(e) => setCharge({ ...charge, description: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label>Amount (₱)</label>
-                  <input
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={charge.amount}
-                    onChange={(e) => setCharge({ ...charge, amount: e.target.value })}
-                  />
-                </div>
-              </div>
-              <button>Post charge</button>
-            </form>
-          </div>
-
-          <div className="panel">
-            <h3>Post payment</h3>
-            <form onSubmit={postPayment}>
-              <div className="row">
-                <div>
-                  <label>Method</label>
-                  <select
-                    value={payment.method}
-                    onChange={(e) => setPayment({ ...payment, method: e.target.value })}
+                    Charge
+                  </button>
+                  <button
+                    type="button"
+                    className={actionTab === 'payment' ? 'active' : ''}
+                    onClick={() => setActionTab('payment')}
                   >
-                    {['CASH', 'CARD', 'GCASH', 'BANK_TRANSFER'].map((m) => (
-                      <option key={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label>Amount (₱)</label>
-                  <input
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={payment.amount}
-                    onChange={(e) => setPayment({ ...payment, amount: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button>Post payment</button>
-                <button type="button" className="secondary" onClick={chargeByQr}>
-                  Charge by QR
-                </button>
-              </div>
-            </form>
-
-            {qr && (
-              <div className="qr-charge">
-                <img src={qr.qrDataUrl} alt="Scan to pay" width="180" height="180" />
-                <div className="qr-charge-side">
-                  <div className="qr-charge-amount">{formatPeso(qr.amountCents)}</div>
-                  {qr.scannable ? (
-                    <p className="muted">Ask the guest to scan this with their phone camera.</p>
-                  ) : (
-                    <p className="muted">
-                      {/* Honest about the offline case: a phone resolving localhost
-                          reaches itself, so the code cannot be scanned from one. */}
-                      This code points at <code>localhost</code>, so it can only be opened on this
-                      machine. Open the link in another tab to demonstrate, or set{' '}
-                      <code>PUBLIC_BASE_URL</code> to this machine&rsquo;s network address to make it
-                      scannable.
-                    </p>
-                  )}
-                  <a href={qr.url} target="_blank" rel="noreferrer" className="qr-charge-link">
-                    {qr.url}
-                  </a>
-                  <p className="muted" style={{ fontSize: 12 }}>
-                    Expires {new Date(qr.expiresAt).toLocaleTimeString()}. The folio updates itself
-                    when the guest confirms.
-                  </p>
-                  <button className="secondary small" onClick={() => setQr(null)}>
-                    Dismiss
+                    Payment
+                  </button>
+                  <button
+                    type="button"
+                    className={actionTab === 'deposit' ? 'active' : ''}
+                    onClick={() => setActionTab('deposit')}
+                  >
+                    Deposit
                   </button>
                 </div>
-              </div>
-            )}
-          </div>
 
-          <div className="panel">
-            <h3>Advance deposit</h3>
-            <form onSubmit={postDeposit}>
-              <div className="row">
-                <div>
-                  <label>Method</label>
-                  <select
-                    value={deposit.method}
-                    onChange={(e) => setDeposit({ ...deposit, method: e.target.value })}
-                  >
-                    {['CASH', 'CARD', 'GCASH', 'BANK_TRANSFER'].map((m) => (
-                      <option key={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label>Amount (₱)</label>
-                  <input
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={deposit.amount}
-                    onChange={(e) => setDeposit({ ...deposit, amount: e.target.value })}
-                  />
-                </div>
+                {actionTab === 'charge' && (
+                  <form onSubmit={postCharge}>
+                    <label>Charge code</label>
+                    <select
+                      value={charge.chargeCode}
+                      onChange={(e) => setCharge({ ...charge, chargeCode: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      {codes.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <label style={{ marginTop: 10 }}>Description</label>
+                    <input
+                      required
+                      value={charge.description}
+                      onChange={(e) => setCharge({ ...charge, description: e.target.value })}
+                    />
+                    <label style={{ marginTop: 10 }}>Amount (₱)</label>
+                    <input
+                      required
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={charge.amount}
+                      onChange={(e) => setCharge({ ...charge, amount: e.target.value })}
+                    />
+                    <button style={{ marginTop: 12 }}>Post charge</button>
+                  </form>
+                )}
+
+                {actionTab === 'payment' && (
+                  <>
+                    <form onSubmit={postPayment}>
+                      <label>Method</label>
+                      <select
+                        value={payment.method}
+                        onChange={(e) => setPayment({ ...payment, method: e.target.value })}
+                      >
+                        {renderMethodOptions()}
+                      </select>
+                      <label style={{ marginTop: 10 }}>Amount (₱)</label>
+                      <input
+                        required
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={payment.amount}
+                        onChange={(e) => setPayment({ ...payment, amount: e.target.value })}
+                      />
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
+                        <button>Post payment</button>
+                        <button type="button" className="secondary" onClick={chargeByQr}>
+                          Charge by QR
+                        </button>
+                      </div>
+                    </form>
+
+                    {qr && (
+                      <div className="qr-charge" style={{ flexDirection: 'column' }}>
+                        <img src={qr.qrDataUrl} alt="Scan to pay" width="160" height="160" />
+                        <div className="qr-charge-side">
+                          <div className="qr-charge-amount">{formatPeso(qr.amountCents)}</div>
+                          {qr.scannable ? (
+                            <p className="muted">Ask the guest to scan this with their phone camera.</p>
+                          ) : (
+                            <p className="muted">
+                              {/* Honest about the offline case: a phone resolving localhost
+                                  reaches itself, so the code cannot be scanned from one. */}
+                              This code points at <code>localhost</code>, so it can only be opened on
+                              this machine. Open the link in another tab to demonstrate, or set{' '}
+                              <code>PUBLIC_BASE_URL</code> to this machine&rsquo;s network address to
+                              make it scannable.
+                            </p>
+                          )}
+                          <a href={qr.url} target="_blank" rel="noreferrer" className="qr-charge-link">
+                            {qr.url}
+                          </a>
+                          <p className="muted" style={{ fontSize: 12 }}>
+                            Expires {new Date(qr.expiresAt).toLocaleTimeString()}. The folio updates
+                            itself when the guest confirms.
+                          </p>
+                          <button className="secondary small" onClick={() => setQr(null)}>
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {actionTab === 'deposit' && (
+                  <form onSubmit={postDeposit}>
+                    <label>Method</label>
+                    <select
+                      value={deposit.method}
+                      onChange={(e) => setDeposit({ ...deposit, method: e.target.value })}
+                    >
+                      {renderMethodOptions()}
+                    </select>
+                    <label style={{ marginTop: 10 }}>Amount (₱)</label>
+                    <input
+                      required
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={deposit.amount}
+                      onChange={(e) => setDeposit({ ...deposit, amount: e.target.value })}
+                    />
+                    <button style={{ marginTop: 12 }}>Record deposit</button>
+                  </form>
+                )}
               </div>
-              <button>Record deposit</button>
-            </form>
+            </div>
           </div>
         </>
       )}
@@ -785,8 +975,11 @@ export default function Folios() {
         open={splitOpen}
         folio={folio}
         // The guest occupying the room is nearly always one of the payers, so the
-        // dialog opens with their name already in the first row.
-        guestName={stayGuestName}
+        // dialog opens with their name already in the first row. folio.guestName
+        // (the reservation's) is the reliable source; stayGuestName (derived from
+        // a Guest-service profile join) is a fallback for the rare folio it still
+        // catches that this one does not.
+        guestName={folio?.guestName || stayGuestName}
         // Defaults the payer count to the booking's adult count instead of an
         // arbitrary 2, since the desk splits a bill among the people who are
         // actually staying far more often than any other number.
@@ -804,6 +997,57 @@ export default function Folios() {
         // its siblings have moved on — reload rather than patching local state.
         onDone={() => load(folioId)}
       />
+
+      {/* Filing an e-wallet refund/chargeback claim — see the Dispute button
+          on a GCash/Maya row in "Payments received" above. */}
+      <Modal
+        open={!!disputeFor}
+        onClose={() => setDisputeFor(null)}
+        title={disputeFor ? `File a dispute — ${disputeFor.method}` : 'File a dispute'}
+        width={420}
+        footer={
+          <>
+            <button className="secondary" onClick={() => setDisputeFor(null)}>
+              Cancel
+            </button>
+            <button onClick={submitDispute} disabled={disputeBusy}>
+              {disputeBusy ? 'Filing…' : 'File dispute'}
+            </button>
+          </>
+        }
+      >
+        {disputeFor && (
+          <form onSubmit={submitDispute}>
+            <label>Type</label>
+            <select
+              value={disputeForm.type}
+              onChange={(e) => setDisputeForm({ ...disputeForm, type: e.target.value })}
+            >
+              <option value="REFUND_REQUEST">Refund request (guest/desk-initiated)</option>
+              <option value="CHARGEBACK">Chargeback (filed by the guest with the wallet)</option>
+            </select>
+            <label style={{ marginTop: 10 }}>Amount (₱)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              max={(Number(disputeFor.amountCents) / 100).toFixed(2)}
+              value={disputeForm.amount}
+              onChange={(e) => setDisputeForm({ ...disputeForm, amount: e.target.value })}
+            />
+            <label style={{ marginTop: 10 }}>Reason</label>
+            <textarea
+              rows={3}
+              value={disputeForm.reason}
+              onChange={(e) => setDisputeForm({ ...disputeForm, reason: e.target.value })}
+              placeholder="What the guest reported, or the gateway's chargeback reason."
+            />
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              Filing does not move any money. Approving the case later posts the actual refund.
+            </p>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }
