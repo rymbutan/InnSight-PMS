@@ -17,5 +17,7 @@ export const SOURCE_LABELS = {
   OTA: 'Other OTA',
 };
 
-// Matches the deposit form's <option> list on the New Reservation screen.
-export const PAYMENT_TYPES = ['Cash', 'Card', 'Bank Transfer', 'GCash'];
+// Payment method options moved to lib/paymentMethods.js's paymentMethodGroups()
+// — every payment-method <select> in the app (including the one this file
+// used to serve) renders from that, grouped so GCash/Maya nest under
+// "E-Wallet" instead of sitting flat alongside Cash and Card.

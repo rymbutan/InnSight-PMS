@@ -66,6 +66,11 @@ const NAV_SECTIONS = [
       {
         to: '/rooms',
         label: 'Hotel Room Information Editor',
+        // Everyone but Admin sees the plain-language name — the full name
+        // names what the page technically is (an editor of room records),
+        // which matters to whoever configures the property, not to a Front
+        // Desk or Housekeeping user just looking up a room.
+        nonAdminLabel: 'Hotel Rooms',
         icon: 'bed',
         roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
       },
@@ -125,7 +130,7 @@ const NAV_SECTIONS = [
     label: 'Settings',
     items: [
       { to: '/users', label: 'User & Roles', icon: 'shield', roles: ['ADMIN', 'MANAGER'] },
-      { to: '/health', label: 'Service Health', icon: 'activity', roles: ['ADMIN', 'MANAGER'] },
+      { to: '/health', label: 'Service Health', icon: 'activity', roles: ['ADMIN'] },
       { to: '/settings', label: 'Settings', icon: 'settings' },
     ],
   },
@@ -328,28 +333,34 @@ export default function Layout() {
             <div className="side-group-label" aria-hidden={collapsed || undefined}>
               {s.label}
             </div>
-            {s.items.map((n) => (
-              <NavLink
-                key={n.to}
-                to={n.to}
-                end={n.end}
-                // `matchPaths` marks the row active on routes other than its own
-                // `to`. Reports & Revenue links to /reports but covers both
-                // pages, and without this the rail highlights nothing at all
-                // while you are on /revenue.
-                className={({ isActive }) =>
-                  `side-link${
-                    isActive || n.matchPaths?.some((p) => location.pathname.startsWith(p)) ? ' active' : ''
-                  }`
-                }
-                onClick={() => setDrawerOpen(false)}
-                // The label is the only affordance left once collapsed.
-                title={collapsed ? n.label : undefined}
-              >
-                <Icon name={n.icon} size={18} strokeWidth={1.9} />
-                <span className="side-link-label">{n.label}</span>
-              </NavLink>
-            ))}
+            {s.items.map((n) => {
+              // A nav item may show a different label to everyone but Admin
+              // (see the Hotel Room Information Editor entry above) — resolved
+              // here, once, rather than at every read of n.label below.
+              const label = n.nonAdminLabel && !hasRole('ADMIN') ? n.nonAdminLabel : n.label;
+              return (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  end={n.end}
+                  // `matchPaths` marks the row active on routes other than its own
+                  // `to`. Reports & Revenue links to /reports but covers both
+                  // pages, and without this the rail highlights nothing at all
+                  // while you are on /revenue.
+                  className={({ isActive }) =>
+                    `side-link${
+                      isActive || n.matchPaths?.some((p) => location.pathname.startsWith(p)) ? ' active' : ''
+                    }`
+                  }
+                  onClick={() => setDrawerOpen(false)}
+                  // The label is the only affordance left once collapsed.
+                  title={collapsed ? label : undefined}
+                >
+                  <Icon name={n.icon} size={18} strokeWidth={1.9} />
+                  <span className="side-link-label">{label}</span>
+                </NavLink>
+              );
+            })}
           </div>
         ))}
       </nav>
@@ -421,6 +432,18 @@ export default function Layout() {
           >
             <Icon name="menu" size={18} />
           </button>
+
+          {/* One control, in the shared topbar, so every routed page gets it
+              for free rather than each page wiring its own. Hidden on the
+              dashboard itself — there is nothing in the app to go back TO
+              from the landing page. navigate(-1) walks the app's own history
+              stack, the same one the browser's back button reads. */}
+          {location.pathname !== '/' && (
+            <button type="button" className="cb-back" onClick={() => navigate(-1)}>
+              <Icon name="chevron-left" size={15} strokeWidth={2.2} />
+              Back
+            </button>
+          )}
 
           <div className="cb-search-wrap" ref={searchRef}>
             <input
