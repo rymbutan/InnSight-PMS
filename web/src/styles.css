@@ -5134,17 +5134,24 @@ html[data-theme='dark'] .skel {
   }
 }
 
+/* Stacked list, not the wrapped inline row this used to be — the legend now
+   lives in its own card in the right-hand column (.hk-side), at the same
+   ~290px width as the room detail card below it, so a horizontal wrap of
+   six items no longer fits. */
 .hk-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 9px;
   font-size: 12.5px;
 }
 .hk-legend-item {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+.hk-legend-text {
+  flex: 1;
+  min-width: 0;
 }
 .hk-legend-swatch {
   width: 14px;
@@ -5152,6 +5159,7 @@ html[data-theme='dark'] .skel {
   border-radius: 4px;
   border: 1.5px solid;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 .hk-layout {
@@ -5219,21 +5227,32 @@ html[data-theme='dark'] .skel {
    `align-items: flex-start`, so this stays its own height instead of being
    stretched to the map's, which a stretched item cannot stick inside; and the
    top bar is `position: sticky; top: 0` at z-index 100, so the offset below
-   clears it and the z-index stays under it. */
-.hk-detail {
+   clears it and the z-index stays under it.
+
+   The stickiness and height cap live on `.hk-side` (the column) rather than on
+   `.hk-detail` itself now, because the legend card sits above it in the same
+   column — anchoring each card separately would either overlap them or need
+   the legend's own height threaded into the detail card's `top`. One sticky,
+   internally-scrolling column with both cards inside is simpler and behaves
+   the same whether or not a room is selected. */
+.hk-side {
   width: 290px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   position: sticky;
   top: calc(var(--topbar-h) + 16px);
-  /* Never taller than what is left of the screen. Without the cap, a room with
-     a full action list is simply cut off at the bottom of the viewport with no
-     way to reach the rest — sticky pins the TOP of the element, so overflow
-     goes off the bottom edge and stays there however far you scroll. The panel
-     scrolls internally instead. The 32px is the 16px offset above plus the same
+  /* Never taller than what is left of the screen — see the note above this
+     rule used to carry alone; the 32px is the 16px offset above plus the same
      again below, so it never sits flush against the bottom edge. */
   max-height: calc(100vh - var(--topbar-h) - 32px);
   overflow-y: auto;
   z-index: 1;
+}
+.hk-legend-panel,
+.hk-detail {
+  flex-shrink: 0;
 }
 .hk-detail-head {
   display: flex;
@@ -5280,11 +5299,12 @@ html[data-theme='dark'] .skel {
   .hk-layout {
     flex-direction: column;
   }
-  /* Stacked, the panel sits BELOW the map rather than beside it, so there is no
-     "stay in view while the map scrolls past" to preserve — sticking here would
-     just pin a full-width block over the content underneath it, and the height
-     cap would put a second scrollbar inside a page that already scrolls. */
-  .hk-detail {
+  /* Stacked, the column sits BELOW the map rather than beside it, so there is
+     no "stay in view while the map scrolls past" to preserve — sticking here
+     would just pin a full-width block over the content underneath it, and the
+     height cap would put a second scrollbar inside a page that already
+     scrolls. */
+  .hk-side {
     width: 100%;
     position: static;
     max-height: none;
