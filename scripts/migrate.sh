@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 migrate() {
   local svc="$1"
   echo ""
-  echo "→ Syncing schema for $svc…"
+  echo "→ Syncing schema for ${svc}…"
   # No --accept-data-loss: a destructive change should fail loudly and be
   # handled deliberately rather than silently dropping columns/data.
   docker compose exec -T "$svc" npx prisma db push --schema=src/prisma/schema.prisma
