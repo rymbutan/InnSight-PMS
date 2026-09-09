@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
@@ -123,8 +123,129 @@ export default function Reports() {
         </div>
       </div>
 
-      {result && <RenderReport type={result.type} data={result.data} />}
+      {/* An ad-hoc report replaces this once run; until then (and every time
+          the picker is reset) the dashboard is what fills the lower half of
+          the page. Either way, this region is never the blank space it used
+          to be before the operator picked a report and hit Run. */}
+      {result ? <RenderReport type={result.type} data={result.data} /> : <DefaultDashboard />}
     </div>
+  );
+}
+
+// ── Default dashboard ────────────────────────────────────────────────────────
+// What fills the page before anyone has run an ad-hoc report: live KPIs that
+// need no date range (so there is always something to show on a stack with no
+// completed night audit yet) plus a log of recent report activity. Each half
+// degrades to its own EmptyState independently — a property with rooms but no
+// report history yet should still see its room KPIs, not lose them to a single
+// all-or-nothing empty check.
+function DefaultDashboard() {
+  const toast = useToast();
+  const [state, setState] = useState({ loading: true, rooms: null, inHouse: null, runs: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [rooms, inHouse, runs] = await Promise.all([
+        api.get('/api/reports/room-status').then((r) => r.data).catch(() => null),
+        api.get('/api/reports/in-house').then((r) => r.data).catch(() => null),
+        api.get('/api/reports/runs').then((r) => r.data).catch(() => null),
+      ]);
+      if (cancelled) return;
+      setState({ loading: false, rooms, inHouse, runs });
+      if (!rooms && !inHouse && !runs) toast.error('Could not load the reports dashboard.');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state.loading) {
+    return (
+      <div className="panel">
+        <div className="metrics">
+          <Metric label="Total rooms" value="…" />
+          <Metric label="In-house guests" value="…" />
+          <Metric label="Vacant, ready" value="…" />
+          <Metric label="Needs attention" value="…" />
+        </div>
+      </div>
+    );
+  }
+
+  const rooms = state.rooms;
+  const runs = state.runs || [];
+  const byStatus = rooms?.byStatus || {};
+  // No rooms at all means no property has been configured yet — the one case
+  // where even the KPI tiles have nothing to say, so the whole region defers
+  // to guidance instead of a wall of zeroes.
+  if (!rooms || rooms.total === 0) {
+    return (
+      <div className="panel">
+        <EmptyState
+          kind="chart"
+          title="Nothing to report on yet"
+          hint="Add rooms under Rooms & Rates, then check guests in — KPIs and report history will appear here."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="panel">
+        <h3 style={{ margin: '0 0 12px' }}>At a glance</h3>
+        <div className="metrics">
+          <Metric label="Total rooms" value={rooms.total} />
+          <Metric label="In-house guests" value={state.inHouse?.count ?? '—'} />
+          <Metric
+            label="Vacant, ready"
+            value={(byStatus.CLEAN || 0) + (byStatus.CLEAN_INSPECTED || 0)}
+          />
+          <Metric label="Vacant, dirty" value={byStatus.DIRTY || 0} />
+          <Metric
+            label="Needs attention"
+            value={(byStatus.OUT_OF_SERVICE || 0) + (byStatus.OUT_OF_ORDER || 0)}
+          />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3 style={{ margin: '0 0 12px' }}>Recent report activity</h3>
+        {runs.length === 0 ? (
+          <EmptyState
+            kind="inbox"
+            title="No reports have been run yet"
+            hint="Pick a report above and select Run — it will show up here."
+          />
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Report</th>
+                <th className="t-c">Status</th>
+                <th>Run by</th>
+                <th>Run at</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.slice(0, 10).map((r) => (
+                <tr key={r.id}>
+                  <td>{r.type.replace(/_/g, ' ')}</td>
+                  <td className="t-c">
+                    <span className={`badge ${r.status === 'COMPLETED' ? 'confirmed' : 'cancelled'}`}>
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="muted">{r.runBy || '—'}</td>
+                  <td className="muted">{new Date(r.runAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }
 
