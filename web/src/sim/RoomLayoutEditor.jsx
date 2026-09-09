@@ -87,6 +87,7 @@ function stationLine(s) {
 // code that knows how to turn live editor state back into the source format —
 // re-deriving that is a morning's work, and re-adding a caller is one line. It
 // tree-shakes out of the build, so it costs nothing but these lines.
+// eslint-disable-next-line no-unused-vars -- kept for future use, see above
 function serializeBlock(tier, room, walls, furniture, stations) {
   const hPart = room.h && room.h !== 3 ? ` h: ${r2(room.h)},` : '';
   return (
@@ -2145,15 +2146,3 @@ const miniBtn = {
   fontSize: 10,
   cursor: 'pointer',
 };
-const icobtn = { background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 16 };
-function btn(active) {
-  return {
-    padding: '5px 9px',
-    borderRadius: 5,
-    border: '1px solid var(--border)',
-    cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'var(--field)',
-    color: active ? 'var(--on-accent)' : 'var(--text)',
-    fontSize: 12,
-  };
-}

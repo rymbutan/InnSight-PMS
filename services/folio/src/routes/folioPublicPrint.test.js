@@ -27,7 +27,7 @@ const mockPrisma = {
       return null;
     },
     findMany: async () => [],
-    update: async ({ where: { id }, data }) => {
+    update: async ({ data }) => {
       Object.assign(folioRow, data);
       return folioRow;
     },

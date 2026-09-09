@@ -51,9 +51,18 @@ test('the card is titled InnSight PMS Registration Card', () => {
 test('guest fields are filled from the system, not left blank', () => {
   const byLabel = Object.fromEntries(build().fields.map((f) => [f.label, f.value]));
   assert.strictEqual(byLabel.Name, 'Maria Dela Cruz');
-  assert.strictEqual(byLabel.Country, 'Philippines');
   assert.strictEqual(byLabel.Phone, '+63 917 555 0101');
   assert.strictEqual(byLabel.Email, 'maria@example.com');
+});
+
+// Country used to print from guest.nationality, but nothing in the booking
+// flow ever collects or stores a guest's nationality, so the row printed
+// blank on every card. Removed rather than made a write-in line like Address
+// below — even a fixture that DOES carry a nationality (guest.nationality
+// above) must not resurrect the row.
+test('there is no Country field — nothing in the system ever captures one', () => {
+  const country = build().fields.find((f) => f.label === 'Country');
+  assert.strictEqual(country, undefined);
 });
 
 // Address has no backing column anywhere in the system (Guest has none, and the

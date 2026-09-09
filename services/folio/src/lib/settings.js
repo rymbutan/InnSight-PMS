@@ -16,15 +16,24 @@
 // settingsStore.js. lib/prisma.js constructs a PrismaClient at module load, so
 // requiring it here would make this file's unit tests need a database.
 
-const { DEFAULT_TAX_RATES } = require('./policies');
+const { TAX_COMPONENTS, defaultRatesForCountry, DEFAULT_COUNTRY } = require('./policies');
 
-// Component key → AppSetting key.
-const TAX_RATE_KEYS = {
-  vat: 'tax_vat_percent',
-  serviceCharge: 'tax_service_charge_percent',
-  localTax: 'tax_local_percent',
-  realPropertyTax: 'tax_rpt_percent',
-};
+const TAX_COMPONENT_KEYS = TAX_COMPONENTS.map((c) => c.key);
+
+// Tax rates are now stored PER COUNTRY, not as one flat global set — this is
+// the AppSetting key for one component of one jurisdiction's rate set. Any
+// number of countries can have rates configured; which one is actually
+// applied to a real charge is decided by the property's own country
+// (HOTEL_KEYS.country below), not by whichever the operator looked at last.
+function taxRateKey(country, component) {
+  return `tax_${country}_${component}_percent`;
+}
+
+const COUNTRY_CODE = /^[A-Z]{2}$/;
+function normalizeCountry(country) {
+  const c = String(country ?? '').trim().toUpperCase();
+  return COUNTRY_CODE.test(c) ? c : null;
+}
 
 const HOTEL_KEYS = {
   name: 'hotel_name',
@@ -39,6 +48,10 @@ const HOTEL_KEYS = {
   // turnover a clean handover instead of a conflict.
   checkInTime: 'hotel_checkin_time',
   checkOutTime: 'hotel_checkout_time',
+  // ISO-3166 alpha-2. This is the jurisdiction a real charge's tax is computed
+  // against — see policies.js's note on why the property's country governs,
+  // not a guest's nationality.
+  country: 'hotel_country',
 };
 
 // Fields that are a 24-hour HH:MM clock time rather than free text.
@@ -65,12 +78,14 @@ const HOTEL_DEFAULTS = {
   // released again in the afternoon, leaving housekeeping the gap between.
   checkInTime: '14:00',
   checkOutTime: '12:00',
+  country: DEFAULT_COUNTRY,
 };
 
-function parseTaxRates(rows = []) {
+function parseTaxRates(country, rows = []) {
   const byKey = new Map(rows.map((r) => [r.key, r.value]));
-  const rates = { ...DEFAULT_TAX_RATES };
-  for (const [component, key] of Object.entries(TAX_RATE_KEYS)) {
+  const rates = defaultRatesForCountry(country);
+  for (const component of TAX_COMPONENT_KEYS) {
+    const key = taxRateKey(country, component);
     if (!byKey.has(key)) continue;
     const n = Number(byKey.get(key));
     // A corrupt stored value must NOT become NaN tax on a guest's bill.
@@ -79,15 +94,18 @@ function parseTaxRates(rows = []) {
   return rates;
 }
 
-function validateTaxRates(body = {}) {
-  const unknown = Object.keys(body).filter((k) => !(k in TAX_RATE_KEYS));
+function validateTaxRates(country, body = {}) {
+  if (!normalizeCountry(country)) {
+    return { ok: false, error: 'country must be a 2-letter ISO code, e.g. PH.' };
+  }
+  const unknown = Object.keys(body).filter((k) => !TAX_COMPONENT_KEYS.includes(k));
   if (unknown.length) {
     // Rejected rather than ignored: silently dropping a field the caller
     // believed it set is how a rate ends up different from what the screen says.
     return { ok: false, error: `Unknown tax rate(s): ${unknown.join(', ')}.` };
   }
-  const rates = { ...DEFAULT_TAX_RATES };
-  for (const [component] of Object.entries(TAX_RATE_KEYS)) {
+  const rates = defaultRatesForCountry(country);
+  for (const component of TAX_COMPONENT_KEYS) {
     if (!(component in body)) continue;
     const n = Number(body[component]);
     if (!Number.isFinite(n) || n < 0 || n > 100) {
@@ -121,6 +139,12 @@ function validateHotel(body = {}) {
       hotel[field] = v;
       continue;
     }
+    if (field === 'country') {
+      const normalized = normalizeCountry(v);
+      if (!normalized) return { ok: false, error: 'country must be a 2-letter ISO code, e.g. PH.' };
+      hotel.country = normalized;
+      continue;
+    }
     if (v.length > 200) return { ok: false, error: `${field} must be 200 characters or fewer.` };
     hotel[field] = v;
   }
@@ -139,7 +163,9 @@ function validateHotel(body = {}) {
 }
 
 module.exports = {
-  TAX_RATE_KEYS,
+  TAX_COMPONENT_KEYS,
+  taxRateKey,
+  normalizeCountry,
   HOTEL_KEYS,
   HOTEL_DEFAULTS,
   HOTEL_TIME_FIELDS,

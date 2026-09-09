@@ -189,7 +189,7 @@ export default function Arrivals() {
             Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}
           </h3>
           {/* The range switcher sits in the panel header, top right. */}
-          <div className="seg" role="group" aria-label="Arrival window">
+          <div className="seg-rect" role="group" aria-label="Arrival window">
             {[
               ['today', 'Today'],
               ['week', 'Week'],
@@ -198,7 +198,7 @@ export default function Arrivals() {
               <button
                 key={value}
                 type="button"
-                className={`seg-btn${range === value ? ' is-active' : ''}`}
+                className={`seg-rect-btn${range === value ? ' is-active' : ''}`}
                 aria-pressed={range === value}
                 onClick={() => setRange(value)}
               >

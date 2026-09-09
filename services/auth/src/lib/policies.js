@@ -74,7 +74,31 @@ const TAX_COMPONENTS = [
   { key: 'realPropertyTax', label: 'Real Property Tax' },
 ];
 
-const DEFAULT_TAX_RATES = { vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 };
+// ── Country jurisdiction ────────────────────────────────────────────────────
+// Tax is owed to whatever country the PROPERTY operates in, not the guest's
+// own nationality — a guest from abroad staying at a PH property still pays PH
+// VAT. DEFAULT_COUNTRY is that property's jurisdiction until Settings says
+// otherwise (see lib/settings.js's `hotel_country`).
+//
+// Only PH ships a real default rate set, for the same reason localTax and
+// realPropertyTax already default to zero above: inventing a plausible rate
+// for a jurisdiction nobody has configured would put fabricated tax on a
+// guest's bill. A country with no rates configured gets 0% on every
+// component — an honest, obviously-incomplete number — rather than silently
+// borrowing PH's.
+const DEFAULT_COUNTRY = 'PH';
+const DEFAULT_TAX_RATES_BY_COUNTRY = {
+  [DEFAULT_COUNTRY]: { vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 },
+};
+const ZERO_TAX_RATES = { vat: 0, serviceCharge: 0, localTax: 0, realPropertyTax: 0 };
+
+function defaultRatesForCountry(country) {
+  return { ...(DEFAULT_TAX_RATES_BY_COUNTRY[country] || ZERO_TAX_RATES) };
+}
+
+// Unchanged name and value for every existing caller: this is simply
+// DEFAULT_TAX_RATES_BY_COUNTRY's entry for DEFAULT_COUNTRY.
+const DEFAULT_TAX_RATES = DEFAULT_TAX_RATES_BY_COUNTRY[DEFAULT_COUNTRY];
 
 // Categories that are never taxed. An unknown category IS taxed — the safer
 // direction of failure for a billing system is to compute tax and have someone
@@ -157,5 +181,9 @@ module.exports = {
   commissionCents,
   TAX_COMPONENTS,
   DEFAULT_TAX_RATES,
+  DEFAULT_COUNTRY,
+  DEFAULT_TAX_RATES_BY_COUNTRY,
+  ZERO_TAX_RATES,
+  defaultRatesForCountry,
   CHANNEL_COMMISSION,
 };
