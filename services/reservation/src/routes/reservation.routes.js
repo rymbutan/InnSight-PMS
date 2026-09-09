@@ -7,7 +7,7 @@ const { computeAddOns } = require('../lib/addOns');
 const { makeInventoryClient, NoInventoryError } = require('../lib/inventoryClient');
 const { nightsBetween: nightsBetweenDates, utcDayKey } = require('../lib/date');
 const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
-const { pickAssignableRoom, normaliseRoomId, MAX_ASSIGN_ATTEMPTS } = require('../lib/roomAssignment');
+const { pickAssignableRoom, freeRoomIds, normaliseRoomId, MAX_ASSIGN_ATTEMPTS } = require('../lib/roomAssignment');
 const { makeFolioClient } = require('../lib/folioClient');
 const { stampWindow, DEFAULT_SERVICE_TIMES } = require('../lib/stayWindow');
 const { send: sendMail, TEMPLATES } = require('../lib/notifier');
@@ -141,6 +141,45 @@ async function logActivity(reservationId, user, action, summary, payload) {
     /* non-fatal */
   }
 }
+
+// GET /api/reservations/available-rooms?roomTypeCode=&checkIn=&checkOut=&excludeReservationId=
+//
+// The rooms of a type actually free for a date range — not "every room of
+// this type that isn't OUT_OF_ORDER", which is what the New Reservation
+// wizard's per-pick room dropdown used to list (web/src/pages/NewReservation.jsx).
+// That list had NO date-overlap check at all, so a room already booked by
+// someone else for the exact dates being entered showed up as a normal,
+// selectable choice right next to "Auto-assign" — and picking one is exactly
+// what caused guests to be booked into a room that was actually taken.
+//
+// Reuses freeRoomIds — the identical check auto-assignment itself picks
+// from — so a human choosing from this list and the system choosing for
+// them can never disagree about which rooms are free.
+router.get('/reservations/available-rooms', requireRole(...STAFF), async (req, res) => {
+  try {
+    const { roomTypeCode, checkIn, checkOut, excludeReservationId } = req.query;
+    if (!roomTypeCode || !checkIn || !checkOut) {
+      return res.status(400).json({ error: 'roomTypeCode, checkIn, checkOut required.' });
+    }
+    const ci = new Date(checkIn);
+    const co = new Date(checkOut);
+    if (Number.isNaN(ci.getTime()) || Number.isNaN(co.getTime()) || co <= ci) {
+      return res.status(400).json({ error: 'checkOut must be after checkIn.' });
+    }
+    const ids = await freeRoomIds({
+      inventory,
+      prisma,
+      roomTypeCode,
+      checkIn: ci,
+      checkOut: co,
+      excludeReservationId: excludeReservationId || undefined,
+    });
+    res.json({ roomIds: ids });
+  } catch (err) {
+    console.error('[Reservation] Available rooms error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
 
 // POST /api/reservations
 router.post('/reservations', requireRole(...STAFF), async (req, res) => {
@@ -986,6 +1025,24 @@ router.get('/reservations/:id/activity', requireRole(...ROLE_GROUPS.DESK_AUDIT),
   }
 });
 
+// GET /api/reservations/:id/notifications — every attempted booking
+// confirmation, across Email, SMS and Viber. SMS/Viber are mocked (no real
+// provider exists in this stack), so this is the only place to see what
+// would have gone out — see lib/notifyChannels.js.
+router.get('/reservations/:id/notifications', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    const list = await prisma.notificationLog.findMany({
+      where: { reservationId: req.params.id },
+      orderBy: { sentAt: 'desc' },
+      take: 200,
+    });
+    res.json(list);
+  } catch (err) {
+    console.error('[Reservation] Notifications error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/settings/addon-fee-percent — read the current add-on surcharge so
 // the reservation wizard can show it before checkout.
 router.get('/settings/addon-fee-percent', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
@@ -1054,8 +1111,8 @@ router.get('/settings/theme', async (_req, res) => {
   }
 });
 
-// PUT /api/settings/theme — admin/manager only; this changes what everyone sees.
-router.put('/settings/theme', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+// PUT /api/settings/theme — ADMIN only; this changes what everyone sees.
+router.put('/settings/theme', requireRole('ADMIN'), async (req, res) => {
   try {
     const { primary, secondary, hover } = req.body || {};
     for (const [name, v] of Object.entries({ primary, secondary, hover })) {
@@ -1076,8 +1133,8 @@ router.put('/settings/theme', requireRole(...ROLE_GROUPS.MGMT), async (req, res)
   }
 });
 
-// PUT /api/settings/theme/reset — back to the shipped palette.
-router.put('/settings/theme/reset', requireRole(...ROLE_GROUPS.MGMT), async (_req, res) => {
+// PUT /api/settings/theme/reset — ADMIN only, same as the write above.
+router.put('/settings/theme/reset', requireRole('ADMIN'), async (_req, res) => {
   try {
     await prisma.appSetting.deleteMany({ where: { key: THEME_KEY } });
     res.json(THEME_DEFAULT);

@@ -47,8 +47,21 @@ const { overlappingRoomsWhere } = require('./listQuery');
 const MAX_ASSIGN_ATTEMPTS = 3;
 
 /**
- * The first room of `roomTypeCode` that nothing else holds over
- * [checkIn, checkOut), or null if there is none.
+ * Every room of `roomTypeCode` that nothing else holds over
+ * [checkIn, checkOut) — the full free set, in inventory's preference order
+ * (lowest floor, then lowest number).
+ *
+ * This is the same two-step check pickAssignableRoom uses (inventory's
+ * physically-usable candidates, minus whichever of them a Reservation already
+ * holds for an overlapping window) — pulled out so a caller that needs the
+ * WHOLE free list (a room picker a human chooses from, not just "give me
+ * one") reads the identical answer auto-assignment would have picked from,
+ * rather than a second, easily-drifting implementation of "is this room
+ * free". See NewReservation.jsx's per-pick room dropdown, which used to list
+ * every room of the type with no date-overlap check at all — excluding only
+ * OUT_OF_ORDER — so a room already booked by someone else for the exact
+ * dates being entered, or one a guest is physically standing in right now,
+ * showed up as a normal, selectable choice.
  *
  * @param {object} args
  * @param {object} args.inventory              inventory client (needs roomCandidates)
@@ -57,10 +70,12 @@ const MAX_ASSIGN_ATTEMPTS = 3;
  * @param {string|Date} args.checkIn
  * @param {string|Date} args.checkOut
  * @param {string} [args.excludeReservationId] ignore this booking's own row (moves)
- * @param {string[]} [args.excludeRoomIds]     rooms already tried and lost
- * @returns {Promise<string|null>} room id
+ * @param {string[]} [args.excludeRoomIds]     rooms to leave out regardless
+ * @returns {Promise<string[]>} room ids, inventory's preference order — empty
+ *   (not thrown) if inventory could not be reached, so a caller populating a
+ *   picker shows "none available" rather than crashing the page.
  */
-async function pickAssignableRoom({
+async function freeRoomIds({
   inventory,
   prisma,
   roomTypeCode,
@@ -73,27 +88,37 @@ async function pickAssignableRoom({
   try {
     candidates = await inventory.roomCandidates({ roomTypeCode, checkIn, checkOut });
   } catch (err) {
-    // Inventory being unreachable must not fail a booking whose capacity is
-    // already held. Leave the room unassigned and say so loudly.
     console.error(
-      `[Reservation] Could not list rooms of type ${roomTypeCode} for auto-assignment: ${err.message}. ` +
-        'The booking will be taken with no room assigned.'
+      `[Reservation] Could not list rooms of type ${roomTypeCode}: ${err.message}.`
     );
-    return null;
+    return [];
   }
 
   const skip = new Set(excludeRoomIds);
   const ids = (candidates || []).map((r) => r?.id).filter((id) => id && !skip.has(id));
-  if (!ids.length) return null;
+  if (!ids.length) return [];
 
   const taken = await prisma.reservation.findMany({
     where: overlappingRoomsWhere({ roomIds: ids, checkIn, checkOut, excludeReservationId }),
     select: { assignedRoomId: true },
   });
   const busy = new Set(taken.map((r) => r.assignedRoomId));
-  // `ids` order is inventory's preference order, so `find` picks the room a
-  // human would have picked.
-  return ids.find((id) => !busy.has(id)) || null;
+  return ids.filter((id) => !busy.has(id));
+}
+
+/**
+ * The first room of `roomTypeCode` that nothing else holds over
+ * [checkIn, checkOut), or null if there is none. Auto-assignment's own entry
+ * point — see freeRoomIds above for the check this picks from.
+ *
+ * @param {object} args  same shape as freeRoomIds
+ * @returns {Promise<string|null>} room id
+ */
+async function pickAssignableRoom(args) {
+  // `ids` order is inventory's preference order, so the first entry is the
+  // room a human would have picked.
+  const ids = await freeRoomIds(args);
+  return ids[0] || null;
 }
 
 /**
@@ -113,4 +138,4 @@ function normaliseRoomId(value) {
   return trimmed === '' ? null : trimmed;
 }
 
-module.exports = { pickAssignableRoom, normaliseRoomId, MAX_ASSIGN_ATTEMPTS };
+module.exports = { pickAssignableRoom, freeRoomIds, normaliseRoomId, MAX_ASSIGN_ATTEMPTS };

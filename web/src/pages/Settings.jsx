@@ -55,7 +55,15 @@ export default function Settings() {
   const [pForm, setPForm] = useState({ current: '', next: '', confirm: '' });
   const [busy, setBusy] = useState('');
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
-  const [taxRates, setTaxRates] = useState({ vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 });
+  const [taxRates, setTaxRates] = useState({
+    vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0, country: 'PH',
+  });
+  // The country whose rates the form is currently showing/editing — starts as
+  // the property's own (whatever the tax-rates fetch below answers with), but
+  // can be pointed at a different jurisdiction to pre-configure it without
+  // switching the property to it. Kept separate from `taxRates.country` so
+  // typing in the box doesn't refetch on every keystroke.
+  const [taxCountryInput, setTaxCountryInput] = useState('');
   const [hotel, setHotel] = useState({
     name: '',
     address: '',
@@ -65,9 +73,10 @@ export default function Settings() {
     url: '',
     checkInTime: '14:00',
     checkOutTime: '12:00',
+    country: 'PH',
   });
 
-  const canTheme = hasRole('ADMIN', 'MANAGER');
+  const canTheme = hasRole('ADMIN');
   // Both Billing endpoints (PUT /api/settings/tax-rates, PUT /api/settings/hotel)
   // are admin/manager-only server-side. Gate the cards the same way the System
   // Color Changer above gates on `canTheme`, so a FRONT_DESK user is not shown
@@ -84,9 +93,35 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    api.get('/api/settings/tax-rates').then((r) => setTaxRates(r.data)).catch(() => {});
+    api
+      .get('/api/settings/tax-rates')
+      .then((r) => {
+        setTaxRates(r.data);
+        setTaxCountryInput(r.data.country);
+      })
+      .catch(() => {});
     api.get('/api/settings/hotel').then((r) => setHotel(r.data)).catch(() => {});
   }, []);
+
+  // Load a different jurisdiction's rates into the form WITHOUT changing which
+  // country is the property's active one — for configuring a country ahead of
+  // switching to it. Saving from here still only takes effect for real charges
+  // once Hotel Details' Country field is set to match.
+  async function loadTaxCountry(e) {
+    e.preventDefault();
+    const country = taxCountryInput.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(country)) return toast.error('Country must be a 2-letter code, e.g. PH.');
+    setBusy('taxCountry');
+    try {
+      const { data } = await api.get('/api/settings/tax-rates', { params: { country } });
+      setTaxRates(data);
+      setTaxCountryInput(data.country);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function submitUsername(e) {
     e.preventDefault();
@@ -220,14 +255,23 @@ export default function Settings() {
     e.preventDefault();
     setBusy('tax');
     try {
-      const { data } = await api.put('/api/settings/tax-rates', {
-        vat: Number(taxRates.vat),
-        serviceCharge: Number(taxRates.serviceCharge),
-        localTax: Number(taxRates.localTax),
-        realPropertyTax: Number(taxRates.realPropertyTax),
-      });
+      const { data } = await api.put(
+        '/api/settings/tax-rates',
+        {
+          vat: Number(taxRates.vat),
+          serviceCharge: Number(taxRates.serviceCharge),
+          localTax: Number(taxRates.localTax),
+          realPropertyTax: Number(taxRates.realPropertyTax),
+        },
+        { params: { country: taxRates.country } }
+      );
       setTaxRates(data);
-      toast.success('Tax rates saved. They apply to charges posted from now on.');
+      toast.success(
+        data.country === hotel.country
+          ? 'Tax rates saved. They apply to charges posted from now on.'
+          : `Tax rates saved for ${data.country}. The property is currently set to ${hotel.country}, ` +
+            `so these will not apply to a real charge until Hotel Details' Country is changed to match.`
+      );
     } catch (err) {
       toast.error(errMsg(err));
     } finally {
@@ -542,12 +586,42 @@ export default function Settings() {
               <div className="set-card-heading">
                 <div className="set-card-title">Tax Rates</div>
                 <div className="set-card-sub">
-                  Applied to charges as they are posted. Existing charges keep the rates they
-                  were posted with.
+                  Applied to charges as they are posted, for whichever country is the property's
+                  jurisdiction (Hotel Details below) — never a guest's own nationality. Existing
+                  charges keep the rates they were posted with.
                 </div>
               </div>
             </div>
             <div className="set-card-body">
+              <div className="set-row-3" style={{ marginBottom: 12 }}>
+                <Field label="Viewing jurisdiction">
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      value={taxCountryInput}
+                      maxLength={2}
+                      style={{ textTransform: 'uppercase' }}
+                      placeholder="PH"
+                      onChange={(e) => setTaxCountryInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy === 'taxCountry'}
+                      onClick={loadTaxCountry}
+                    >
+                      {busy === 'taxCountry' ? 'Loading…' : 'Load'}
+                    </button>
+                  </div>
+                </Field>
+                <Field label="">
+                  <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
+                    {taxRates.country === hotel.country
+                      ? `This is the property's active jurisdiction — rates saved here bill real guests.`
+                      : `The property is currently ${hotel.country}. Rates saved for ${taxRates.country} ` +
+                        `here are stored but won't apply to a real charge until Hotel Details' Country is changed to match.`}
+                  </p>
+                </Field>
+              </div>
               <div className="set-row-3">
                 {[
                   ['vat', 'VAT (%)'],
@@ -635,6 +709,20 @@ export default function Settings() {
                     Applies to new and edited bookings. Existing bookings keep the
                     window they were taken with.
                   </p>
+                </Field>
+              </div>
+
+              {/* Decides which country's Tax Rates (above) actually apply to a
+                  real charge — a guest's own nationality plays no part. */}
+              <div className="set-row-3" style={{ marginTop: 12 }}>
+                <Field label="Country (ISO 2-letter, decides tax jurisdiction)">
+                  <input
+                    value={hotel.country || ''}
+                    maxLength={2}
+                    style={{ textTransform: 'uppercase' }}
+                    placeholder="PH"
+                    onChange={(e) => setHotel({ ...hotel, country: e.target.value })}
+                  />
                 </Field>
               </div>
             </div>
