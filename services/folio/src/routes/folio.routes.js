@@ -2,7 +2,6 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/auth');
-const { centsToWords } = require('../lib/receiptWords');
 const { classifyTransactions } = require('../lib/folioSummary');
 const { folioListRow } = require('../lib/folioList');
 const { folioPrintModel } = require('../lib/folioPrintModel');
@@ -899,7 +898,7 @@ router.post('/folios/:id/refund', requireRole(...FINANCE), async (req, res) => {
       })
     );
     if (!result.ok) {
-      const { ok, status, error, ...extra } = result;
+      const { ok: _ok, status, error, ...extra } = result;
       return res.status(status).json({ error, ...extra });
     }
     redis.publish(
@@ -1061,7 +1060,7 @@ router.post('/payment-disputes/:disputeId/resolve', requireRole(...FINANCE), asy
         return { ok: true, dispute: updated, refundTx: refund.tx };
       });
       if (!result.ok) {
-        const { ok, status, error, ...extra } = result;
+        const { ok: _ok, status, error, ...extra } = result;
         return res.status(status).json({ error, ...extra });
       }
       redis.publish(
@@ -1349,7 +1348,7 @@ router.post('/folios/:id/split', requireRole(...CASHIER), async (req, res) => {
 
     // What each payer's folio ends up holding. Computed from the same allocate()
     // the rows are built with, so a preview cannot disagree with the split.
-    function previewFor(folioNumbers) {
+    const previewFor = (folioNumbers) => {
       const totals = shares.map(() => 0n);
       for (const tx of splittable) {
         const net = netRemaining(tx, source.transactions);
@@ -1366,7 +1365,7 @@ router.post('/folios/:id/split', requireRole(...CASHIER), async (req, res) => {
         isSource: i === 0,
         totalCents: totals[i].toString(),
       }));
-    }
+    };
 
     if (dryRun) {
       return res.json({

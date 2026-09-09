@@ -5,3 +5,13 @@
 # "set: illegal option -" and crash-loops all nine containers on boot.
 # These must stay LF no matter how the developer's git is configured.
 *.sh text eol=lf
+
+# .prettierrc.json sets endOfLine: "lf". Without this, core.autocrlf=true
+# (git's Windows default) checks these out as CRLF, and `prettier --check`
+# then reports every single line of the file as a style violation — not a
+# real formatting problem, just the checkout disagreeing with the config. It
+# reads as "the whole repo fails Lint & format" when only this file's
+# checkout does.
+*.js text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
