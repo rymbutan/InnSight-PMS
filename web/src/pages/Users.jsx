@@ -8,14 +8,18 @@ import { useAuth } from '../auth';
 
 export default function Users() {
   const confirm = useConfirm();
-  // MANAGER can reach this page (route guard allows ADMIN + MANAGER) but is
-  // strictly read-only on account data — every create/edit/disable/reset/role
-  // control below is hidden rather than merely disabled, since the API refuses
-  // all of them for MANAGER anyway (services/auth/src/routes/users.routes.js,
-  // WRITE_ROLES). A visible-but-rejected button reads as broken; not showing
-  // it reads as "not yours to do."
+  // MANAGER has the same account-management privilege as ADMIN, with one
+  // carve-out: an account that already holds (or would be given) the ADMIN
+  // role is off-limits — see the matching guards in
+  // services/auth/src/routes/users.routes.js (blockIfAdminTarget /
+  // blockIfGrantingAdmin). The controls this affects are hidden rather than
+  // merely disabled for a MANAGER, since the API refuses them outright; a
+  // visible-but-rejected button reads as broken, not showing it reads as
+  // "not yours to do."
   const { hasRole, user: me } = useAuth();
-  const canManage = hasRole('ADMIN');
+  const canManage = hasRole('ADMIN', 'MANAGER');
+  const isAdmin = hasRole('ADMIN');
+  const isAdminRow = (u) => (u.roles || []).some((r) => (r.roleCode || r) === 'ADMIN');
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [form, setForm] = useState({ username: '', password: '', displayName: '', email: '', roles: [] });
@@ -319,16 +323,21 @@ export default function Users() {
           <div>
             <label>Roles</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {roles.map((r) => (
-                <label key={r.code} className="ed-check">
-                  <input
-                    type="checkbox"
-                    checked={form.roles.includes(r.code)}
-                    onChange={() => toggleRoleInForm(r.code)}
-                  />
-                  <span>{r.code}</span>
-                </label>
-              ))}
+              {/* A MANAGER cannot grant ADMIN (services/auth's
+                  blockIfGrantingAdmin) — the checkbox is not offered rather
+                  than offered and then rejected on submit. */}
+              {roles
+                .filter((r) => isAdmin || r.code !== 'ADMIN')
+                .map((r) => (
+                  <label key={r.code} className="ed-check">
+                    <input
+                      type="checkbox"
+                      checked={form.roles.includes(r.code)}
+                      onChange={() => toggleRoleInForm(r.code)}
+                    />
+                    <span>{r.code}</span>
+                  </label>
+                ))}
             </div>
           </div>
         </form>
@@ -373,7 +382,9 @@ export default function Users() {
                         No roles
                       </span>
                     )}
-                    {canManage && (
+                    {/* A MANAGER cannot edit an admin account's roles — see
+                        blockIfAdminTarget. */}
+                    {canManage && (isAdmin || !isAdminRow(u)) && (
                       <button
                         type="button"
                         className="role-edit-btn"
@@ -388,21 +399,29 @@ export default function Users() {
                 </td>
                 <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
                 <td className="t-actions">
-                  {canManage ? (
+                  {canManage && (isAdmin || !isAdminRow(u)) ? (
                     <>
                       <button className="small secondary" onClick={() => openReset(u)}>
                         Reset Password
                       </button>{' '}
-                      {/* Your own row never gets this button: the server refuses
-                          to disable the signed-in account either way (the
-                          self-lockout guard on PATCH/disable), so a button that
-                          can only ever fail is just not shown rather than shown
-                          and then rejected. */}
-                      {u.id !== me?.id && (
-                        <button className="small danger" onClick={() => toggle(u)}>
-                          {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                        </button>
-                      )}
+                      {/* Your own row never gets a WORKING Disable/Enable — the
+                          server refuses to disable the signed-in account either
+                          way (the self-lockout guard on PATCH/disable) — but the
+                          button still renders, invisibly, so it keeps its column
+                          width. Omitting it outright let "Reset Password" drift
+                          to a different position on this one row than every
+                          other row, since td.t-actions centres its content and a
+                          one-button group centres differently from a two-button
+                          one. */}
+                      <button
+                        className="small danger"
+                        style={u.id === me?.id ? { visibility: 'hidden', pointerEvents: 'none' } : undefined}
+                        tabIndex={u.id === me?.id ? -1 : undefined}
+                        aria-hidden={u.id === me?.id || undefined}
+                        onClick={() => u.id !== me?.id && toggle(u)}
+                      >
+                        {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                      </button>
                     </>
                   ) : (
                     <span className="muted">—</span>
@@ -457,27 +476,30 @@ export default function Users() {
             />
             <label style={{ marginTop: 12 }}>Roles</label>
             <div className="role-picker">
-              {roles.map((r) => {
-                const on = approveRoles.includes(r.code);
-                return (
-                  <label key={r.code} className={`role-picker-row${on ? ' is-on' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={() =>
-                        setApproveRoles((d) =>
-                          on ? d.filter((x) => x !== r.code) : [...d, r.code]
-                        )
-                      }
-                      style={{ width: 'auto' }}
-                    />
-                    <RoleBadge code={r.code} />
-                    <span className="muted" style={{ fontSize: 12 }}>
-                      {r.name || r.code}
-                    </span>
-                  </label>
-                );
-              })}
+              {/* A MANAGER cannot grant ADMIN — not offered here either. */}
+              {roles
+                .filter((r) => isAdmin || r.code !== 'ADMIN')
+                .map((r) => {
+                  const on = approveRoles.includes(r.code);
+                  return (
+                    <label key={r.code} className={`role-picker-row${on ? ' is-on' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          setApproveRoles((d) =>
+                            on ? d.filter((x) => x !== r.code) : [...d, r.code]
+                          )
+                        }
+                        style={{ width: 'auto' }}
+                      />
+                      <RoleBadge code={r.code} />
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {r.name || r.code}
+                      </span>
+                    </label>
+                  );
+                })}
             </div>
             {approveRoles.length === 0 && (
               <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
@@ -551,25 +573,30 @@ export default function Users() {
           </div>
         )}
         <div className="role-picker">
-          {roles.map((r) => {
-            const on = draftRoles.includes(r.code);
-            return (
-              <label key={r.code} className={`role-picker-row${on ? ' is-on' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() =>
-                    setDraftRoles((d) => (on ? d.filter((x) => x !== r.code) : [...d, r.code]))
-                  }
-                  style={{ width: 'auto' }}
-                />
-                <RoleBadge code={r.code} />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {r.name || r.code}
-                </span>
-              </label>
-            );
-          })}
+          {/* A MANAGER cannot grant ADMIN — not offered here either, so
+              ticking every other box and saving cannot be misread as "ADMIN
+              was silently dropped". */}
+          {roles
+            .filter((r) => isAdmin || r.code !== 'ADMIN')
+            .map((r) => {
+              const on = draftRoles.includes(r.code);
+              return (
+                <label key={r.code} className={`role-picker-row${on ? ' is-on' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() =>
+                      setDraftRoles((d) => (on ? d.filter((x) => x !== r.code) : [...d, r.code]))
+                    }
+                    style={{ width: 'auto' }}
+                  />
+                  <RoleBadge code={r.code} />
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {r.name || r.code}
+                  </span>
+                </label>
+              );
+            })}
         </div>
         {draftRoles.length === 0 && (
           <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
