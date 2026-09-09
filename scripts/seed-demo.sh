@@ -26,7 +26,7 @@ if [ -z "$ADMIN_PASS" ]; then
   exit 1
 fi
 
-echo "→ Logging in to $GATEWAY as $ADMIN_USER…"
+echo "→ Logging in to $GATEWAY as ${ADMIN_USER}…"
 TOKEN=$(curl -sf -X POST "$GATEWAY/api/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}" \
