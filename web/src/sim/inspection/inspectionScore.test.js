@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 
 import { GOOD, ISSUES } from '../taskScore.js';
-import { scoreInspection } from './inspectionScore.js';
+import { scoreInspection, passesInspection } from './inspectionScore.js';
 
 const c = { injected: ['room_mismatch', 'amenity_math'], roomTier: 'Standard', pax: 4 };
 const itemFor = (items, key) => items.find((i) => i.key === key);
@@ -103,6 +103,52 @@ test('a perfect run scores every dimension GOOD', () => {
     assert.equal(it.procedure, GOOD, `${it.key} procedure`);
     assert.equal(it.understanding, GOOD, `${it.key} understanding`);
   }
+});
+
+test('passesInspection: a perfect run passes, so the room can be marked clean', () => {
+  const items = scoreInspection({
+    caseFile: c,
+    flags: [
+      { anchorId: 'a1', defectId: 'room_mismatch', chosenCategory: 'room_mismatch' },
+      { anchorId: 'a2', defectId: 'amenity_math', chosenCategory: 'amenity_math' },
+    ],
+    elapsedSec: 90,
+  });
+  assert.equal(passesInspection(items), true);
+});
+
+test('passesInspection: a missed defect fails the room, not just the rubric', () => {
+  const items = scoreInspection({
+    caseFile: c,
+    flags: [{ anchorId: 'a1', defectId: 'room_mismatch', chosenCategory: 'room_mismatch' }],
+    elapsedSec: 90,
+  });
+  assert.equal(passesInspection(items), false);
+});
+
+test('passesInspection: found but miscategorised is not a pass', () => {
+  const items = scoreInspection({
+    caseFile: c,
+    flags: [
+      { anchorId: 'a1', defectId: 'room_mismatch', chosenCategory: 'lived_in' },
+      { anchorId: 'a2', defectId: 'amenity_math', chosenCategory: 'amenity_math' },
+    ],
+    elapsedSec: 90,
+  });
+  assert.equal(passesInspection(items), false);
+});
+
+test('passesInspection: a false positive fails precision, so it fails the room too', () => {
+  const items = scoreInspection({
+    caseFile: c,
+    flags: [
+      { anchorId: 'a1', defectId: 'room_mismatch', chosenCategory: 'room_mismatch' },
+      { anchorId: 'a2', defectId: 'amenity_math', chosenCategory: 'amenity_math' },
+      { anchorId: 'c1', defectId: null, chosenCategory: 'lived_in' },
+    ],
+    elapsedSec: 90,
+  });
+  assert.equal(passesInspection(items), false);
 });
 
 test('every item carries the label and note the assessment renders', () => {
