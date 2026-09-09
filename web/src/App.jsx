@@ -194,7 +194,9 @@ export default function App() {
         <Route
           path="/health"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER']}>
+            // ADMIN only — service health is operational data withheld from
+            // MANAGER; see the matching guard on GET /api/health/services.
+            <ProtectedRoute roles={['ADMIN']}>
               <Health />
             </ProtectedRoute>
           }

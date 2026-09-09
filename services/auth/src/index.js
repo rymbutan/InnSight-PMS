@@ -118,7 +118,11 @@ const SERVICES = [
   { name: 'reports', url: process.env.REPORTS_URL || 'http://reports-service:3013' },
 ];
 
-app.get('/api/health/services', verifyToken, requireRole('ADMIN', 'MANAGER'), async (req, res) => {
+// ADMIN only. Service health (per-service up/down, latency, error detail) is
+// operational/infrastructure data, not property-management data, and is
+// explicitly withheld from MANAGER in both the API and the UI (web/src/App.jsx,
+// web/src/components/Layout.jsx).
+app.get('/api/health/services', verifyToken, requireRole('ADMIN'), async (req, res) => {
   const checks = await Promise.all(
     SERVICES.map(async (s) => {
       const url = s.url.endsWith('/health') ? s.url : `${s.url}/health`;

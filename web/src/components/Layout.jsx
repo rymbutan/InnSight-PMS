@@ -125,7 +125,7 @@ const NAV_SECTIONS = [
     label: 'Settings',
     items: [
       { to: '/users', label: 'User & Roles', icon: 'shield', roles: ['ADMIN', 'MANAGER'] },
-      { to: '/health', label: 'Service Health', icon: 'activity', roles: ['ADMIN', 'MANAGER'] },
+      { to: '/health', label: 'Service Health', icon: 'activity', roles: ['ADMIN'] },
       { to: '/settings', label: 'Settings', icon: 'settings' },
     ],
   },
