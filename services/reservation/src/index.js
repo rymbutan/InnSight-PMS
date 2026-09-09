@@ -68,11 +68,18 @@ app.post('/api/public/reservations', async (req, res) => {
       adults,
       children,
       promoCode,
+      specialRequests,
+      expectedArrivalTime,
     } = req.body;
-    if (!guestName || !guestEmail || !roomTypeCode || !checkIn || !checkOut) {
-      return res
-        .status(400)
-        .json({ error: 'guestName, guestEmail, roomTypeCode, checkIn, checkOut required.' });
+    // Email and phone are both mandatory: this is how a booking confirmation
+    // (see redis.subscriber.js's Email + SMS/Viber dispatch on
+    // reservation:confirmed) reaches the guest at all. The frontend already
+    // requires both; this is the guard that matters, since the frontend check
+    // is trivially bypassed by anyone calling the API directly.
+    if (!guestName || !guestEmail || !guestPhone || !roomTypeCode || !checkIn || !checkOut) {
+      return res.status(400).json({
+        error: 'guestName, guestEmail, guestPhone, roomTypeCode, checkIn, checkOut required.',
+      });
     }
     const ci = new Date(checkIn);
     const co = new Date(checkOut);
@@ -165,7 +172,17 @@ app.post('/api/public/reservations', async (req, res) => {
           depositCents: BigInt(0), // no payment collected on the public engine yet
           origin: 'Public booking engine',
           inventoryHoldGroupId: hold.groupId,
-          ...(appliedPromo ? { specialRequests: `Promo applied: ${appliedPromo}` } : {}),
+          // Combined, not replaced: this used to overwrite whatever the guest
+          // typed in Special Requests with just the promo note the moment a
+          // promo code was applied, silently dropping the guest's own text.
+          ...(specialRequests || appliedPromo
+            ? {
+                specialRequests: [specialRequests, appliedPromo ? `Promo applied: ${appliedPromo}` : null]
+                  .filter(Boolean)
+                  .join('\n'),
+              }
+            : {}),
+          ...(expectedArrivalTime ? { expectedArrivalTime } : {}),
         },
       });
       await inventory.attachHold(hold.groupId, reservation.id);

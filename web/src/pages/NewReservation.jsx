@@ -9,8 +9,28 @@ import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 
 import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
+import { paymentMethodGroups } from '../lib/paymentMethods';
 
 const STEPS = ['Availability', 'Details', 'Guests', 'Add-ons', 'Payment'];
+
+// Built-in special requests for the Add-ons step's dropdown — the common
+// ones a front desk gets asked for repeatedly, so staff pick one instead of
+// re-typing it every time. Phrased as a billed line-item description (not
+// the guest-facing wording on the public booking page's own checklist),
+// since this becomes what prints on the folio. "Other" keeps the free-text
+// input for anything not on the list — a cake brand, a specific chocolate,
+// whatever the guest actually asked for that isn't one of these.
+const BUILT_IN_ADDON_REQUESTS = [
+  'High floor room',
+  'Quiet room',
+  'Luggage storage',
+  'Away from elevator',
+  'Near elevator',
+  'Car parking',
+  'Honeymoon arrangements',
+  'Baby cot (additional charges may apply)',
+  'Airport transfer',
+];
 
 export default function NewReservation() {
   const [params] = useSearchParams();
@@ -29,6 +49,14 @@ export default function NewReservation() {
   const [searched, setSearched] = useState(false);
   const [types, setTypes] = useState([]);
   const [allRooms, setAllRooms] = useState([]);
+  // Which specific rooms of each picked type are actually free for
+  // [checkIn, checkOut) — { [typeCode]: string[] room ids }. Drives the
+  // per-pick room dropdown below; see GET /reservations/available-rooms.
+  // Rooms of a type that AREN'T in here for the current dates are not
+  // missing by accident — they're already booked for an overlapping window
+  // (or genuinely out of service), which is exactly what used to go
+  // unchecked when this list was just "every room of the type".
+  const [availableRoomIds, setAvailableRoomIds] = useState({});
 
   // Selections
   const [picks, setPicks] = useState([]); // {typeCode, name, ratePerNightCents, qty, assignedRoomId?}
@@ -52,6 +80,9 @@ export default function NewReservation() {
   const [addOns, setAddOns] = useState([]); // [{ description, costCents }]
   const [addOnDesc, setAddOnDesc] = useState('');
   const [addOnCostPesos, setAddOnCostPesos] = useState('');
+  // Which built-in request the dropdown has selected, if any — '' (none
+  // chosen yet) or 'OTHER' both fall through to the free-text input below it.
+  const [addOnPreset, setAddOnPreset] = useState('');
   const [feePercent, setFeePercent] = useState(10);
   const [feeEditPesos, setFeeEditPesos] = useState('');
   // Defaults mirror DEFAULT_TAX_RATES in services/_shared/policies.js, so a
@@ -78,6 +109,7 @@ export default function NewReservation() {
     setAddOns((list) => [...list, { description: addOnDesc.trim(), costCents }]);
     setAddOnDesc('');
     setAddOnCostPesos('');
+    setAddOnPreset('');
   }
   function removeAddOn(idx) {
     setAddOns((list) => list.filter((_, i) => i !== idx));
@@ -102,7 +134,7 @@ export default function NewReservation() {
 
   // Step 5
   const [depositPesos, setDepositPesos] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
   // Track whether the user has begun entering data; if so, warn before
   // navigating away (back-button or tab close).
   const dirty = picks.length > 0 || pickedGuest || newGuest.firstName || depositPesos;
@@ -149,6 +181,38 @@ export default function NewReservation() {
     prefilled.current = true;
     addPick(t, params.get('assignedRoomId') || undefined);
   }, [types]);
+
+  // Which rooms are actually free for the current dates — refetched whenever
+  // the date range changes or a new room type gets picked. One request per
+  // DISTINCT type in `picks`, not per pick, since several picks can share a
+  // type. A failed fetch leaves that type's entry alone (undefined) rather
+  // than clearing it to an empty list, so the per-pick dropdown below falls
+  // back to its old, permissive filter instead of offering nothing at all.
+  useEffect(() => {
+    if (!checkIn || !checkOut) return undefined;
+    const typeCodes = [...new Set(picks.map((p) => p.typeCode))];
+    if (!typeCodes.length) return undefined;
+    let cancelled = false;
+    Promise.all(
+      typeCodes.map((roomTypeCode) =>
+        api
+          .get('/api/reservations/available-rooms', { params: { roomTypeCode, checkIn, checkOut } })
+          .then((r) => [roomTypeCode, r.data.roomIds])
+          .catch(() => [roomTypeCode, null])
+      )
+    ).then((pairs) => {
+      if (cancelled) return;
+      setAvailableRoomIds((prev) => {
+        const next = { ...prev };
+        for (const [roomTypeCode, ids] of pairs) if (ids) next[roomTypeCode] = ids;
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkIn, checkOut, picks.map((p) => p.typeCode).join(',')]);
 
   function addPick(t, roomId) {
     setPicks((p) => [
@@ -200,10 +264,46 @@ export default function NewReservation() {
     setSearched(true);
   }
 
+  // Every "create new guest" field is required before Add-ons is reachable —
+  // an existing PICKED guest already has this on file, so the rule only
+  // applies down the "Or create new guest" path.
+  const NEW_GUEST_REQUIRED_FIELDS = [
+    ['firstName', 'First name'],
+    ['lastName', 'Last name'],
+    ['email', 'Email'],
+    ['phone', 'Phone'],
+    ['streetAddress', 'Street'],
+    ['city', 'City'],
+    ['country', 'Country'],
+    ['state', 'State/Region'],
+    ['postal', 'Postal'],
+  ];
+
   function next() {
-    if (step === 1 && picks.length === 0) return toast.error('Select at least one accommodation.');
-    if (step === 3 && !pickedGuest && !newGuest.firstName)
-      return toast.error('Pick a guest or enter a new one.');
+    if (step === 1) {
+      if (!checkIn || !checkOut) return toast.error('Pick check-in and check-out dates first.');
+      if (picks.length === 0) return toast.error('Select at least one accommodation.');
+    }
+    if (step === 3 && !pickedGuest) {
+      const missing = NEW_GUEST_REQUIRED_FIELDS.filter(([key]) => !String(newGuest[key] || '').trim());
+      if (missing.length) {
+        return toast.error(
+          `Pick an existing guest, or fill in every field for the new guest (missing: ${missing
+            .map(([, label]) => label)
+            .join(', ')}).`
+        );
+      }
+    }
+    // Add-ons is deliberately skippable — "no add-ons yet" is a valid
+    // finished state, not a missing field. What is NOT allowed is leaving
+    // half of the "add a request" mini-form filled in and silently moving on,
+    // since that discards what was typed without any signal that it never
+    // got added — require it to be finished (via Add) or cleared first.
+    if (step === 4 && (addOnDesc.trim() || pesosToCents(addOnCostPesos))) {
+      return toast.error(
+        'Finish adding this special request (click Add), or clear the special request and cost fields before continuing.'
+      );
+    }
     setStep(Math.min(STEPS.length, step + 1));
   }
   function back() {
@@ -347,13 +447,27 @@ export default function NewReservation() {
                           style={{ width: 140 }}
                         >
                           <option value="">Auto-assign (first free room)</option>
-                          {allRooms
-                            .filter((r) => r.typeCode === p.typeCode && r.status !== 'OUT_OF_ORDER')
-                            .map((r) => (
-                              <option key={r.id} value={r.id}>
-                                Room {r.number}
-                              </option>
-                            ))}
+                          {/* Only rooms actually free for [checkIn, checkOut) —
+                              see the available-rooms fetch above. This used to
+                              list every room of the type that wasn't
+                              OUT_OF_ORDER, with no date-overlap check at all,
+                              which is how a room already booked by someone
+                              else for these exact dates ended up selectable
+                              right next to Auto-assign. Falls back to the old,
+                              permissive filter only if that fetch hasn't
+                              resolved yet (or failed) for this type — so a
+                              slow network never leaves the dropdown empty. */}
+                          {(availableRoomIds[p.typeCode]
+                            ? allRooms.filter(
+                                (r) =>
+                                  availableRoomIds[p.typeCode].includes(r.id) || r.id === p.assignedRoomId
+                              )
+                            : allRooms.filter((r) => r.typeCode === p.typeCode && r.status !== 'OUT_OF_ORDER')
+                          ).map((r) => (
+                            <option key={r.id} value={r.id}>
+                              Room {r.number}
+                            </option>
+                          ))}
                         </select>
                         <span style={{ width: 100, textAlign: 'right' }}>
                           {formatPeso(p.ratePerNightCents * p.qty * nights)}
@@ -497,6 +611,7 @@ export default function NewReservation() {
                 <div>
                   <label>First name *</label>
                   <input
+                    required
                     value={newGuest.firstName}
                     onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })}
                   />
@@ -504,21 +619,24 @@ export default function NewReservation() {
                 <div>
                   <label>Last name *</label>
                   <input
+                    required
                     value={newGuest.lastName}
                     onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label>Email</label>
+                  <label>Email *</label>
                   <input
+                    required
                     type="email"
                     value={newGuest.email}
                     onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label>Phone</label>
+                  <label>Phone *</label>
                   <input
+                    required
                     value={newGuest.phone}
                     onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })}
                   />
@@ -527,15 +645,17 @@ export default function NewReservation() {
               <h3>Guest address</h3>
               <div className="row">
                 <div>
-                  <label>Street</label>
+                  <label>Street *</label>
                   <input
+                    required
                     value={newGuest.streetAddress}
                     onChange={(e) => setNewGuest({ ...newGuest, streetAddress: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label>City</label>
+                  <label>City *</label>
                   <input
+                    required
                     value={newGuest.city}
                     onChange={(e) => setNewGuest({ ...newGuest, city: e.target.value })}
                   />
@@ -543,20 +663,23 @@ export default function NewReservation() {
                 <div>
                   <label>Country *</label>
                   <input
+                    required
                     value={newGuest.country}
                     onChange={(e) => setNewGuest({ ...newGuest, country: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label>State/Region</label>
+                  <label>State/Region *</label>
                   <input
+                    required
                     value={newGuest.state}
                     onChange={(e) => setNewGuest({ ...newGuest, state: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label>Postal</label>
+                  <label>Postal *</label>
                   <input
+                    required
                     value={newGuest.postal}
                     onChange={(e) => setNewGuest({ ...newGuest, postal: e.target.value })}
                   />
@@ -591,13 +714,24 @@ export default function NewReservation() {
             );
           })}
           <div className="row" style={{ marginTop: 12 }}>
-            <div style={{ flex: 1 }}>
+            <div>
               <label>Special request</label>
-              <input
-                value={addOnDesc}
-                placeholder="e.g. specific brand of cake"
-                onChange={(e) => setAddOnDesc(e.target.value)}
-              />
+              <select
+                value={addOnPreset}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAddOnPreset(val);
+                  setAddOnDesc(val === 'OTHER' ? '' : val);
+                }}
+              >
+                <option value="">Choose a built-in request…</option>
+                {BUILT_IN_ADDON_REQUESTS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+                <option value="OTHER">Other — type your own…</option>
+              </select>
             </div>
             <div>
               <label>Cost (₱)</label>
@@ -609,12 +743,30 @@ export default function NewReservation() {
                 onChange={(e) => setAddOnCostPesos(e.target.value)}
               />
             </div>
-            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <div className="row-action">
               <button onClick={addAddOn} disabled={!addOnDesc.trim() || !pesosToCents(addOnCostPesos)}>
                 Add
               </button>
             </div>
           </div>
+          {/* Kept OUT of the row above on purpose: it used to live inside the
+              "Special request" cell, and that cell growing to fit a second
+              input stretched the whole row — Cost's input floated near the
+              top of a now-much-taller cell while Add sank to the bottom,
+              visibly disconnected from both. A full-width row of its own
+              can't distort anything beside it. */}
+          {addOnPreset === 'OTHER' && (
+            <div className="row" style={{ marginTop: -4 }}>
+              <div style={{ flex: 1 }}>
+                <label>Custom request</label>
+                <input
+                  value={addOnDesc}
+                  placeholder="e.g. specific brand of cake"
+                  onChange={(e) => setAddOnDesc(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
           {addOns.length > 0 && (
             <div className="row" style={{ marginTop: 8, fontWeight: 600 }}>
               <div style={{ flex: 1 }}>Add-ons total</div>
@@ -668,12 +820,21 @@ export default function NewReservation() {
             <div>
               <label>Payment method</label>
               <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-                <option>Cash</option>
-                <option>Card</option>
-                <option>Bank Transfer</option>
-                <option>GCash</option>
-                <option>Maya</option>
-                <option>Other</option>
+                {paymentMethodGroups().map((g) =>
+                  g.kind === 'group' ? (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.methods.map((m) => (
+                        <option key={m.code} value={m.code}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : (
+                    <option key={g.code} value={g.code}>
+                      {g.label}
+                    </option>
+                  )
+                )}
               </select>
             </div>
           </div>

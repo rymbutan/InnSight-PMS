@@ -6,59 +6,94 @@ const {
   validateTaxRates,
   parseHotel,
   validateHotel,
-  TAX_RATE_KEYS,
+  TAX_COMPONENT_KEYS,
+  taxRateKey,
+  normalizeCountry,
 } = require('./settings');
 
-test('missing rows fall back to the shipped defaults', () => {
-  const rates = parseTaxRates([]);
+test('missing rows fall back to PH\'s shipped defaults', () => {
+  const rates = parseTaxRates('PH', []);
   assert.deepEqual(rates, { vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 });
 });
 
-test('stored rows override the defaults', () => {
-  const rates = parseTaxRates([
-    { key: 'tax_vat_percent', value: '10' },
-    { key: 'tax_local_percent', value: '1.85' },
+test('a country with no configured rates at all defaults to zero on every component', () => {
+  // Not PH's numbers — a jurisdiction nobody has configured must not silently
+  // borrow another country's rate.
+  const rates = parseTaxRates('JP', []);
+  assert.deepEqual(rates, { vat: 0, serviceCharge: 0, localTax: 0, realPropertyTax: 0 });
+});
+
+test('stored rows override the defaults, scoped to that country', () => {
+  const rates = parseTaxRates('PH', [
+    { key: taxRateKey('PH', 'vat'), value: '10' },
+    { key: taxRateKey('PH', 'localTax'), value: '1.85' },
   ]);
   assert.equal(rates.vat, 10);
   assert.equal(rates.localTax, 1.85);
   assert.equal(rates.serviceCharge, 10, 'an unset key keeps its default');
 });
 
+test('rows stored for a different country do not leak into this one', () => {
+  const rates = parseTaxRates('PH', [{ key: taxRateKey('JP', 'vat'), value: '10' }]);
+  assert.equal(rates.vat, 12, 'JP row must not affect PH');
+});
+
 test('a corrupt stored value falls back rather than yielding NaN', () => {
   // A NaN rate would silently produce NaN tax on a guest's bill.
-  const rates = parseTaxRates([{ key: 'tax_vat_percent', value: 'twelve' }]);
+  const rates = parseTaxRates('PH', [{ key: taxRateKey('PH', 'vat'), value: 'twelve' }]);
   assert.equal(rates.vat, 12);
 });
 
 test('every component has a settings key', () => {
-  assert.deepEqual(Object.keys(TAX_RATE_KEYS).sort(), [
+  assert.deepEqual(TAX_COMPONENT_KEYS.slice().sort(), [
     'localTax', 'realPropertyTax', 'serviceCharge', 'vat',
   ]);
 });
 
 test('validation accepts a full, in-range payload', () => {
-  const r = validateTaxRates({ vat: 12, serviceCharge: 10, localTax: 1.85, realPropertyTax: 0 });
+  const r = validateTaxRates('PH', { vat: 12, serviceCharge: 10, localTax: 1.85, realPropertyTax: 0 });
   assert.equal(r.ok, true);
   assert.equal(r.rates.localTax, 1.85);
 });
 
 test('validation accepts a partial payload and keeps the rest at their defaults', () => {
-  const r = validateTaxRates({ vat: 8 });
+  const r = validateTaxRates('PH', { vat: 8 });
   assert.equal(r.ok, true);
   assert.equal(r.rates.vat, 8);
   assert.equal(r.rates.serviceCharge, 10);
 });
 
+test('validation for a country with no defaults keeps unset components at zero', () => {
+  const r = validateTaxRates('JP', { vat: 8 });
+  assert.equal(r.ok, true);
+  assert.equal(r.rates.vat, 8);
+  assert.equal(r.rates.serviceCharge, 0);
+});
+
 test('validation rejects out-of-range and non-numeric rates', () => {
   for (const bad of [{ vat: -1 }, { vat: 101 }, { vat: 'abc' }, { serviceCharge: NaN }, { localTax: Infinity }]) {
-    assert.equal(validateTaxRates(bad).ok, false, `${JSON.stringify(bad)} must be rejected`);
+    assert.equal(validateTaxRates('PH', bad).ok, false, `${JSON.stringify(bad)} must be rejected`);
   }
 });
 
 test('validation rejects an unknown key rather than silently dropping it', () => {
-  const r = validateTaxRates({ vat: 12, wineTax: 5 });
+  const r = validateTaxRates('PH', { vat: 12, wineTax: 5 });
   assert.equal(r.ok, false);
   assert.match(r.error, /wineTax/);
+});
+
+test('validation rejects a malformed country code', () => {
+  for (const bad of ['p', 'PHL', 'ph1', '', 'Philippines']) {
+    assert.equal(validateTaxRates(bad, { vat: 12 }).ok, false, `${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test('normalizeCountry upper-cases a valid 2-letter code and rejects everything else', () => {
+  assert.equal(normalizeCountry('ph'), 'PH');
+  assert.equal(normalizeCountry('PH'), 'PH');
+  assert.equal(normalizeCountry('PHL'), null);
+  assert.equal(normalizeCountry(''), null);
+  assert.equal(normalizeCountry(undefined), null);
 });
 
 test('hotel identity defaults to InnSight, never to the reference property', () => {
@@ -78,6 +113,26 @@ test('stored hotel rows override the defaults', () => {
   assert.equal(hotel.name, 'Test Grand Hotel');
   assert.equal(hotel.email, 'desk@example.test');
   assert.equal(typeof hotel.address, 'string', 'unset fields are still present as strings');
+});
+
+// ── Property country ─────────────────────────────────────────────────────────
+// The jurisdiction a real charge's tax is computed against (policies.js).
+test('property country defaults to PH', () => {
+  assert.strictEqual(parseHotel([]).country, 'PH');
+});
+
+test('a stored country overrides the default', () => {
+  const hotel = parseHotel([{ key: 'hotel_country', value: 'JP' }]);
+  assert.strictEqual(hotel.country, 'JP');
+});
+
+test('validation upper-cases a valid country and rejects a malformed one', () => {
+  assert.strictEqual(validateHotel({ country: 'jp' }).hotel.country, 'JP');
+  for (const bad of ['j', 'JPN', '', 'Japan']) {
+    const out = validateHotel({ country: bad });
+    assert.strictEqual(out.ok, false, `${JSON.stringify(bad)} should be refused`);
+    assert.match(out.error, /country/);
+  }
 });
 
 // ── Service times ───────────────────────────────────────────────────────────
