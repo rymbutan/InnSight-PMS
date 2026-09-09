@@ -48,6 +48,7 @@ model Reservation {
   activity              ReservationActivity[]
   cards                 ReservationCard[]
   documents             ReservationDocument[]
+  notifications         NotificationLog[]
 
   // The calendar and arrivals views filter on checkIn + status and order by
   // checkIn. With only confirmationNumber indexed, every one of those queries
@@ -127,6 +128,33 @@ model ReservationDocument {
   reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@index([reservationId])
+}
+
+// Every attempted booking-confirmation dispatch — Email, SMS, and Viber
+// alike, win or lose. Email already has Mailhog as an inspectable "sent mail"
+// view; SMS and Viber have no such tool, because there is no real SMS/Viber
+// provider anywhere in this stack (see docker-compose.yml's "RUNNING OFFLINE"
+// note — a live third-party API would break that constraint outright). This
+// is the only record of what would have gone out and to whom.
+model NotificationLog {
+  id            String              @id @default(uuid())
+  reservationId String
+  channel       NotificationChannel
+  to            String
+  subject       String?
+  body          String
+  status        String              @default("SENT") // SENT | FAILED
+  error         String?
+  sentAt        DateTime            @default(now())
+  reservation   Reservation         @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId, sentAt])
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  VIBER
 }
 
 model AppSetting {
