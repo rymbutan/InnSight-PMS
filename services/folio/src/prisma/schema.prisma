@@ -163,6 +163,56 @@ enum PaymentIntentStatus {
   CANCELLED
 }
 
+// A refund request or chargeback filed against an E-WALLET payment
+// (GCash, Maya — see lib/paymentMethods.js's E-wallet category). Cash and
+// card payments use the existing direct /refund route unchanged; a wallet
+// claim gets its own tracked case because, unlike a desk-initiated refund, it
+// can arrive from the gateway itself (a chargeback) rather than from staff,
+// and its outcome is not always known the moment it is filed.
+//
+// No relation fields to Payment/Folio, matching PaymentIntent above: this is
+// a plain reference, not a Prisma relation, so no FK migration complexity.
+model PaymentDispute {
+  id             String               @id @default(uuid())
+  folioId        String
+  paymentId      String
+  // The e-wallet this claim is against (GCASH, MAYA, or the generic
+  // QR_WALLET). Not any method — see the route guard.
+  method         String
+  type           PaymentDisputeType
+  status         PaymentDisputeStatus @default(PENDING)
+  amountCents    BigInt
+  reason         String?
+  filedBy        String?
+  filedAt        DateTime             @default(now())
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  resolutionNote String?
+  // Set only once APPROVED — the id of the REFUND FolioTransaction this case
+  // produced, so the case and the money movement it caused stay linked for
+  // audit without duplicating the refund logic that already exists.
+  refundTxId     String?
+
+  @@index([folioId])
+  @@index([paymentId])
+  @@index([status])
+}
+
+enum PaymentDisputeType {
+  REFUND_REQUEST
+  CHARGEBACK
+}
+
+// PENDING → APPROVED (executes the refund) | REJECTED (no money moves) | DISPUTED
+// (escalated to the gateway; outcome not yet known). DISPUTED → APPROVED |
+// REJECTED once that outcome is known. APPROVED and REJECTED are terminal.
+enum PaymentDisputeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DISPUTED
+}
+
 // Folio-service configuration: tax component rates and the hotel identity block
 // printed at the top of a guest folio. Mirrors the reservation service's
 // AppSetting rather than sharing it, because posting a charge must not depend on

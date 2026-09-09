@@ -7,20 +7,38 @@
 // the shipped defaults.
 
 const prisma = require('./prisma');
-const { DEFAULT_TAX_RATES } = require('./policies');
+const { DEFAULT_TAX_RATES, DEFAULT_COUNTRY, defaultRatesForCountry } = require('./policies');
 const {
-  TAX_RATE_KEYS, HOTEL_KEYS, HOTEL_DEFAULTS, parseTaxRates, parseHotel,
+  TAX_COMPONENT_KEYS, taxRateKey, normalizeCountry, HOTEL_KEYS, HOTEL_DEFAULTS, parseTaxRates, parseHotel,
 } = require('./settings');
 
-async function getTaxRates() {
+// The jurisdiction a real charge is taxed against when no country is asked
+// for explicitly — see policies.js: the property's own country, not a
+// guest's nationality.
+async function getPropertyCountry() {
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: HOTEL_KEYS.country } });
+    return normalizeCountry(rows[0]?.value) || DEFAULT_COUNTRY;
+  } catch (err) {
+    console.error('[Folio] Could not read property country, using default:', err.message);
+    return DEFAULT_COUNTRY;
+  }
+}
+
+// `country` is optional: omitted, this returns the rates that actually apply
+// to a real charge (the property's own jurisdiction). Passed explicitly, it
+// returns that country's rates instead — for Settings to browse or edit a
+// jurisdiction other than the one currently active, without touching it.
+async function getTaxRates(country) {
+  const c = normalizeCountry(country) || (await getPropertyCountry());
   try {
     const rows = await prisma.appSetting.findMany({
-      where: { key: { in: Object.values(TAX_RATE_KEYS) } },
+      where: { key: { in: TAX_COMPONENT_KEYS.map((component) => taxRateKey(c, component)) } },
     });
-    return parseTaxRates(rows);
+    return { ...parseTaxRates(c, rows), country: c };
   } catch (err) {
     console.error('[Folio] Could not read tax rates, using defaults:', err.message);
-    return { ...DEFAULT_TAX_RATES };
+    return { ...(c === DEFAULT_COUNTRY ? DEFAULT_TAX_RATES : defaultRatesForCountry(c)), country: c };
   }
 }
 
@@ -36,15 +54,21 @@ async function getHotel() {
   }
 }
 
-async function saveTaxRates(rates) {
-  for (const [component, key] of Object.entries(TAX_RATE_KEYS)) {
+// `country` is required here (unlike getTaxRates) — writing rates for the
+// wrong jurisdiction by accident is the one mistake this must not allow
+// silently defaulting past.
+async function saveTaxRates(country, rates) {
+  const c = normalizeCountry(country);
+  if (!c) throw new Error('saveTaxRates requires a 2-letter country code.');
+  for (const component of TAX_COMPONENT_KEYS) {
+    const key = taxRateKey(c, component);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: String(rates[component]) },
       update: { value: String(rates[component]) },
     });
   }
-  return rates;
+  return { ...rates, country: c };
 }
 
 async function saveHotel(hotel) {
@@ -58,4 +82,4 @@ async function saveHotel(hotel) {
   return hotel;
 }
 
-module.exports = { getTaxRates, getHotel, saveTaxRates, saveHotel };
+module.exports = { getTaxRates, getHotel, getPropertyCountry, saveTaxRates, saveHotel };
