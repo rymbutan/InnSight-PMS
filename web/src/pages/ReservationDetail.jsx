@@ -14,7 +14,8 @@ import FilterPanel, { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
 import Timeline from '../components/Timeline';
 import { labelize } from '../lib/labels';
-import { SOURCES, SOURCE_LABELS, PAYMENT_TYPES } from '../lib/reservationOptions';
+import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
+import { paymentMethodGroups } from '../lib/paymentMethods';
 import { planQuickEdit } from '../lib/quickEditPlan';
 
 const TABS = [
@@ -25,6 +26,7 @@ const TABS = [
   'Notes',
   'Documents',
   'Reservation Activity',
+  'Notifications',
   'Sent Pay by Link',
 ];
 
@@ -41,6 +43,7 @@ export default function ReservationDetail() {
   const [folioTxns, setFolioTxns] = useState([]);
   const [notes, setNotes] = useState({ active: [], archived: [] });
   const [activity, setActivity] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
   const [chargeOpen, setChargeOpen] = useState(false);
@@ -74,6 +77,8 @@ export default function ReservationDetail() {
       });
       const actResp = await api.get(`/api/reservations/${id}/activity`).catch(() => ({ data: [] }));
       setActivity(actResp.data || []);
+      const notifResp = await api.get(`/api/reservations/${id}/notifications`).catch(() => ({ data: [] }));
+      setNotifications(notifResp.data || []);
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -359,6 +364,7 @@ export default function ReservationDetail() {
       {activeTab === 'Notes' && <NotesTab notes={notes} reservationId={id} onChanged={load} />}
       {activeTab === 'Documents' && <DocumentsTab reservationId={id} />}
       {activeTab === 'Reservation Activity' && <ActivityTab activity={activity} />}
+      {activeTab === 'Notifications' && <NotificationsTab notifications={notifications} />}
       {activeTab === 'Sent Pay by Link' && <PayLinkTab res={res} folio={folio} />}
 
       {/* Modals */}
@@ -1130,6 +1136,53 @@ function ActivityTab({ activity }) {
   );
 }
 
+// Every attempted booking confirmation — Email, SMS, and Viber alike. SMS and
+// Viber are mocked (see services/reservation/src/lib/notifyChannels.js — no
+// real provider exists anywhere in this stack), so this is the only place to
+// see what would have gone out and to whom.
+function NotificationsTab({ notifications }) {
+  if (notifications.length === 0) {
+    return (
+      <div className="panel">
+        <h3>Notifications</h3>
+        <p className="muted">
+          No confirmations have gone out yet. Confirming the booking sends one over every channel
+          the guest has an address for (email, and SMS/Viber to their phone).
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="panel">
+      <h3>Notifications</h3>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Sent</th>
+            <th>Channel</th>
+            <th>To</th>
+            <th>Status</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {notifications.map((n) => (
+            <tr key={n.id}>
+              <td>{new Date(n.sentAt).toLocaleString()}</td>
+              <td>{n.channel}</td>
+              <td>{n.to}</td>
+              <td>
+                <span className={`badge ${n.status === 'SENT' ? 'confirmed' : 'cancelled'}`}>{n.status}</span>
+              </td>
+              <td className="muted">{n.subject || n.body}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Payment links ride on the stay's folio (see planTransfer/PaymentIntent in the
 // folio service) — there is nowhere else in this app to post the eventual
 // payment. So this tab, like Print Registration Card and Check Out, is only
@@ -1199,11 +1252,15 @@ function PayLinkTab({ res, folio }) {
         </div>
         <div>
           <label>Method</label>
+          {/* A QR code is scanned into an e-wallet app, so only e-wallet
+              methods belong here — Card and the mislabelled "BANK" option
+              this used to offer were never actually a scannable QR flow, and
+              the value the desk picked here used to be silently dropped by
+              the server anyway (every intent was QR_WALLET regardless). */}
           <select value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option value="QR_WALLET">QR Wallet</option>
-            <option value="CARD">Card</option>
+            <option value="QR_WALLET">QR wallet (unbranded)</option>
             <option value="GCASH">GCash</option>
-            <option value="BANK">Bank Transfer</option>
+            <option value="MAYA">Maya</option>
           </select>
         </div>
         <button className="btn-primary" onClick={send} disabled={sending || !res.guestEmail}>
@@ -1457,7 +1514,7 @@ function ChargeModal({ open, onClose, folio, chargeCodes, onDone }) {
 
 function PaymentModal({ open, onClose, folio, balanceCents, onDone }) {
   const toast = useToast();
-  const [method, setMethod] = useState('Cash');
+  const [method, setMethod] = useState('CASH');
   const [amount, setAmount] = useState('');
   const [ref, setRef] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1502,12 +1559,21 @@ function PaymentModal({ open, onClose, folio, balanceCents, onDone }) {
       </p>
       <label>Payment method</label>
       <select value={method} onChange={(e) => setMethod(e.target.value)} style={{ marginBottom: 12 }}>
-        <option>Cash</option>
-        <option>Card</option>
-        <option>Bank Transfer</option>
-        <option>GCash</option>
-        <option>Maya</option>
-        <option>Other</option>
+        {paymentMethodGroups().map((g) =>
+          g.kind === 'group' ? (
+            <optgroup key={g.label} label={g.label}>
+              {g.methods.map((m) => (
+                <option key={m.code} value={m.code}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          ) : (
+            <option key={g.code} value={g.code}>
+              {g.label}
+            </option>
+          )
+        )}
       </select>
       <label>Amount (₱)</label>
       <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
@@ -1933,11 +1999,21 @@ function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) 
           <label>Payment type</label>
           <select value={form.paymentType} onChange={set('paymentType')}>
             <option value="">—</option>
-            {PAYMENT_TYPES.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
+            {paymentMethodGroups().map((g) =>
+              g.kind === 'group' ? (
+                <optgroup key={g.label} label={g.label}>
+                  {g.methods.map((m) => (
+                    <option key={m.code} value={m.code}>
+                      {m.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : (
+                <option key={g.code} value={g.code}>
+                  {g.label}
+                </option>
+              )
+            )}
           </select>
         </div>
         <div>
