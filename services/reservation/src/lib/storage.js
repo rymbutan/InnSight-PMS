@@ -37,7 +37,7 @@ async function ensureBucket() {
 // A key that cannot collide across reservations or uploads, and that keeps a
 // reservation's files grouped when a bucket is browsed by hand.
 function objectKeyFor(reservationId, filename) {
-  const safe = String(filename || 'file').replace(/[^\w.\-]/g, '_').slice(-120);
+  const safe = String(filename || 'file').replace(/[^\w.-]/g, '_').slice(-120);
   return `reservations/${reservationId}/${crypto.randomUUID()}-${safe}`;
 }
 

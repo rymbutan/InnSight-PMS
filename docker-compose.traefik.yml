@@ -1,0 +1,34 @@
+# Second production overlay — apply ON TOP of docker-compose.yml AND
+# docker-compose.prod.yml, in that order, never alone:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#                     -f docker-compose.traefik.yml up -d --build
+#
+# This file is specific to a host that already runs Hostinger's default
+# Traefik container (installed by their VPS Docker template: network_mode
+# host, providers.docker with exposedbydefault=false, a letsencrypt
+# certresolver on :80/:443). It does NOT terminate TLS itself — it hands the
+# gateway to that existing Traefik via labels instead of standing up a second
+# proxy or certbot container.
+#
+# Traefik runs with network_mode: host, so it has no bridge network of its
+# own; it reaches the gateway container over the docker-compose default
+# bridge network by container IP, which the host can already route to. That
+# is why the gateway does not need to publish 8080 to all interfaces here —
+# only to loopback, for `ssh -L 8080:localhost:8080` debugging.
+#
+# innsight.tech's DNS A record must point at this VPS before Traefik can
+# complete the ACME HTTP-01 challenge, or the router will sit there
+# unable to get a certificate (check with `docker logs traefik-traefik-1`).
+
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:8080:8080"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.innsight.rule=Host(`innsight.tech`) || Host(`www.innsight.tech`)
+      - traefik.http.routers.innsight.entrypoints=websecure
+      - traefik.http.routers.innsight.tls=true
+      - traefik.http.routers.innsight.tls.certresolver=letsencrypt
+      - traefik.http.services.innsight.loadbalancer.server.port=8080

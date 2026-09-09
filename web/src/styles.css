@@ -395,6 +395,29 @@ button.danger {
   background: var(--row-hover);
 }
 
+/* One "← Back" control in the shared topbar — present on every routed page
+   for free, rather than each page wiring its own. Word + arrow only, no
+   filled background, so it reads as navigation chrome rather than a
+   call-to-action competing with each page's own buttons. */
+.cb-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  padding: 6px 4px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--control-radius);
+}
+.cb-back:hover {
+  color: var(--text);
+  background: var(--row-hover);
+}
+
 /* The brand lockup at the top of the rail: the emblem plus its own wordmark
    artwork, rather than the UI font approximating the letterforms. */
 .side-brand {
@@ -3286,39 +3309,50 @@ tr.active td {
   color: var(--text-success);
 }
 
+/* A floating card, not a flush strip. This used to bleed edge-to-edge inside
+   .cb-main via negative margins (16px -32px -24px, exactly cancelling
+   .cb-main's own padding) — full-width, no visible corners, no separation
+   from the page behind it, so it read as part of the background rather than
+   a distinct summary panel. Kept sticky to the bottom of the viewport, but
+   now with its own border, radius and shadow all the way around, and a gap
+   below it instead of sitting flush against the edge. */
 .wizard-bottom {
   position: sticky;
-  bottom: 0;
+  bottom: 16px;
   background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding: 14px 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+  padding: 16px 24px;
   display: flex;
   align-items: center;
   gap: 24px;
-  margin: 16px -32px -24px;
+  margin-top: 16px;
 }
 .wizard-totals {
   display: flex;
-  gap: 22px;
+  gap: 24px;
   flex: 1;
   flex-wrap: wrap;
 }
 .wizard-total {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 .wizard-total .label {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 .wizard-total .value {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
 }
 .wizard-total.balance .value {
   color: var(--accent);
-  font-size: 16px;
+  font-size: 17px;
 }
 
 /* ==========================================================================
@@ -4049,6 +4083,49 @@ th.sortable.active .sort-arrow {
 .pb-roomcard:hover {
   border-color: var(--accent);
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+/* Built-in special request — the guest's own checklist + free text + arrival
+   time, on the public booking engine's Guest step. */
+.pb-special-requests {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.pb-special-requests-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.pb-special-requests-sub {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: 2px 0 12px;
+}
+.pb-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.pb-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+}
+.pb-check-row input[type='checkbox'] {
+  margin-top: 3px;
+  width: 15px;
+  height: 15px;
+  min-width: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* ==========================================================================
@@ -5134,17 +5211,24 @@ html[data-theme='dark'] .skel {
   }
 }
 
+/* Stacked list, not the wrapped inline row this used to be — the legend now
+   lives in its own card in the right-hand column (.hk-side), at the same
+   ~290px width as the room detail card below it, so a horizontal wrap of
+   six items no longer fits. */
 .hk-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 9px;
   font-size: 12.5px;
 }
 .hk-legend-item {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+.hk-legend-text {
+  flex: 1;
+  min-width: 0;
 }
 .hk-legend-swatch {
   width: 14px;
@@ -5152,6 +5236,7 @@ html[data-theme='dark'] .skel {
   border-radius: 4px;
   border: 1.5px solid;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 .hk-layout {
@@ -5219,21 +5304,32 @@ html[data-theme='dark'] .skel {
    `align-items: flex-start`, so this stays its own height instead of being
    stretched to the map's, which a stretched item cannot stick inside; and the
    top bar is `position: sticky; top: 0` at z-index 100, so the offset below
-   clears it and the z-index stays under it. */
-.hk-detail {
+   clears it and the z-index stays under it.
+
+   The stickiness and height cap live on `.hk-side` (the column) rather than on
+   `.hk-detail` itself now, because the legend card sits above it in the same
+   column — anchoring each card separately would either overlap them or need
+   the legend's own height threaded into the detail card's `top`. One sticky,
+   internally-scrolling column with both cards inside is simpler and behaves
+   the same whether or not a room is selected. */
+.hk-side {
   width: 290px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   position: sticky;
   top: calc(var(--topbar-h) + 16px);
-  /* Never taller than what is left of the screen. Without the cap, a room with
-     a full action list is simply cut off at the bottom of the viewport with no
-     way to reach the rest — sticky pins the TOP of the element, so overflow
-     goes off the bottom edge and stays there however far you scroll. The panel
-     scrolls internally instead. The 32px is the 16px offset above plus the same
+  /* Never taller than what is left of the screen — see the note above this
+     rule used to carry alone; the 32px is the 16px offset above plus the same
      again below, so it never sits flush against the bottom edge. */
   max-height: calc(100vh - var(--topbar-h) - 32px);
   overflow-y: auto;
   z-index: 1;
+}
+.hk-legend-panel,
+.hk-detail {
+  flex-shrink: 0;
 }
 .hk-detail-head {
   display: flex;
@@ -5280,11 +5376,12 @@ html[data-theme='dark'] .skel {
   .hk-layout {
     flex-direction: column;
   }
-  /* Stacked, the panel sits BELOW the map rather than beside it, so there is no
-     "stay in view while the map scrolls past" to preserve — sticking here would
-     just pin a full-width block over the content underneath it, and the height
-     cap would put a second scrollbar inside a page that already scrolls. */
-  .hk-detail {
+  /* Stacked, the column sits BELOW the map rather than beside it, so there is
+     no "stay in view while the map scrolls past" to preserve — sticking here
+     would just pin a full-width block over the content underneath it, and the
+     height cap would put a second scrollbar inside a page that already
+     scrolls. */
+  .hk-side {
     width: 100%;
     position: static;
     max-height: none;
@@ -7892,12 +7989,106 @@ html[data-theme='dark'] .hk-tooltip {
   overflow-wrap: anywhere;
 }
 
-/* Segmented range switcher — used in the Arrivals panel header. Sized to sit
-   level with an <h3> in .panel-head without stretching it.
+/* ==========================================================================
+   Folio page re-layout
+   --------------------------------------------------------------------------
+   A single "who/what/how much" summary card up top (guest name, folio
+   number, status, balance, and the primary actions), then a two-column body
+   below it: the ledger and its supporting tables on the left, and a compact
+   tabbed "take an action" card pinned on the right — Charge / Payment /
+   Deposit used to be three separate full-width panels stacked one after the
+   other, which meant scrolling past two forms you were not about to use to
+   reach the third. Mirrors the same two-column-with-a-sticky-sidebar shape
+   already established on Map & Housekeeping (.hk-layout/.hk-side), kept as
+   its own set of rules rather than sharing those classes so a change to
+   either page's layout cannot silently affect the other.
+   ========================================================================== */
+.folio-summary-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.folio-summary-guest {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.folio-summary-name {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.folio-summary-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+.folio-summary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.folio-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.folio-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.folio-side {
+  width: 320px;
+  flex-shrink: 0;
+  position: sticky;
+  /* Same reasoning as .hk-side: the page scrolls on the document, the
+     sidebar should not be stretched to the ledger's height (so it can
+     actually stick), and the top bar is sticky at z-index 100 above it. */
+  top: calc(var(--topbar-h) + 16px);
+  max-height: calc(100vh - var(--topbar-h) - 32px);
+  overflow-y: auto;
+  z-index: 1;
+}
+@media (max-width: 960px) {
+  .folio-layout {
+    flex-direction: column;
+  }
+  .folio-side {
+    width: 100%;
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+/* The bordered, rectangular segmented control — used in the Arrivals panel
+   header and SplitBillDialog's method switcher. Sized to sit level with an
+   <h3> in .panel-head without stretching it.
    Token substitutions (verified against the definitions in this file — the
    brief's names don't all exist): --surface-hover -> --row-hover,
-   --text-muted -> --muted, --primary/--primary-hover -> --accent/--accent-hover. */
-.seg {
+   --text-muted -> --muted, --primary/--primary-hover -> --accent/--accent-hover.
+   Named .seg-rect/.seg-rect-btn rather than .seg/.seg-btn: this file already
+   had an UNRELATED .seg (Amenities.jsx's Catalog/Laundry toggle, Calendar's
+   and Rooms' view switchers, etc. — the pill-shaped tab control, further up),
+   with its own container radius, padding and background. Same class name,
+   two different components — this rule, being declared later, won the
+   container's shape (a rounded RECTANGLE with overflow:hidden) for every
+   consumer of bare `.seg`, while their bare `<button>` children still matched
+   the pill rule's oval-radius buttons — so EVERY pill-style toggle in the app
+   rendered as a rectangular container with an oval button escaping its
+   corners, exactly like Amenities' Catalog/Laundry switcher. Distinct names
+   so neither can bleed into the other again. */
+.seg-rect {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -7908,7 +8099,7 @@ html[data-theme='dark'] .hk-tooltip {
      itself right the same way. */
   margin-left: auto;
 }
-.seg-btn {
+.seg-rect-btn {
   appearance: none;
   border: 0;
   background: transparent;
@@ -7919,18 +8110,18 @@ html[data-theme='dark'] .hk-tooltip {
   cursor: pointer;
   border-right: 1px solid var(--border);
 }
-.seg-btn:last-child {
+.seg-rect-btn:last-child {
   border-right: 0;
 }
-.seg-btn:hover {
+.seg-rect-btn:hover {
   background: var(--row-hover);
   color: var(--text);
 }
-.seg-btn.is-active {
+.seg-rect-btn.is-active {
   background: var(--accent);
   color: var(--on-accent);
 }
-.seg-btn.is-active:hover {
+.seg-rect-btn.is-active:hover {
   background: var(--accent-hover);
 }
 
@@ -7956,13 +8147,13 @@ tr.is-linked > td {
 
 
 /* ── Split bill dialog ─────────────────────────────────────────────────────
-   Built out of the controls the rest of the app already uses: .seg/.seg-btn for
-   the method (as in Arrivals), .secondary.small for the stepper, .error for the
-   message, tabular-nums for money. The first version reached for raw radio
-   inputs and its own colour block, and both fought the global form rules —
-   `input { width: 100%; min-height: var(--control-h) }` turned each radio into a
-   large circle, and the uppercase global `label` broke "By percentage" over two
-   lines. */
+   Built out of the controls the rest of the app already uses: .seg-rect/
+   .seg-rect-btn for the method (as in Arrivals), .secondary.small for the
+   stepper, .error for the message, tabular-nums for money. The first version
+   reached for raw radio inputs and its own colour block, and both fought the
+   global form rules — `input { width: 100%; min-height: var(--control-h) }`
+   turned each radio into a large circle, and the uppercase global `label`
+   broke "By percentage" over two lines. */
 
 /* A labelled row: caption on the left, control on the right. */
 .split-block {
@@ -7984,9 +8175,9 @@ tr.is-linked > td {
   text-transform: uppercase;
   color: var(--muted);
 }
-/* .seg carries `margin-left: auto` so it right-aligns inside a .panel-head.
-   Here it follows its caption instead. */
-.split-seg.seg {
+/* .seg-rect carries `margin-left: auto` so it right-aligns inside a
+   .panel-head. Here it follows its caption instead. */
+.split-seg.seg-rect {
   margin-left: 0;
 }
 

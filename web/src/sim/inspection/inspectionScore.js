@@ -106,3 +106,15 @@ export function scoreInspection({ caseFile, flags = [], elapsedSec = 0 }) {
 
   return items;
 }
+
+/**
+ * Whether a completed inspection is clean enough to sign the room off as
+ * guest-ready: every injected defect was found AND correctly categorised, and
+ * nothing clean was condemned. Partial credit (found but miscategorised, or a
+ * defect missed) does not pass — the room goes back for re-cleaning instead.
+ *
+ * @param {Array} items  the array `scoreInspection` returns
+ */
+export function passesInspection(items) {
+  return items.length > 0 && items.every((i) => i.procedure === GOOD && i.understanding === GOOD);
+}

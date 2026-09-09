@@ -96,3 +96,28 @@ test('a walk-in folio with no stay reports no adult count', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.adults, null);
 });
+
+// guestName comes from the RESERVATION, not a Guest-service profile join —
+// Folio.guestId (an optional link to an actual Guest record) is null on
+// almost every folio, so a lookup keyed on it came up empty for nearly every
+// folio with a real, named guest attached via its stay. The reservation's
+// guestName is a required, always-present string.
+test('a folio on a stay reports the reservation guest name', async () => {
+  folioRow = { id: 'f3', stayId: 'stay1', guestId: null };
+  stayRow = { reservationId: 'res1' };
+  reservationRow = { adults: 2, guestName: 'Dela Cruz, Maria' };
+
+  const r = await call('/api/folios/f3');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.guestName, 'Dela Cruz, Maria');
+});
+
+test('a walk-in folio with no stay reports no guest name', async () => {
+  folioRow = { id: 'f4', stayId: null };
+  stayRow = null;
+  reservationRow = null;
+
+  const r = await call('/api/folios/f4');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.guestName, null);
+});
