@@ -242,6 +242,36 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
       return { scanned: candidates.length, marked: touched };
     });
 
+    // Step 3b — auto-cancel overdue bookings. Distinct from a no-show: a
+    // no-show is a CONFIRMED guest who never arrived (handled above); this is
+    // an unconfirmed (PENDING) booking whose check-in date has already
+    // passed — nobody ever finished paying the downpayment/confirming it, so
+    // it's "overdue," not attended-but-absent. No fee override is sent to
+    // /cancel: its own policy computation (services/reservation/src/lib/
+    // policies.js's cancellationFeeCents) always lands these in the <24h/
+    // 100%-forfeiture tier, since checkIn has already passed.
+    const autoCancelSummary = await recordStep(day.id, 'auto_cancel_overdue', async () => {
+      const to = endOfLocalDay(date);
+      const candidates = await callService(
+        `${RESERVATION_URL}/api/reservations?status=PENDING&to=${to.toISOString()}`
+      );
+      const businessDayKey = localDay(date);
+      const overdue = candidates.filter((r) => localDay(r.checkIn) <= businessDayKey);
+      const touched = [];
+      for (const r of overdue) {
+        try {
+          await callService(`${RESERVATION_URL}/api/reservations/${r.id}/cancel`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: 'Overdue — auto-cancelled (unconfirmed past check-in)' }),
+          });
+          touched.push(r.id);
+        } catch (err) {
+          touched.push({ id: r.id, error: err.message });
+        }
+      }
+      return { scanned: candidates.length, cancelled: touched };
+    });
+
     // Step 4 — occupancy snapshot
     const occupancy = await recordStep(day.id, 'occupancy_snapshot', async () => {
       const rooms = await callService(`${INVENTORY_URL}/api/rooms`);
@@ -318,7 +348,7 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
 
     res.json({
       businessDay: closed,
-      stepsSummary: { stays: stays.length, roomPostings, noShowSummary, occupancy },
+      stepsSummary: { stays: stays.length, roomPostings, noShowSummary, autoCancelSummary, occupancy },
     });
   } catch (err) {
     console.error('[Audit] Run error:', err.message);

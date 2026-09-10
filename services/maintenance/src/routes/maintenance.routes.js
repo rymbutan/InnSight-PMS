@@ -4,9 +4,11 @@ const { requireRole, ROLE_GROUPS } = require('../middleware/auth');
 
 // Anyone can report an issue (create), but triage/assign/start/complete/verify
 // and asset management are restricted to maintenance staff and managers.
-const MAINT = ['ADMIN', 'MANAGER', 'MAINTENANCE'];
+// HOUSEKEEPING and MAINTENANCE were merged into one role (Unified Staff Role) —
+// see ROLE_GROUPS.MAINT in middleware/auth.js.
+const MAINT = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE'];
 // Any operational role can REPORT an issue; only MAINT progresses the work order.
-const REPORTER = ['ADMIN', 'MANAGER', 'MAINTENANCE', 'FRONT_DESK', 'HOUSEKEEPING'];
+const REPORTER = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE', 'FRONT_DESK'];
 
 const router = express.Router();
 const prisma = require('../lib/prisma');

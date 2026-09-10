@@ -32,8 +32,10 @@ const byNumber = (a, b) => String(a.number).localeCompare(String(b.number), unde
  * columns line up down the map instead of each floor drawing its own grid.
  *
  * @returns {{slots, floors, mapW, mapH}} `floors` carries the corridor and label
- *   geometry the SVG needs; `mapW` may exceed MAP_W, which is what makes the
- *   panel scroll rather than crush the rooms.
+ *   geometry the SVG needs. `mapW` is sized to the content, not a fixed
+ *   canvas — it exceeds MAP_W for a busy floor (which is what makes the panel
+ *   scroll rather than crush the rooms) and shrinks below it for a sparse one
+ *   (so the drawing doesn't sit inside acres of dead space).
  */
 export function computeLayout(rooms) {
   const byFloor = new Map();
@@ -51,7 +53,17 @@ export function computeLayout(rooms) {
 
   const fit = (MAP_W - MARGIN_X * 2 - GAP * (cols - 1)) / cols;
   const w = Math.max(MIN_ROOM_W, Math.min(MAX_ROOM_W, fit));
-  const mapW = Math.max(MAP_W, MARGIN_X * 2 + cols * w + GAP * (cols - 1));
+  // mapW hugs the actual content — it used to be clamped to at least MAP_W,
+  // which was fine for a busy floor (content already reaches MAP_W on its
+  // own) but left a sparsely-occupied property (few rooms per floor, spread
+  // across many floors) drawing a corridor far wider than its own rooms:
+  // two 150px-wide rooms centred in a 980-wide bar, with dead space flanking
+  // them on both sides. The SVG is rendered at this exact native size (see
+  // Housekeeping.jsx), not stretched to fill its panel, so shrinking mapW
+  // here only tightens the drawing around its rooms — it can no longer
+  // inflate mapH through aspect-ratio scaling the way it would if the SVG
+  // were still stretched via CSS width:100%/height:auto.
+  const mapW = MARGIN_X * 2 + cols * w + GAP * (cols - 1);
 
   const slots = [];
   const floors = [];

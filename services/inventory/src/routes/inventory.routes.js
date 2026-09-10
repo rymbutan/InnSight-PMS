@@ -9,8 +9,10 @@ const _ADMIN = ['ADMIN', 'MANAGER'];
 // Property configuration — rooms, prices, rate plans, amenity catalog — is
 // ADMIN-only (managers can operate the desk but not change the property setup).
 const ROOM_ADMIN = ['ADMIN'];
-// Room status transitions are performed by housekeeping and the front desk too.
-const ROOM_STATUS_ROLES = ['ADMIN', 'MANAGER', 'HOUSEKEEPING', 'FRONT_DESK'];
+// Room status transitions are performed by housekeeping/maintenance and the
+// front desk too. HOUSEKEEPING and MAINTENANCE were merged into one role
+// (Unified Staff Role) — see ROLE_GROUPS.MAINT in middleware/auth.js.
+const ROOM_STATUS_ROLES = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE', 'FRONT_DESK'];
 const BOOKING = ['ADMIN', 'MANAGER', 'FRONT_DESK']; // placing/releasing inventory holds & facility bookings
 
 const router = express.Router();
@@ -923,7 +925,7 @@ router.post('/facility-bookings', requireRole(...BOOKING), async (req, res) => {
 });
 
 // ── Housekeeping room assignment ───────────────────────────────────────────
-const HOUSEKEEPING_MGMT = ['ADMIN', 'MANAGER', 'HOUSEKEEPING'];
+const HOUSEKEEPING_MGMT = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE'];
 // PATCH /api/rooms/:id/assign — assign a room to a housekeeper (or clear with null)
 router.patch('/rooms/:id/assign', requireRole(...HOUSEKEEPING_MGMT), async (req, res) => {
   try {

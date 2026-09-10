@@ -10,6 +10,7 @@ const prisma = require('./prisma');
 const { DEFAULT_TAX_RATES, DEFAULT_COUNTRY, defaultRatesForCountry } = require('./policies');
 const {
   TAX_COMPONENT_KEYS, taxRateKey, normalizeCountry, HOTEL_KEYS, HOTEL_DEFAULTS, parseTaxRates, parseHotel,
+  PAYMENT_FEE_KEY, parsePaymentFeePercent,
 } = require('./settings');
 
 // The jurisdiction a real charge is taxed against when no country is asked
@@ -82,4 +83,34 @@ async function saveHotel(hotel) {
   return hotel;
 }
 
-module.exports = { getTaxRates, getHotel, getPropertyCountry, saveTaxRates, saveHotel };
+// Falls back to 0 on ANY failure, same discipline as getTaxRates above: a
+// folio must still accept a card payment when settings are unreachable, and
+// charging NO fee is the safe direction to fail in, not inventing one.
+async function getPaymentFeePercent() {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: PAYMENT_FEE_KEY } });
+    return parsePaymentFeePercent(row);
+  } catch (err) {
+    console.error('[Folio] Could not read payment processing fee, using default:', err.message);
+    return 0;
+  }
+}
+
+async function savePaymentFeePercent(feePercent) {
+  await prisma.appSetting.upsert({
+    where: { key: PAYMENT_FEE_KEY },
+    create: { key: PAYMENT_FEE_KEY, value: String(feePercent) },
+    update: { value: String(feePercent) },
+  });
+  return feePercent;
+}
+
+module.exports = {
+  getTaxRates,
+  getHotel,
+  getPropertyCountry,
+  saveTaxRates,
+  saveHotel,
+  getPaymentFeePercent,
+  savePaymentFeePercent,
+};

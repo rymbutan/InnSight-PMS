@@ -36,6 +36,15 @@ function makeFolioClient({ name, baseUrl = FOLIO_URL }) {
     return call(`${baseUrl}/api/settings/tax-rates`);
   }
 
+  // The CARD/BANK_TRANSFER processing-fee surcharge percent, for previewing —
+  // and, server-side, authoritatively computing — the deposit fee shown in the
+  // wizard's Payment step. Same fallback discipline: a caller that can't reach
+  // folio treats 0% as "no surcharge to preview" rather than blocking the booking.
+  async function getPaymentFeePercent() {
+    const result = await call(`${baseUrl}/api/settings/payment-fee-percent`);
+    return result?.feePercent ?? 0;
+  }
+
   // The property's check-in/check-out clock times, stamped onto every booking's
   // stored window. Same fallback discipline as the rates: callers treat a
   // failure as "use the shipped defaults" rather than refusing the booking.
@@ -47,7 +56,7 @@ function makeFolioClient({ name, baseUrl = FOLIO_URL }) {
     };
   }
 
-  return { getTaxRates, getHotelTimes };
+  return { getTaxRates, getHotelTimes, getPaymentFeePercent };
 }
 
 module.exports = { makeFolioClient };

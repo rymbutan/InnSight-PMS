@@ -105,16 +105,63 @@ test('a pre-arrival check-in change is sent; an in-house one is dropped', () => 
 
 test('check-out on or before check-in is rejected', () => {
   const plan = planQuickEdit({ res, stay: null, form: pristine({ checkOut: '2026-08-30' }) });
-  assert.ok(plan.errors.some((e) => /after check-in/i.test(e)), plan.errors.join(';'));
+  assert.ok(
+    plan.errors.some((e) => /after check-in/i.test(e)),
+    plan.errors.join(';')
+  );
 });
 
 test('a reservation needs at least one adult', () => {
   const plan = planQuickEdit({ res, stay: null, form: pristine({ adults: 0 }) });
-  assert.ok(plan.errors.some((e) => /adult/i.test(e)), plan.errors.join(';'));
+  assert.ok(
+    plan.errors.some((e) => /adult/i.test(e)),
+    plan.errors.join(';')
+  );
 });
 
 test('cleared text fields are sent as null, not empty string', () => {
   const withOrigin = { ...res, origin: 'Booking.com' };
   const plan = planQuickEdit({ res: withOrigin, stay: null, form: pristine({ origin: '' }) });
   assert.strictEqual(plan.resPatch.origin, null);
+});
+
+// Mandatory Downpayment Constraint: this field is how staff record a deposit
+// against a publicly-created booking (which starts with none at all), so it
+// can later be confirmed. Leaving it blank must not be read as "set it to 0".
+test('a blank deposit field sends nothing — it is not an attempt to zero it out', () => {
+  const plan = planQuickEdit({ res: { ...res, depositCents: 0n }, stay: null, form: pristine() });
+  assert.strictEqual(plan.resPatch.depositCents, undefined);
+  assert.deepStrictEqual(plan.errors, []);
+});
+
+test('recording a deposit sends depositCents in centavos', () => {
+  const plan = planQuickEdit({
+    res: { ...res, depositCents: 0n },
+    stay: null,
+    form: pristine({ depositPesos: '500' }),
+  });
+  assert.strictEqual(plan.resPatch.depositCents, 50000);
+  assert.deepStrictEqual(plan.errors, []);
+});
+
+test('a zero or negative deposit is rejected before it reaches the server', () => {
+  const plan = planQuickEdit({
+    res: { ...res, depositCents: 0n },
+    stay: null,
+    form: pristine({ depositPesos: '0' }),
+  });
+  assert.ok(
+    plan.errors.some((e) => /greater than 0/i.test(e)),
+    plan.errors.join(';')
+  );
+  assert.strictEqual(plan.resPatch.depositCents, undefined);
+});
+
+test('an unchanged deposit is not resent', () => {
+  const plan = planQuickEdit({
+    res: { ...res, depositCents: 50000n },
+    stay: null,
+    form: pristine({ depositPesos: '500' }),
+  });
+  assert.strictEqual(plan.resPatch.depositCents, undefined);
 });

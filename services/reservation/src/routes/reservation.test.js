@@ -444,17 +444,14 @@ function call(app, method, path, body, headers = {}) {
 function callRaw(app, method, path) {
   return new Promise((resolve) => {
     const server = app.listen(0, () => {
-      const req = http.request(
-        { host: '127.0.0.1', port: server.address().port, method, path },
-        (res) => {
-          const chunks = [];
-          res.on('data', (c) => chunks.push(c));
-          res.on('end', () => {
-            server.close();
-            resolve({ status: res.statusCode, headers: res.headers, buf: Buffer.concat(chunks) });
-          });
-        }
-      );
+      const req = http.request({ host: '127.0.0.1', port: server.address().port, method, path }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          server.close();
+          resolve({ status: res.statusCode, headers: res.headers, buf: Buffer.concat(chunks) });
+        });
+      });
       req.on('error', () => {
         server.close();
         resolve({ status: 0, buf: Buffer.alloc(0) });
@@ -471,6 +468,11 @@ const sample = {
   checkIn: '2026-05-01',
   checkOut: '2026-05-03',
   adults: 2,
+  // Mandatory Downpayment Constraint: every creation test in this file books
+  // through the same fixture, so a required downpayment goes on it once here
+  // rather than into every individual test body.
+  depositCents: 100000,
+  paymentType: 'CASH',
 };
 
 test('POST /api/reservations creates and returns a reservation with confirmationNumber', async () => {
@@ -485,6 +487,134 @@ test('POST /api/reservations creates and returns a reservation with confirmation
 test('POST /api/reservations rejects missing required fields', async () => {
   const app = makeApp();
   const res = await call(app, 'POST', '/api/reservations', { guestName: '' });
+  assert.strictEqual(res.status, 400);
+});
+
+// Mandatory Downpayment Constraint: booking creation must fail without proof
+// of a required downpayment via one of Cash/Card/E-Wallet/Bank Transfer.
+test('POST /api/reservations rejects a zero deposit', async () => {
+  const app = makeApp();
+  const res = await call(app, 'POST', '/api/reservations', { ...sample, depositCents: 0 });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /downpayment/i);
+});
+
+test('POST /api/reservations rejects a missing paymentType', async () => {
+  const app = makeApp();
+  // eslint-disable-next-line no-unused-vars
+  const { paymentType, ...noMethod } = sample;
+  const res = await call(app, 'POST', '/api/reservations', noMethod);
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /downpayment/i);
+});
+
+test('POST /api/reservations rejects an unrecognised paymentType', async () => {
+  const app = makeApp();
+  const res = await call(app, 'POST', '/api/reservations', { ...sample, paymentType: 'CRYPTO' });
+  assert.strictEqual(res.status, 400);
+});
+
+// Per-method deposit detail required alongside paymentType, mirroring
+// missingDepositField.js — same requirements Folio holds its own payment
+// route to.
+const DEPOSIT_DETAIL_BY_METHOD = {
+  CASH: {},
+  E_WALLET: {},
+  CARD: { cardMasked: 'VISA •••• 4242', cardholderName: 'Juan Dela Cruz' },
+  BANK_TRANSFER: {
+    bankName: 'BDO',
+    transferNetwork: 'InstaPay',
+    senderName: 'Juan Dela Cruz',
+    reference: 'REF123',
+  },
+};
+
+for (const paymentType of ['CASH', 'CARD', 'E_WALLET', 'BANK_TRANSFER']) {
+  test(`POST /api/reservations accepts a downpayment via ${paymentType}`, async () => {
+    const app = makeApp();
+    const res = await call(app, 'POST', '/api/reservations', {
+      ...sample,
+      paymentType,
+      ...DEPOSIT_DETAIL_BY_METHOD[paymentType],
+    });
+    assert.strictEqual(res.status, 201);
+  });
+}
+
+test('POST /api/reservations rejects a CARD deposit missing cardholderName', async () => {
+  const app = makeApp();
+  const res = await call(app, 'POST', '/api/reservations', {
+    ...sample,
+    paymentType: 'CARD',
+    cardMasked: 'VISA •••• 4242',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /cardholder name/i);
+});
+
+test('POST /api/reservations rejects a BANK_TRANSFER deposit missing a reference', async () => {
+  const app = makeApp();
+  const res = await call(app, 'POST', '/api/reservations', {
+    ...sample,
+    paymentType: 'BANK_TRANSFER',
+    bankName: 'BDO',
+    transferNetwork: 'InstaPay',
+    senderName: 'Juan Dela Cruz',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /reference/i);
+});
+
+test('POST /api/reservations computes depositFeeCents server-side and ignores any client-sent value', async () => {
+  const app = makeApp();
+  const res = await call(app, 'POST', '/api/reservations', {
+    ...sample,
+    paymentType: 'CASH',
+    depositFeeCents: 999999, // must be ignored — CASH never carries a processing fee
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(Number(res.body.depositFeeCents), 0);
+});
+
+test('POST /api/reservations/:id/confirm refuses a reservation with no recorded downpayment', async () => {
+  resetDb();
+  const app = makeApp();
+  // Simulates a booking taken through the public self-service widget
+  // (services/reservation/src/index.js's /api/public/reservations), which
+  // collects no deposit at all.
+  const id = seedReservation({ status: 'PENDING', depositCents: 0n, paymentType: null });
+  const res = await call(app, 'POST', `/api/reservations/${id}/confirm`, {});
+  assert.strictEqual(res.status, 409);
+  assert.match(res.body.error, /downpayment/i);
+});
+
+test('PATCH /api/reservations/:id lets staff record a downpayment, unblocking confirm', async () => {
+  resetDb();
+  const app = makeApp();
+  const id = seedReservation({ status: 'PENDING', depositCents: 0n, paymentType: null });
+  const patched = await call(app, 'PATCH', `/api/reservations/${id}`, {
+    depositCents: 50000,
+    paymentType: 'CASH',
+  });
+  assert.strictEqual(patched.status, 200);
+  const confirm = await call(app, 'POST', `/api/reservations/${id}/confirm`, {});
+  assert.strictEqual(confirm.status, 200);
+  assert.strictEqual(confirm.body.status, 'CONFIRMED');
+});
+
+test('PATCH /api/reservations/:id rejects a zero deposit', async () => {
+  resetDb();
+  const app = makeApp();
+  const id = seedReservation({ status: 'PENDING' });
+  const res = await call(app, 'PATCH', `/api/reservations/${id}`, { depositCents: 0 });
+  assert.strictEqual(res.status, 400);
+});
+
+test('PATCH /api/reservations/:id rejects an unrecognised paymentType', async () => {
+  resetDb();
+  const app = makeApp();
+  const id = seedReservation({ status: 'PENDING' });
+  const res = await call(app, 'PATCH', `/api/reservations/${id}`, { paymentType: 'CRYPTO' });
   assert.strictEqual(res.status, 400);
 });
 

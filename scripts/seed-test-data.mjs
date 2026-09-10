@@ -257,6 +257,10 @@ async function main() {
         children: g.children,
         specialRequests: g.requests,
         source: 'WALK_IN',
+        // Mandatory Downpayment Constraint: POST /reservations refuses a
+        // booking without depositCents > 0 and a valid paymentType.
+        depositCents: 100000,
+        paymentType: 'CASH',
       }, { raw: true });
 
       if (res.status === 201) {

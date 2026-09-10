@@ -61,7 +61,7 @@ const NAV_SECTIONS = [
         to: '/housekeeping',
         label: 'Map & Housekeeping',
         icon: 'map',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
+        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'],
       },
       {
         to: '/rooms',
@@ -72,24 +72,13 @@ const NAV_SECTIONS = [
         // Desk or Housekeeping user just looking up a room.
         nonAdminLabel: 'Hotel Rooms',
         icon: 'bed',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
+        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'],
       },
       {
         to: '/amenities',
         label: 'Amenities & Facilities',
         icon: 'sparkles',
         roles: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
-      },
-    ],
-  },
-  {
-    label: 'Skills Proficiency',
-    items: [
-      {
-        to: '/training',
-        label: 'Training & Competency',
-        icon: 'graduation-cap',
-        roles: ['ADMIN', 'MANAGER', 'HOUSEKEEPING', 'FRONT_DESK'],
       },
     ],
   },

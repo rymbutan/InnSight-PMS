@@ -1457,14 +1457,73 @@ html[data-theme='dark'] .side-brand-mark {
   color: var(--muted-2);
 }
 
-/* ── Section labels (ACCOUNT INFORMATION / SYSTEM APPEARANCE) ── */
-.set-section-label {
-  margin: 24px 0 10px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+/* ── Collapsible section bars (Account Information / Billing / Hotel Details
+   / System Appearance) — closed by default; one click reveals its cards,
+   instead of every card on the page being on screen at once. */
+.set-accordion {
+  margin: 14px 0;
+}
+.set-accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.set-accordion-header:hover {
+  border-color: var(--accent);
+}
+/* Header and body read as one bordered shape while open — square the seam
+   between them instead of stacking two fully-rounded rectangles. */
+.set-accordion.is-open .set-accordion-header {
+  border-radius: 12px 12px 0 0;
+  border-bottom-color: transparent;
+}
+.set-accordion-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   color: var(--muted);
+}
+.set-accordion-title {
+  flex: 1;
+}
+.set-accordion-caret {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.set-accordion.is-open .set-accordion-caret {
+  transform: rotate(180deg);
+}
+.set-accordion-body {
+  border: 1px solid var(--border-strong);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 18px;
+  background: var(--surface-2);
+}
+/* The section's own top padding already separates it from the header — an
+   is-wide card's usual margin-top (meant to separate it from a GRID of cards
+   above it) would just double that gap when the wide card is the first thing
+   in the section. */
+.set-accordion-body > .set-card:first-child {
+  margin-top: 0;
 }
 
 /* ── Cards ── */
@@ -2630,6 +2689,19 @@ tr.active td {
   color: var(--on-green-soft);
 }
 .badge.disabled {
+  background: var(--neutral-soft);
+  color: var(--on-neutral-soft);
+}
+/* Folio list's "Type of Charge" column (Folios.jsx) — a stay whose bill was
+   split into several folios (chargeType SPLIT) vs. one that never was
+   (SOLO). Accent for split so a payer-split stay stands out among a page of
+   otherwise-identical solo folios; neutral for solo, since it is the
+   unremarkable default and shouldn't compete for attention. */
+.badge.split {
+  background: var(--accent-soft);
+  color: var(--on-accent-soft);
+}
+.badge.solo {
   background: var(--neutral-soft);
   color: var(--on-neutral-soft);
 }
@@ -4788,87 +4860,6 @@ html[data-theme='dark'] .skel {
   min-width: 0;
 }
 
-/* ── Training & Competency layout ─────────────────────────────────────────
-   Records left, summary right. Same split as the Rooms page: the wide column
-   is what you read row by row, the rail is what you glance at. */
-.tr-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-@media (min-width: 1100px) {
-  .tr-grid {
-    /* minmax(0,…) on the main track or the wide tables refuse to shrink and
-       push the rail off the edge — grid items default to min-width:auto. */
-    grid-template-columns: minmax(0, 2.2fr) minmax(260px, 0.9fr);
-  }
-  .tr-rail {
-    position: sticky;
-    top: calc(var(--topbar-h) + 16px);
-  }
-}
-.tr-main,
-.tr-rail {
-  min-width: 0;
-}
-
-/* Rank list. An ordered list, so the position is real to a screen reader and
-   not just a number drawn beside a name. */
-.rank-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.rank-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--surface-2);
-  font-size: 12.5px;
-}
-.rank-pos {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--neutral-soft);
-  color: var(--on-neutral-soft);
-  font-size: 11px;
-  font-weight: 700;
-}
-/* Top three carry weight, and the first carries the accent. Ranks below three
-   stay neutral — colouring all of them would make the podium meaningless. */
-.rank-pos.is-top1 {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-.rank-pos.is-top2,
-.rank-pos.is-top3 {
-  background: var(--accent-soft);
-  color: var(--on-accent-soft);
-}
-.rank-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rank-score {
-  flex: none;
-  font-weight: 700;
-  color: var(--text);
-}
-
 /* Floor-plan thumbnail on a layout picker card. */
 .layout-thumb {
   display: flex;
@@ -5249,16 +5240,32 @@ html[data-theme='dark'] .skel {
   min-width: 0;
   padding: 10px;
 }
+/* Rendered at its native size (width/height attributes set from mapW/mapH in
+   JS) rather than stretched to fill the panel via width:100%/height:auto —
+   that stretch used to scale mapH right along with mapW, so a sparse property
+   (few rooms per floor, spread across many floors — a short, narrow drawing)
+   got blown up into a needlessly tall one just to fill a wide panel. Native
+   sizing means a compact property draws compact, and a busy one still
+   overflows into `.hk-map-scroll`'s horizontal scroll below. */
 .hk-map {
-  width: 100%;
-  height: auto;
   display: block;
+  /* `.hk-map-scroll` is now a flex container (to centre a narrow map — see
+     below); flex items default to shrinkable, which would squeeze the map
+     below MIN_ROOM_W instead of scrolling once it's wider than the panel. */
+  flex-shrink: 0;
 }
 /* The map keeps its rooms legible and grows instead of shrinking them, so a
    large property scrolls sideways here rather than crushing forty-five rooms
    into one screen-width. `min-width: 0` on the panel is what lets this actually
    scroll instead of stretching its flex parent. */
 .hk-map-scroll {
+  display: flex;
+  /* Centres a map that's narrower than the panel (native-sized now, so it no
+     longer stretches via width:100% to fill the space) instead of leaving it
+     pinned to the left edge with dead space on the right. Has no visible
+     effect once the map is wider than the panel — a flex item that overflows
+     its container still scrolls, it just doesn't have room left to centre. */
+  justify-content: center;
   overflow-x: auto;
   overflow-y: hidden;
   max-width: 100%;
@@ -5850,7 +5857,7 @@ html[data-theme='dark'] .hk-tooltip {
   margin-top: 2px;
 }
 
-/* ── Training page launcher (pages/Training.jsx) ───────────────────────────── */
+/* ── Scenario launcher cards (sim/inspection/SavedScenarioList.jsx, pages/RoomLayouts.jsx) ── */
 /* `auto-fit`, not `auto-fill`. The two differ only when there are fewer cards
    than the row could hold: auto-fill KEEPS the empty tracks, so four cards in a
    row wide enough for five left a card's worth of dead space on the right and
@@ -7953,6 +7960,51 @@ html[data-theme='dark'] .hk-tooltip {
   font-size: 14px;
   margin-top: 10px;
 }
+.pay-reference strong {
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--text);
+}
+
+/* "Payments received" table on the Folios screen — the same monospace
+   treatment as .pay-reference above (what the guest's own phone shows),
+   so a reference reads consistently wherever it appears. */
+.payment-reference {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Collapsed gateway/bank details under a PAYMENT ledger line (Folios.jsx).
+   A bare <details> has no `open` attribute, so this starts closed — the
+   summary line alone ("Card: Visa ****4321 | Ref: TXN-99812") is enough for
+   a glance, and the rest is one click away. */
+.payment-tx-details summary {
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  list-style: none;
+}
+.payment-tx-details summary::-webkit-details-marker {
+  display: none;
+}
+.payment-tx-details summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 1em;
+  color: var(--muted);
+}
+.payment-tx-details[open] summary::before {
+  content: '▾';
+}
+.payment-tx-details-body {
+  margin: 6px 0 2px 1em;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 /* QR charge panel on the Folios screen — the code beside what it is for, so the
    cashier can read the amount off the same block they are showing the guest. */
@@ -8016,6 +8068,17 @@ html[data-theme='dark'] .hk-tooltip {
   gap: 12px;
   min-width: 0;
 }
+/* Name and folio-number/status on one line, not stacked — the wrapper around
+   both used to be a plain unclassed div (block layout, so the sub-line fell
+   below the name); this puts them side by side, wrapping onto a second line
+   only if the panel is too narrow to hold both. */
+.folio-summary-nameline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
 .folio-summary-name {
   font-size: 19px;
   font-weight: 700;
@@ -8027,7 +8090,6 @@ html[data-theme='dark'] .hk-tooltip {
   gap: 8px;
   color: var(--muted);
   font-size: 13px;
-  margin-top: 2px;
 }
 .folio-summary-actions {
   display: flex;
@@ -8144,7 +8206,6 @@ tr.is-linked > td {
     box-shadow: inset 0 0 0 1px transparent;
   }
 }
-
 
 /* ── Split bill dialog ─────────────────────────────────────────────────────
    Built out of the controls the rest of the app already uses: .seg-rect/

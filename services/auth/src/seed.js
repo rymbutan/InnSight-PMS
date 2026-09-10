@@ -83,16 +83,18 @@ const ROLES = [
     ],
   },
   {
-    code: 'HOUSEKEEPING',
-    name: 'Housekeeping',
-    description: 'Room status and housekeeping tasks',
-    permissions: ['room.read', 'hk.read', 'hk.update'],
-  },
-  {
-    code: 'MAINTENANCE',
-    name: 'Maintenance',
-    description: 'Work orders and assets',
-    permissions: ['room.read', 'maintenance.read', 'maintenance.write'],
+    // Unified Staff Role: Housekeeping and Maintenance used to be two
+    // separate roles. Merged into one, since at this property's scale the
+    // same on-the-ground staff do both jobs — a split role meant every
+    // account doing both had to hold two roles, and re-assigning one without
+    // the other was a real, recurring mistake. Combined permissions cover
+    // everything either half needed: updating room cleanliness status,
+    // inspecting guest rooms, logging maintenance tickets, and working the
+    // resulting orders through to completion.
+    code: 'HOUSEKEEPING_MAINTENANCE',
+    name: 'Housekeeping & Maintenance',
+    description: 'Room status, inspections, maintenance tickets and work orders',
+    permissions: ['room.read', 'hk.read', 'hk.update', 'maintenance.read', 'maintenance.write'],
   },
   {
     code: 'AUDITOR',
@@ -148,6 +150,31 @@ async function seed() {
     await prisma.role.delete({ where: { code: 'FRONT_OFFICE' } });
     console.log(
       `[Auth] Migrated ${legacyUsers.length} user(s) FRONT_OFFICE → FRONT_DESK and removed the legacy role.`
+    );
+  }
+
+  // One-time migration: HOUSEKEEPING and MAINTENANCE were merged into
+  // HOUSEKEEPING_MAINTENANCE (Unified Staff Role). Move every user off
+  // either legacy code onto the merged one, then drop both orphans. A user
+  // who somehow held BOTH legacy roles lands on the merged one exactly
+  // once — upsert makes the second migration a no-op rather than a unique-
+  // constraint error.
+  for (const legacyCode of ['HOUSEKEEPING', 'MAINTENANCE']) {
+    const legacyRole = await prisma.role.findUnique({ where: { code: legacyCode } });
+    if (!legacyRole) continue;
+    const legacyUsers = await prisma.userRole.findMany({ where: { roleCode: legacyCode } });
+    for (const ur of legacyUsers) {
+      await prisma.userRole.upsert({
+        where: { userId_roleCode: { userId: ur.userId, roleCode: 'HOUSEKEEPING_MAINTENANCE' } },
+        update: {},
+        create: { userId: ur.userId, roleCode: 'HOUSEKEEPING_MAINTENANCE' },
+      });
+    }
+    await prisma.userRole.deleteMany({ where: { roleCode: legacyCode } });
+    await prisma.rolePermission.deleteMany({ where: { roleCode: legacyCode } });
+    await prisma.role.delete({ where: { code: legacyCode } });
+    console.log(
+      `[Auth] Migrated ${legacyUsers.length} user(s) ${legacyCode} → HOUSEKEEPING_MAINTENANCE and removed the legacy role.`
     );
   }
 

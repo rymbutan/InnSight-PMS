@@ -52,7 +52,7 @@ export default function Audit() {
     const ok = await confirm({
       title: 'Run night audit',
       message: 'Run night audit and close the business day?',
-      detail: `Posts a ₱${nightlyRate} room charge to ${inHouseCount} in-house stay(s) and marks overdue reservations as no-show.`,
+      detail: `Posts a ₱${nightlyRate} room charge to ${inHouseCount} in-house stay(s), marks unarrived confirmed bookings as no-show, and auto-cancels overdue unconfirmed ones.`,
       confirmLabel: 'Run audit',
     });
     if (!ok) return;
@@ -128,8 +128,8 @@ export default function Audit() {
             </div>
             <p className="muted">
               The audit posts a room charge to each in-house folio, combines all of the day's sales — rooms
-              plus amenities, laundry, spa and visitor sales — marks overdue reservations as no-show, and
-              closes the day.
+              plus amenities, laundry, spa and visitor sales — marks unarrived confirmed bookings as
+              no-show, auto-cancels overdue unconfirmed bookings, and closes the day.
             </p>
           </>
         ) : (
