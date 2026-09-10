@@ -324,7 +324,7 @@ async function main() {
     if (!DRY) {
       const already = await api(
         'GET',
-        `/api/reservations?guestName=${encodeURIComponent(`${b.noShowGuest.first} ${b.noShowGuest.last}`)}`
+        `/api/reservations?q=${encodeURIComponent(`${b.noShowGuest.first} ${b.noShowGuest.last}`)}`
       ).catch(() => []);
       if (Array.isArray(already) && already.length > 0) {
         skip(`Lane ${lane.name} already has a reservation for ${b.noShowGuest.first} ${b.noShowGuest.last} — skipping the rest of this lane`);
@@ -430,7 +430,7 @@ async function main() {
       // guaranteed to be 103/302 (Room.status is cosmetic and ignored by
       // assignment). Correct those two reservations in place instead of
       // creating a second, same-named guest for each.
-      const mariaMatches = await api('GET', `/api/reservations?guestName=${encodeURIComponent(`${b.arrivalStdGuest.first} ${b.arrivalStdGuest.last}`)}`);
+      const mariaMatches = await api('GET', `/api/reservations?q=${encodeURIComponent(`${b.arrivalStdGuest.first} ${b.arrivalStdGuest.last}`)}`);
       const maria = Array.isArray(mariaMatches) ? mariaMatches[0] : null;
       if (maria) {
         await api('PATCH', `/api/reservations/${maria.id}`, { assignedRoomId: roomId(b.arrivalStdRoom) });
@@ -443,7 +443,7 @@ async function main() {
       // (the "Early Arrival" scene moves it up to today live) — seed-demo.sh's
       // own booking is a two-night stay starting tomorrow with no room, so
       // both the room and the dates need correcting here.
-      const juanMatches = await api('GET', `/api/reservations?guestName=${encodeURIComponent(`${b.arrivalDlxGuest.first} ${b.arrivalDlxGuest.last}`)}`);
+      const juanMatches = await api('GET', `/api/reservations?q=${encodeURIComponent(`${b.arrivalDlxGuest.first} ${b.arrivalDlxGuest.last}`)}`);
       const juan = Array.isArray(juanMatches) ? juanMatches[0] : null;
       if (juan) {
         await api('PATCH', `/api/reservations/${juan.id}`, {
