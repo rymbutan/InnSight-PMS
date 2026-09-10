@@ -201,12 +201,12 @@ const LIVE_CHANNELS = [
 // each page's live refresh, so a role that can open a screen must keep receiving
 // the events that screen renders or it silently goes stale.
 const CHANNEL_AUDIENCE = {
-  rooms: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'MAINTENANCE', 'AUDITOR'],
+  rooms: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE', 'AUDITOR'],
   reservations: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
   stays: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
   folio: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR'],
   guests: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
-  maintenance: ['ADMIN', 'MANAGER', 'MAINTENANCE'],
+  maintenance: ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE'],
   audit: ['ADMIN', 'MANAGER', 'AUDITOR'],
   facilities: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
 };

@@ -83,11 +83,19 @@ function startSubscriber() {
       }
 
       if (channel === 'stay:no_show' && data.reservationId) {
-        await prisma.reservation.updateMany({
-          where: { id: data.reservationId },
-          data: { status: 'NO_SHOW' },
-        });
-        console.log(`[Reservation] Marked ${data.reservationId} as NO_SHOW`);
+        // Read-then-write, not updateMany: the Terms & Conditions treat a
+        // no-show exactly like a <24h cancellation — full forfeiture — and
+        // Prisma's `data` object can't set a column to another column's
+        // current value (`cancellationFeeCents = totalEstimateCents`) in one
+        // updateMany call.
+        const existing = await prisma.reservation.findUnique({ where: { id: data.reservationId } });
+        if (existing) {
+          await prisma.reservation.update({
+            where: { id: data.reservationId },
+            data: { status: 'NO_SHOW', cancellationFeeCents: existing.totalEstimateCents },
+          });
+          console.log(`[Reservation] Marked ${data.reservationId} as NO_SHOW (fee forfeited in full)`);
+        }
       }
 
       // A guest was renamed. `guestName` on a reservation is a denormalised copy

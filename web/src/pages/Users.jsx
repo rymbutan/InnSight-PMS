@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
 import RoleBadge from '../components/RoleBadge';
 import Modal from '../components/Modal';
 import Icon from '../components/Icon';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth';
+import { isAdminRow, sortUsers } from '../lib/userSort';
 
 export default function Users() {
   const confirm = useConfirm();
@@ -19,8 +20,10 @@ export default function Users() {
   const { hasRole, user: me } = useAuth();
   const canManage = hasRole('ADMIN', 'MANAGER');
   const isAdmin = hasRole('ADMIN');
-  const isAdminRow = (u) => (u.roles || []).some((r) => (r.roleCode || r) === 'ADMIN');
   const [users, setUsers] = useState([]);
+  // User Directory Display Hierarchy: Admin accounts pin permanently at the
+  // top, then everyone else in strict A–Z order by name. See lib/userSort.js.
+  const sortedUsers = useMemo(() => sortUsers(users), [users]);
   const [roles, setRoles] = useState([]);
   const [form, setForm] = useState({ username: '', password: '', displayName: '', email: '', roles: [] });
   const [msg, setMsg] = useState('');
@@ -275,73 +278,73 @@ export default function Users() {
       )}
 
       {canManage && (
-      <div className="panel">
-        <h3>Create user</h3>
-        <form onSubmit={create}>
-          <div className="row">
-            <div>
-              <label>Username</label>
-              <input
-                required
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-              />
-            </div>
-            <div>
-              <label>Display name</label>
-              <input
-                required
-                value={form.displayName}
-                onChange={(e) => setForm({ ...form, displayName: e.target.value })}
-              />
-            </div>
-            <div>
-              <label>Email</label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
-            <div>
-              <label>Password (≥ 8)</label>
-              <input
-                required
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-              />
-            </div>
-            {/* Create sits at the end of the FIELD row, beside Password. The
+        <div className="panel">
+          <h3>Create user</h3>
+          <form onSubmit={create}>
+            <div className="row">
+              <div>
+                <label>Username</label>
+                <input
+                  required
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                />
+              </div>
+              <div>
+                <label>Display name</label>
+                <input
+                  required
+                  value={form.displayName}
+                  onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+                />
+              </div>
+              <div>
+                <label>Email</label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                />
+              </div>
+              <div>
+                <label>Password (≥ 8)</label>
+                <input
+                  required
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                />
+              </div>
+              {/* Create sits at the end of the FIELD row, beside Password. The
                 four inputs share what is left and shrink by about a fifth each
                 — still well clear of the 160px floor `.row > *` sets, so none
                 of them is squeezed to the point of being hard to read. */}
-            <div className="row-action">
-              <button>Create</button>
+              <div className="row-action">
+                <button>Create</button>
+              </div>
             </div>
-          </div>
-          <div>
-            <label>Roles</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {/* A MANAGER cannot grant ADMIN (services/auth's
+            <div>
+              <label>Roles</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {/* A MANAGER cannot grant ADMIN (services/auth's
                   blockIfGrantingAdmin) — the checkbox is not offered rather
                   than offered and then rejected on submit. */}
-              {roles
-                .filter((r) => isAdmin || r.code !== 'ADMIN')
-                .map((r) => (
-                  <label key={r.code} className="ed-check">
-                    <input
-                      type="checkbox"
-                      checked={form.roles.includes(r.code)}
-                      onChange={() => toggleRoleInForm(r.code)}
-                    />
-                    <span>{r.code}</span>
-                  </label>
-                ))}
+                {roles
+                  .filter((r) => isAdmin || r.code !== 'ADMIN')
+                  .map((r) => (
+                    <label key={r.code} className="ed-check">
+                      <input
+                        type="checkbox"
+                        checked={form.roles.includes(r.code)}
+                        onChange={() => toggleRoleInForm(r.code)}
+                      />
+                      <span>{r.code}</span>
+                    </label>
+                  ))}
+              </div>
             </div>
-          </div>
-        </form>
-      </div>
+          </form>
+        </div>
       )}
 
       <div className="panel">
@@ -358,7 +361,7 @@ export default function Users() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {sortedUsers.map((u) => (
               <tr key={u.id}>
                 <td>{u.username}</td>
                 <td>{u.displayName}</td>
@@ -487,9 +490,7 @@ export default function Users() {
                         type="checkbox"
                         checked={on}
                         onChange={() =>
-                          setApproveRoles((d) =>
-                            on ? d.filter((x) => x !== r.code) : [...d, r.code]
-                          )
+                          setApproveRoles((d) => (on ? d.filter((x) => x !== r.code) : [...d, r.code]))
                         }
                         style={{ width: 'auto' }}
                       />

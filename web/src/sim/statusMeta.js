@@ -12,6 +12,28 @@
 export const ON_FILL_INK = '#0f172a'; // room number — 15:1 on the lightest fill
 export const ON_FILL_INK_SOFT = '#475569'; // room type — 6.0:1 on the darkest fill
 
+// Each `color` is chosen for what it signals to housekeeping/front-desk at a
+// glance, not just for visual variety — this is a status BOARD, and a color
+// that reads as the wrong urgency is a worse bug than a room drawn "ugly":
+//   green   → go / ready / positive (VC: nothing stands between this room and
+//             a guest except a supervisor's sign-off)
+//   blue    → trust / verified (VCI: someone actually checked it — blue is
+//             the same "confirmed" signal a checkmark or a badge uses)
+//   red     → stop / needs action now (VD: the one state that actively blocks
+//             a sale until a person does something about it)
+//   violet  → privacy / do-not-disturb, NOT caution (OCC: a guest is in
+//             residence, which is the successful, ordinary outcome of a
+//             booking — not a problem. Amber/orange here would read as a
+//             warning on a room that's simply doing its job, and hospitality
+//             signage already uses violet/purple for "occupied" precisely to
+//             avoid that false alarm)
+//   amber   → caution / temporary (OOS: a known, short-lived limitation —
+//             amber sits a deliberate notch below red because this isn't
+//             blocking inventory the way VD or OOO does)
+//   slate   → neutral / inactive (OOO: removed from the sellable set
+//             entirely — gray reads as "not part of today's board" rather
+//             than "urgent," which fits a room that's already been reported
+//             and is now just waiting on a longer repair)
 export const STATUS_META = {
   CLEAN: {
     code: 'VC',
@@ -34,11 +56,15 @@ export const STATUS_META = {
     fill: '#fee2e2',
     hint: 'Requires immediate cleaning.',
   },
+  // Was orange (#ea580c) — orange/amber is a caution color, and an occupied
+  // room isn't a problem to watch, it's the point of the whole operation.
+  // Violet is the hospitality-industry convention for "guest in residence /
+  // do not disturb" for exactly that reason: calm and private, not alarmed.
   OCCUPIED: {
     code: 'OCC',
     label: 'Occupied',
-    color: '#ea580c',
-    fill: '#ffedd5',
+    color: '#7c3aed',
+    fill: '#ede9fe',
     hint: 'Guest currently in the room.',
   },
   OUT_OF_ORDER: {

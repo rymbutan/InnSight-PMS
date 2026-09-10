@@ -8,7 +8,7 @@
 //
 // Precedence is therefore declared explicitly, most privileged first, and must
 // stay consistent with the role definitions in services/auth/src/seed.js.
-const PRECEDENCE = ['ADMIN', 'MANAGER', 'AUDITOR', 'FRONT_DESK', 'HOUSEKEEPING', 'MAINTENANCE'];
+const PRECEDENCE = ['ADMIN', 'MANAGER', 'AUDITOR', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'];
 
 // One colour per role, so a badge is identifiable at a glance in a dense table
 // without reading it — and so the same role looks the same everywhere it
@@ -23,8 +23,14 @@ const ROLE_COLORS = {
   MANAGER: '#4338ca',
   AUDITOR: '#7e22ce',
   FRONT_DESK: '#0369a1',
-  HOUSEKEEPING: '#0f766e',
-  MAINTENANCE: '#b45309',
+  HOUSEKEEPING_MAINTENANCE: '#0f766e',
+};
+
+// Explicit overrides for a role code whose generic derivation (below) does not
+// read naturally — HOUSEKEEPING_MAINTENANCE would otherwise render "Housekeeping
+// maintenance" (only the first letter of the WHOLE string is capitalised).
+const ROLE_LABELS = {
+  HOUSEKEEPING_MAINTENANCE: 'Housekeeping & Maintenance',
 };
 
 // Slate, for a role code the app does not know about — a badge that still reads
@@ -38,6 +44,7 @@ export function roleColor(code) {
 // Front desk reads better than FRONT_DESK in a table cell.
 export function roleLabel(code) {
   if (!code) return 'User';
+  if (ROLE_LABELS[code]) return ROLE_LABELS[code];
   return code.charAt(0) + code.slice(1).toLowerCase().replace(/_/g, ' ');
 }
 

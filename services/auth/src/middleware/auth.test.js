@@ -97,7 +97,7 @@ test('requireRole: allows when role present', () => {
 });
 
 test('requireRole: forbids when role absent', () => {
-  const req = { user: { roles: ['HOUSEKEEPING'] } };
+  const req = { user: { roles: ['HOUSEKEEPING_MAINTENANCE'] } };
   const res = mockRes();
   requireRole('ADMIN')(req, res, () => assert.fail());
   assert.equal(res.statusCode, 403);

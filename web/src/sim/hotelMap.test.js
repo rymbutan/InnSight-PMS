@@ -59,6 +59,21 @@ test('the seeded property still fits without scrolling', () => {
   assert.deepEqual(widths(slots), [109]);
 });
 
+test('a sparse property shrinks the map instead of drawing dead space', () => {
+  // A 12-floor property with only 2-3 rooms per floor (three training-scenario
+  // "lanes" sharing one numbered building) used to still draw a 980-wide
+  // corridor on every floor, most of it empty air around two centred rooms.
+  const sparse = [];
+  for (let f = 1; f <= 4; f += 1) {
+    for (let i = 1; i <= 3; i += 1) {
+      const number = String(f * 100 + i);
+      sparse.push({ id: number, number, typeCode: 'STD', floor: f, status: 'CLEAN' });
+    }
+  }
+  const { mapW } = computeLayout(sparse);
+  assert.ok(mapW < MAP_W, `a sparse property should hug its own rooms, not stay pinned to ${MAP_W}`);
+});
+
 test('a floor too wide to fit grows the map instead of shrinking the rooms', () => {
   const wide = [];
   for (let i = 1; i <= 40; i += 1) {

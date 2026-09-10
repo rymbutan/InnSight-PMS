@@ -8,30 +8,30 @@ datasource db {
 }
 
 model Folio {
-  id            String             @id @default(uuid())
-  folioNumber   String             @unique
-  stayId        String?
-  guestId       String?
+  id           String             @id @default(uuid())
+  folioNumber  String             @unique
+  stayId       String?
+  guestId      String?
   // Who this folio bills, when that is not simply the guest whose stay it is.
   // Set per payer by a bill split; null on every folio without a distinct payer,
   // which then falls back to the stay's guest name on the printed document.
-  payerName     String?
+  payerName    String?
   // The credential on the QR code printed in the folio's header: a stranger who
   // guesses it can read this one folio's PDF and nothing else, unauthenticated
   // (see /api/public/folios/:token/pdf). Generated lazily on first print rather
   // than at folio creation, since most folios are never scanned and most are
   // never split into new ones either — no code path should be required to
   // remember to set it.
-  publicToken   String?            @unique
-  type          FolioType          @default(GUEST)
-  status        FolioStatus        @default(OPEN)
-  currency      String             @default("PHP")
-  openedAt      DateTime           @default(now())
-  closedAt      DateTime?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  transactions  FolioTransaction[]
-  payments      Payment[]
+  publicToken  String?            @unique
+  type         FolioType          @default(GUEST)
+  status       FolioStatus        @default(OPEN)
+  currency     String             @default("PHP")
+  openedAt     DateTime           @default(now())
+  closedAt     DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  transactions FolioTransaction[]
+  payments     Payment[]
 
   // /api/folios filters on status and stayId; daily-totals filters on openedAt.
   @@index([status, openedAt])
@@ -40,13 +40,13 @@ model Folio {
 }
 
 model FolioTransaction {
-  id                String           @id @default(uuid())
-  folioId           String
-  type              TransactionType
-  chargeCode        String?
-  description       String
-  amountCents       BigInt
-  taxAmountCents    BigInt           @default(0)
+  id             String          @id @default(uuid())
+  folioId        String
+  type           TransactionType
+  chargeCode     String?
+  description    String
+  amountCents    BigInt
+  taxAmountCents BigInt          @default(0)
   // Per-component tax for the printed folio: [{ key, label, rate, amountCents }]
   // with amountCents as a decimal STRING, because JSON cannot carry BigInt.
   //
@@ -54,18 +54,18 @@ model FolioTransaction {
   // balance — this column is presentation detail layered on top. Rows written
   // before this migration are null and print their whole tax as VAT, so no
   // historical folio's figures move.
-  taxBreakdown      Json?
-  quantity          Int              @default(1)
-  note              String?
-  paymentMethod     String?
-  postedAt          DateTime         @default(now())
-  postedBy          String?
-  sourceSystem      String?
-  reversalOf        String?
-  refundOfId        String?          // links a refund/negative-payment to its original payment
-  refundReason      String?
-  reference         String?
-  folio             Folio            @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  taxBreakdown   Json?
+  quantity       Int             @default(1)
+  note           String?
+  paymentMethod  String?
+  postedAt       DateTime        @default(now())
+  postedBy       String?
+  sourceSystem   String?
+  reversalOf     String?
+  refundOfId     String? // links a refund/negative-payment to its original payment
+  refundReason   String?
+  reference      String?
+  folio          Folio           @relation(fields: [folioId], references: [id], onDelete: Cascade)
 
   // folioId was unindexed despite being the join path for every statement,
   // print and daily-total query — the hottest read path in the folio service.
@@ -86,18 +86,47 @@ model ChargeCode {
 }
 
 model Payment {
-  id          String        @id @default(uuid())
-  folioId     String
-  method      String
-  amountCents BigInt
-  gatewayRef  String?
-  status      PaymentStatus @default(AUTHORIZED)
-  cardMasked  String?
-  createdAt   DateTime      @default(now())
-  folio       Folio         @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  id              String           @id @default(uuid())
+  folioId         String
+  method          String
+  amountCents     BigInt
+  gatewayRef      String?
+  status          PaymentStatus    @default(AUTHORIZED)
+  cardMasked      String?
+  // Card-specific: the name on the card, as a receipt would show it. Never a
+  // full card number or CVV — see cardMasked's own "brand + last 4" limit.
+  cardholderName  String?
+  // Bank-transfer-specific: what the front desk captures to confirm a
+  // transfer actually happened (POST /folios/:id/payments requires all four
+  // of these — plus gatewayRef as the bank's own control number — for
+  // method BANK_TRANSFER; see folio.routes.js).
+  bankName        String?
+  transferNetwork String?
+  senderName      String?
+  transferredAt   DateTime?
+  createdAt       DateTime         @default(now())
+  folio           Folio            @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  proof           PaymentDocument?
 
   @@index([folioId, createdAt])
   @@index([status])
+}
+
+// A scanned deposit slip / bank confirmation screenshot attached to a
+// BANK_TRANSFER payment as evidence. Mirrors ReservationDocument in the
+// reservation service (services/reservation/src/prisma/schema.prisma) byte
+// for byte in shape: bytes live in MinIO, only metadata lives here — see
+// lib/storage.js.
+model PaymentDocument {
+  id          String   @id @default(uuid())
+  paymentId   String   @unique
+  filename    String
+  contentType String
+  sizeBytes   Int
+  objectKey   String   @unique
+  uploadedAt  DateTime @default(now())
+  uploadedBy  String?
+  payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 }
 
 enum FolioType {

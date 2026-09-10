@@ -208,9 +208,18 @@ services:
       GUEST_URL: http://guest-service:3008
       STAY_URL: http://stay-service:3006
       RESERVATION_URL: http://reservation-service:3011
+      # Proof-of-transfer uploads for BANK_TRANSFER payments — see lib/storage.js.
+      # Same credential and bucket-per-service pattern as the reservation
+      # service's own document uploads.
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-innsight}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?required}
+      MINIO_BUCKET: folio-payment-proofs
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
 
   guest-service:
     build: ./services/guest

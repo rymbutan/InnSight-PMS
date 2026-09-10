@@ -13,6 +13,52 @@ import { paymentMethodGroups } from '../lib/paymentMethods';
 
 const STEPS = ['Availability', 'Details', 'Guests', 'Add-ons', 'Payment'];
 
+// Same per-method deposit detail Folios.jsx's "Post payment" modal collects,
+// minus amount (that's depositPesos) and proof upload (out of scope here — no
+// folio/payment id exists yet at booking time to attach a document to).
+const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'JCB', 'OTHER'];
+const BANK_NAMES = ['BDO', 'BPI', 'Metrobank', 'UnionBank', 'Landbank', 'OTHER'];
+const TRANSFER_NETWORKS = ['InstaPay', 'PESONet', 'Direct OTC Deposit', 'Wire Transfer', 'OTHER'];
+const EMPTY_DEPOSIT_DETAIL = {
+  cardBrand: 'VISA',
+  cardLast4: '',
+  cardholderName: '',
+  gatewayRef: '',
+  bankName: 'BDO',
+  bankNameOther: '',
+  transferNetwork: 'InstaPay',
+  transferNetworkOther: '',
+  senderName: '',
+  bankRef: '',
+  transferredAt: '',
+};
+
+// 'YYYY-MM-DDTHH:mm' in LOCAL time, what <input type="datetime-local"> both
+// accepts and returns — toISOString() would shift this to UTC.
+function nowForDateTimeLocal() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+// Mirrors services/reservation/src/lib/missingDepositField.js exactly, so a
+// deposit the wizard lets through is never rejected by the server.
+function missingDepositField(method, detail) {
+  if (method === 'CARD') {
+    if (!/^\d{4}$/.test(detail.cardLast4)) return 'Enter the last 4 digits of the card.';
+    if (!detail.cardholderName.trim()) return 'Cardholder name is required.';
+  }
+  if (method === 'BANK_TRANSFER') {
+    if (detail.bankName === 'OTHER' && !detail.bankNameOther.trim()) return 'Enter the bank name.';
+    if (detail.transferNetwork === 'OTHER' && !detail.transferNetworkOther.trim()) {
+      return 'Enter the transfer network/channel.';
+    }
+    if (!detail.senderName.trim()) return "Sender/account holder's name is required.";
+    if (!detail.bankRef.trim()) return 'Bank reference/control number is required.';
+  }
+  return null;
+}
+
 // Built-in special requests for the Add-ons step's dropdown — the common
 // ones a front desk gets asked for repeatedly, so staff pick one instead of
 // re-typing it every time. Phrased as a billed line-item description (not
@@ -46,6 +92,9 @@ export default function NewReservation() {
   const [checkIn, setCheckIn] = useState(params.get('checkIn') || '');
   const [checkOut, setCheckOut] = useState('');
   const [promoCode, setPromoCode] = useState('');
+  // Per the Terms & Conditions' "Promotional / Non-Refundable Tier": flagged
+  // bookings forfeit the full amount on cancellation regardless of timing.
+  const [isNonRefundable, setIsNonRefundable] = useState(false);
   const [searched, setSearched] = useState(false);
   const [types, setTypes] = useState([]);
   const [allRooms, setAllRooms] = useState([]);
@@ -103,9 +152,19 @@ export default function NewReservation() {
       .catch(() => {}); // defaults already set; a failed fetch just keeps them
   }, []);
 
+  // costCents alone can't tell "0" (a free special request — allowed) apart
+  // from "" (nothing typed yet — not allowed), since both round to 0. Read
+  // the raw field instead: entered and non-negative is valid, empty or
+  // negative/non-numeric is not.
+  function addOnCostEntered() {
+    const trimmed = addOnCostPesos.trim();
+    if (trimmed === '') return false;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n >= 0;
+  }
   function addAddOn() {
+    if (!addOnDesc.trim() || !addOnCostEntered()) return;
     const costCents = pesosToCents(addOnCostPesos);
-    if (!addOnDesc.trim() || !costCents) return;
     setAddOns((list) => [...list, { description: addOnDesc.trim(), costCents }]);
     setAddOnDesc('');
     setAddOnCostPesos('');
@@ -135,6 +194,20 @@ export default function NewReservation() {
   // Step 5
   const [depositPesos, setDepositPesos] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
+  // Per-method deposit detail (CARD/BANK_TRANSFER only) — same fields and
+  // validation Folios.jsx's own "Post payment" modal uses.
+  const [depositDetail, setDepositDetail] = useState(EMPTY_DEPOSIT_DETAIL);
+  // CARD/BANK_TRANSFER surcharge preview — the server recomputes and stores
+  // the authoritative fee independently, so a stale preview here can never
+  // desync what actually lands on the reservation.
+  const [paymentFeePercent, setPaymentFeePercent] = useState(0);
+
+  useEffect(() => {
+    api
+      .get('/api/settings/payment-fee-percent')
+      .then(({ data }) => setPaymentFeePercent(data.feePercent))
+      .catch(() => {}); // 0 already set; a failed fetch just keeps no preview
+  }, []);
   // Track whether the user has begun entering data; if so, warn before
   // navigating away (back-button or tab close).
   const dirty = picks.length > 0 || pickedGuest || newGuest.firstName || depositPesos;
@@ -247,7 +320,9 @@ export default function NewReservation() {
     // components at the hotel's configured rates, not a hardcoded VAT-only
     // guess — this is the same total the night audit will eventually charge.
     const taxCents = Math.round(
-      (subtotalCents * (taxRates.vat + taxRates.serviceCharge + taxRates.localTax + taxRates.realPropertyTax)) / 100
+      (subtotalCents *
+        (taxRates.vat + taxRates.serviceCharge + taxRates.localTax + taxRates.realPropertyTax)) /
+        100
     );
     const grandTotalCents = subtotalCents + taxCents + addOnsTotalCents;
     const suggestedDepositCents = Math.round(grandTotalCents * 0.5);
@@ -299,7 +374,7 @@ export default function NewReservation() {
     // half of the "add a request" mini-form filled in and silently moving on,
     // since that discards what was typed without any signal that it never
     // got added — require it to be finished (via Add) or cleared first.
-    if (step === 4 && (addOnDesc.trim() || pesosToCents(addOnCostPesos))) {
+    if (step === 4 && (addOnDesc.trim() || addOnCostPesos.trim() !== '')) {
       return toast.error(
         'Finish adding this special request (click Add), or clear the special request and cost fields before continuing.'
       );
@@ -311,6 +386,19 @@ export default function NewReservation() {
   }
 
   async function submit() {
+    // Mandatory Downpayment Constraint: the server rejects a booking with no
+    // recorded downpayment, but that check must not be the guest's first
+    // clue — this catches it in the wizard, before a guest/room is created.
+    if (!(pesosToCents(depositPesos) > 0)) {
+      return toast.error(
+        'A downpayment is required before this booking can be created. Enter the deposit amount collected.'
+      );
+    }
+    // Same per-method requirements Folio holds a folio payment to — checked
+    // here, before a guest/room is created, so a rejection never comes as a
+    // surprise after the wizard has already done other work.
+    const missingDeposit = missingDepositField(paymentMethod, depositDetail);
+    if (missingDeposit) return toast.error(missingDeposit);
     try {
       // create guest if new
       let guest = pickedGuest;
@@ -338,8 +426,29 @@ export default function NewReservation() {
         totalEstimateCents: totals.grandTotalCents,
         depositCents: pesosToCents(depositPesos),
         paymentType: paymentMethod,
+        isNonRefundable,
         ratePlan: 'Base Rate',
         origin: SOURCE_LABELS[source],
+        // Resolved the same way Folios.jsx's postPayment does: CARD sends a
+        // masked receipt-style string, BANK_TRANSFER resolves its "OTHER"
+        // free-text fields and defaults transferredAt to now.
+        ...(paymentMethod === 'CARD' && {
+          cardMasked: `${depositDetail.cardBrand} •••• ${depositDetail.cardLast4}`,
+          cardholderName: depositDetail.cardholderName.trim(),
+        }),
+        ...(paymentMethod === 'CARD' &&
+          depositDetail.gatewayRef.trim() && { gatewayRef: depositDetail.gatewayRef.trim() }),
+        ...(paymentMethod === 'BANK_TRANSFER' && {
+          bankName:
+            depositDetail.bankName === 'OTHER' ? depositDetail.bankNameOther.trim() : depositDetail.bankName,
+          transferNetwork:
+            depositDetail.transferNetwork === 'OTHER'
+              ? depositDetail.transferNetworkOther.trim()
+              : depositDetail.transferNetwork,
+          senderName: depositDetail.senderName.trim(),
+          gatewayRef: depositDetail.bankRef.trim(),
+          transferredAt: new Date(depositDetail.transferredAt || nowForDateTimeLocal()).toISOString(),
+        }),
         // No discount engine yet — record the promo code on the reservation so
         // staff can see and apply it, rather than silently dropping it.
         ...(promoCode ? { specialRequests: `Promo code: ${promoCode}` } : {}),
@@ -397,6 +506,22 @@ export default function NewReservation() {
               <div>
                 <label>Promo code</label>
                 <input value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
+              </div>
+              {/* `ed-check` gives this the same small box and inline label as
+                  every other field-row checkbox (e.g. Amenities.jsx's
+                  Reservable toggle), instead of a 36px square from the global
+                  input rule with its caption wrapping beside it. `row-action`
+                  opts this cell out of .row's flex:1 stretch so it sits at its
+                  natural width rather than matching the date/promo fields. */}
+              <div className="row-action" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 10 }}>
+                <label className="ed-check">
+                  <input
+                    type="checkbox"
+                    checked={isNonRefundable}
+                    onChange={(e) => setIsNonRefundable(e.target.checked)}
+                  />
+                  <span>Non-refundable / promo rate</span>
+                </label>
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                 <button className="btn-cta" onClick={search}>
@@ -744,7 +869,7 @@ export default function NewReservation() {
               />
             </div>
             <div className="row-action">
-              <button onClick={addAddOn} disabled={!addOnDesc.trim() || !pesosToCents(addOnCostPesos)}>
+              <button onClick={addAddOn} disabled={!addOnDesc.trim() || !addOnCostEntered()}>
                 Add
               </button>
             </div>
@@ -807,18 +932,19 @@ export default function NewReservation() {
               <input value={formatPeso(totals.suggestedDepositCents)} disabled />
             </div>
             <div>
-              <label>Deposit amount (₱)</label>
+              <label>Deposit amount (₱) *</label>
               <input
                 type="number"
-                min="0"
+                min="0.01"
                 step="0.01"
+                required
                 value={depositPesos}
                 onChange={(e) => setDepositPesos(e.target.value)}
                 placeholder={(totals.suggestedDepositCents / 100).toFixed(2)}
               />
             </div>
             <div>
-              <label>Payment method</label>
+              <label>Payment method *</label>
               <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
                 {paymentMethodGroups().map((g) =>
                   g.kind === 'group' ? (
@@ -838,9 +964,155 @@ export default function NewReservation() {
               </select>
             </div>
           </div>
+
+          {/* A preview only — the server computes and stores the authoritative
+              fee independently (see policies.js's paymentProcessingFeeCents),
+              so this can never desync what actually gets recorded. */}
+          {(paymentMethod === 'CARD' || paymentMethod === 'BANK_TRANSFER') &&
+            paymentFeePercent > 0 &&
+            pesosToCents(depositPesos) > 0 && (
+              <p className="muted" style={{ fontSize: 12 }}>
+                + Processing fee ({paymentFeePercent}%):{' '}
+                {formatPeso(Math.round(pesosToCents(depositPesos) * (paymentFeePercent / 100)))}
+              </p>
+            )}
+
+          {/* A card terminal reads the card, not a typed-in number — this asks
+              only for what a receipt would show (brand + last 4 + cardholder
+              name), same rule as Folios.jsx's own "Post payment" modal. */}
+          {paymentMethod === 'CARD' && (
+            <>
+              <div className="row" style={{ marginTop: 10 }}>
+                <div>
+                  <label>Card brand</label>
+                  <select
+                    value={depositDetail.cardBrand}
+                    onChange={(e) => setDepositDetail({ ...depositDetail, cardBrand: e.target.value })}
+                  >
+                    {CARD_BRANDS.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Last 4 digits</label>
+                  <input
+                    required
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="4242"
+                    value={depositDetail.cardLast4}
+                    onChange={(e) =>
+                      setDepositDetail({
+                        ...depositDetail,
+                        cardLast4: e.target.value.replace(/\D/g, '').slice(0, 4),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <label style={{ marginTop: 10 }}>Cardholder name</label>
+              <input
+                required
+                placeholder="As printed on the card"
+                value={depositDetail.cardholderName}
+                onChange={(e) => setDepositDetail({ ...depositDetail, cardholderName: e.target.value })}
+              />
+              {/* Optional: staff can type in the ACTUAL authorization code a real
+                  terminal printed. Left blank, the server simulates one (AUTH-…). */}
+              <label style={{ marginTop: 10 }}>Transaction / Authorization code (optional)</label>
+              <input
+                placeholder="Gateway transaction ID or POS approval code — leave blank to simulate one"
+                value={depositDetail.gatewayRef}
+                onChange={(e) => setDepositDetail({ ...depositDetail, gatewayRef: e.target.value })}
+              />
+            </>
+          )}
+
+          {/* Bank transfer has nothing to simulate a control number FROM — every
+              field here is required (see missingDepositField, both here and
+              server-side in lib/missingDepositField.js). */}
+          {paymentMethod === 'BANK_TRANSFER' && (
+            <>
+              <div className="row" style={{ marginTop: 10 }}>
+                <div>
+                  <label>Bank name</label>
+                  <select
+                    value={depositDetail.bankName}
+                    onChange={(e) => setDepositDetail({ ...depositDetail, bankName: e.target.value })}
+                  >
+                    {BANK_NAMES.map((b) => (
+                      <option key={b} value={b}>
+                        {b === 'OTHER' ? 'Other — type your own…' : b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Transfer network / channel</label>
+                  <select
+                    value={depositDetail.transferNetwork}
+                    onChange={(e) => setDepositDetail({ ...depositDetail, transferNetwork: e.target.value })}
+                  >
+                    {TRANSFER_NETWORKS.map((n) => (
+                      <option key={n} value={n}>
+                        {n === 'OTHER' ? 'Other — type your own…' : n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {depositDetail.bankName === 'OTHER' && (
+                <input
+                  required
+                  style={{ marginTop: 8 }}
+                  placeholder="Bank name"
+                  value={depositDetail.bankNameOther}
+                  onChange={(e) => setDepositDetail({ ...depositDetail, bankNameOther: e.target.value })}
+                />
+              )}
+              {depositDetail.transferNetwork === 'OTHER' && (
+                <input
+                  required
+                  style={{ marginTop: 8 }}
+                  placeholder="Transfer network / channel"
+                  value={depositDetail.transferNetworkOther}
+                  onChange={(e) =>
+                    setDepositDetail({ ...depositDetail, transferNetworkOther: e.target.value })
+                  }
+                />
+              )}
+
+              <label style={{ marginTop: 10 }}>Sender / account holder name</label>
+              <input
+                required
+                value={depositDetail.senderName}
+                onChange={(e) => setDepositDetail({ ...depositDetail, senderName: e.target.value })}
+              />
+
+              <label style={{ marginTop: 10 }}>Bank reference / control number</label>
+              <input
+                required
+                placeholder="Mandatory transaction ID from the slip or app"
+                value={depositDetail.bankRef}
+                onChange={(e) => setDepositDetail({ ...depositDetail, bankRef: e.target.value })}
+              />
+
+              <label style={{ marginTop: 10 }}>Transfer date &amp; time</label>
+              <input
+                required
+                type="datetime-local"
+                value={depositDetail.transferredAt || nowForDateTimeLocal()}
+                onChange={(e) => setDepositDetail({ ...depositDetail, transferredAt: e.target.value })}
+              />
+            </>
+          )}
+
           <div className="muted" style={{ marginTop: 12 }}>
-            On confirm: reservation will be created &amp; auto-confirmed. Deposit (if &gt; 0) will post to the
-            folio after check-in.
+            A downpayment is required to create this booking. On confirm: reservation will be created &amp;
+            auto-confirmed, and the deposit will post to the folio after check-in.
           </div>
         </div>
       )}

@@ -5,34 +5,33 @@
 
 // ── Cancellation policy ────────────────────────────────────────────
 // Returns the fee amount in cents based on how far ahead the guest cancels.
-// Defaults match a typical hostel policy:
-//   • > 48h before check-in   → free
-//   • 24-48h before           → 1 night
-//   • < 24h or after check-in → full reservation total
+// Tiers match the hotel's own Terms & Conditions, section 4 (also printed on
+// the registration card — see services/stay/src/lib/regCardRender.js's
+// TERMS_SECTIONS):
+//   • Non-refundable / promo rate → 100%, always, regardless of timing
+//   • >= 72h before check-in      → a small processing deduction only: 3% of
+//                                    the total on a gateway/e-wallet rail, or
+//                                    a flat PHP 200 if the deposit was CASH
+//   • 24-72h before check-in      → 50%
+//   • < 24h before check-in, or   → 100% (this is also the tier an overdue,
+//     at/after check-in             never-confirmed booking always lands in,
+//                                    since its hours-until-checkIn is <= 0)
 function cancellationFeeCents({
   totalEstimateCents,
   checkIn,
   now = new Date(),
-  nights = 1,
-  policy = 'STANDARD',
-}) {
-  const ms = new Date(checkIn).getTime() - new Date(now).getTime();
-  const hours = ms / 36e5;
-  const oneNightCents = Math.round(Number(totalEstimateCents) / Math.max(1, nights));
-  if (policy === 'FLEX') {
-    // Free up to 24h before
-    if (hours >= 24) return 0;
-    return oneNightCents;
+  method = null,
+  isNonRefundable = false,
+} = {}) {
+  const total = Number(totalEstimateCents);
+  if (isNonRefundable) return total;
+  const hours = (new Date(checkIn).getTime() - new Date(now).getTime()) / 36e5;
+  if (hours >= 72) {
+    const FLAT_ADMIN_FEE_CENTS = 20000; // PHP 200
+    return method === 'CASH' ? FLAT_ADMIN_FEE_CENTS : Math.round(total * 0.03);
   }
-  if (policy === 'STRICT') {
-    // 50% up to 7 days, 100% within 7 days
-    if (hours >= 24 * 7) return Math.round(Number(totalEstimateCents) * 0.5);
-    return Number(totalEstimateCents);
-  }
-  // STANDARD (default)
-  if (hours >= 48) return 0;
-  if (hours >= 24) return oneNightCents;
-  return Number(totalEstimateCents);
+  if (hours >= 24) return Math.round(total * 0.5);
+  return total;
 }
 
 // ── Deposit policy ─────────────────────────────────────────────────
@@ -172,6 +171,23 @@ function commissionCents({ totalEstimateCents, source = 'DIRECT' }) {
   return Math.round(Number(totalEstimateCents) * rate);
 }
 
+// ── Payment processing fee (CARD / BANK_TRANSFER surcharge) ───────────────
+// Same round-half-up, scaled-integer arithmetic as computeTax's own
+// per-component loop, kept separate: this fee is a percentage of the PAYMENT
+// (deposit) amount, not of a charge subtotal. Ported verbatim from
+// services/folio/src/lib/policies.js, which owns the property's configured
+// feePercent (Settings → payment_processing_fee_percent).
+function paymentProcessingFeeCents({ amountCents, feePercent }) {
+  const rate = Number(feePercent) || 0;
+  if (rate <= 0) return 0n;
+  const base = BigInt(amountCents ?? 0);
+  const scaled = BigInt(Math.round(rate * 10000));
+  const negative = base < 0n;
+  const magnitude = negative ? -base : base;
+  const rounded = (magnitude * scaled + 500000n) / 1000000n;
+  return negative ? -rounded : rounded;
+}
+
 module.exports = {
   cancellationFeeCents,
   depositCents,
@@ -179,6 +195,7 @@ module.exports = {
   lateCheckoutFeeCents,
   earlyArrivalFeeCents,
   commissionCents,
+  paymentProcessingFeeCents,
   TAX_COMPONENTS,
   DEFAULT_TAX_RATES,
   DEFAULT_COUNTRY,

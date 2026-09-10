@@ -30,6 +30,20 @@ model Reservation {
   addOns                Json?
   expectedArrivalTime   String?
   paymentType           String?
+  // Per-method deposit detail, mirroring the fields Folio's own payment
+  // record carries (services/folio/src/prisma/schema.prisma's Payment model).
+  // Only the sub-fields relevant to paymentType are ever populated.
+  depositCardMasked        String?
+  depositCardholderName    String?
+  depositBankName          String?
+  depositTransferNetwork   String?
+  depositSenderName        String?
+  depositGatewayRef        String?
+  depositTransferredAt     DateTime?
+  depositFeeCents          BigInt    @default(0)
+  // Promotional / non-refundable rate: per the Terms & Conditions, always
+  // forfeits the full amount on cancellation regardless of timing.
+  isNonRefundable       Boolean                @default(false)
   ratePlan              String?
   origin                String?
   cancellationNumber    String?
