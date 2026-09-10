@@ -1,8 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { PAYMENT_METHODS, PAYMENT_METHOD_CODES, E_WALLET_METHODS, categoryOf, isEWallet } =
-  require('./paymentMethods');
+const {
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_CODES,
+  E_WALLET_METHODS,
+  categoryOf,
+  isEWallet,
+  simulateGatewayRef,
+} = require('./paymentMethods');
 
 test('GCash and Maya are both classified E_WALLET', () => {
   assert.equal(categoryOf('GCASH'), 'E_WALLET');
@@ -51,4 +57,31 @@ test('every method has a human label', () => {
     assert.equal(typeof PAYMENT_METHODS[code].label, 'string');
     assert.ok(PAYMENT_METHODS[code].label.length > 0);
   }
+});
+
+test('simulateGatewayRef mints a CARD authorization code', () => {
+  const ref = simulateGatewayRef('CARD');
+  assert.match(ref, /^AUTH-[0-9A-F]{12}$/);
+});
+
+test('simulateGatewayRef mints a BANK_TRANSFER reference number', () => {
+  const ref = simulateGatewayRef('BANK_TRANSFER');
+  assert.match(ref, /^BANKREF-[0-9A-F]{12}$/);
+});
+
+test('simulateGatewayRef is case-insensitive, like every other lookup in this file', () => {
+  assert.match(simulateGatewayRef('card'), /^AUTH-/);
+  assert.match(simulateGatewayRef('bank_transfer'), /^BANKREF-/);
+});
+
+test('simulateGatewayRef invents nothing for cash, manual e-wallet, or an unknown method', () => {
+  assert.equal(simulateGatewayRef('CASH'), null);
+  assert.equal(simulateGatewayRef('E_WALLET'), null);
+  assert.equal(simulateGatewayRef('BITCOIN'), null);
+  assert.equal(simulateGatewayRef(undefined), null);
+});
+
+test('simulateGatewayRef does not repeat itself across calls', () => {
+  const refs = new Set(Array.from({ length: 20 }, () => simulateGatewayRef('CARD')));
+  assert.equal(refs.size, 20);
 });

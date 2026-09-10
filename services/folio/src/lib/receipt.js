@@ -34,6 +34,24 @@ function receiptModel(payment, folio, guestName) {
     // to show what they paid — but the document has to say so, or it reads as proof
     // of money the hotel no longer holds.
     refunded: payment.status === 'REFUNDED',
+    // Gateway/bank metadata captured when this payment was taken — printed as
+    // proof of what was verified, not just that something was paid. Only
+    // populated for the method it actually applies to; renderReceiptPdf skips
+    // whichever block has nothing to show.
+    gatewayRef: payment.gatewayRef || null,
+    card:
+      payment.method === 'CARD'
+        ? { masked: payment.cardMasked || null, cardholderName: payment.cardholderName || null }
+        : null,
+    bankTransfer:
+      payment.method === 'BANK_TRANSFER'
+        ? {
+            bankName: payment.bankName || null,
+            transferNetwork: payment.transferNetwork || null,
+            senderName: payment.senderName || null,
+            transferredAt: payment.transferredAt || null,
+          }
+        : null,
   };
 }
 

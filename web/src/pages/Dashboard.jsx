@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
+import { useAuth } from '../auth';
 import { formatPeso } from '../lib/money';
 import { localDay, nightsBetween } from '../lib/date';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -31,6 +33,9 @@ function addDaysLocal(d, n) {
 export default function Dashboard() {
   const navigate = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
+  const { hasRole } = useAuth();
+  const canDelete = hasRole('ADMIN', 'MANAGER');
   const [resTab, setResTab] = useState('Arrivals');
   const [resWhen, setResWhen] = useState('Today');
   const [actTab, setActTab] = useState('Sales');
@@ -105,6 +110,32 @@ export default function Dashboard() {
   useEffect(() => {
     load();
   }, []);
+
+  // Admin/Manager only — server-enforced (services/reservation's
+  // requireRole('ADMIN', 'MANAGER') on DELETE) and not offered at all to a
+  // lower-tier role (canDelete gates the button below). Covers both the
+  // Arrivals and Departures tabs of the Reservations panel, since both list
+  // Reservation rows and share this one action. Refused by the server once
+  // a real stay exists against the reservation (a departure whose guest
+  // already checked in), which is the correct behaviour, not a bug — Cancel
+  // is still the tool for that case.
+  async function deleteReservation(r) {
+    const ok = await confirm({
+      title: 'Delete reservation',
+      message: `Permanently delete the reservation for ${r.guestName || 'this guest'}?`,
+      detail: 'This cannot be undone.',
+      confirmLabel: 'Delete permanently',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/reservations/${r.id}`);
+      toast.success('Reservation deleted.');
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
 
   // Auto-populate: re-fetch whenever anything changes in another module
   // (a reservation is booked/cancelled, a guest checks in/out, a room is
@@ -323,7 +354,9 @@ export default function Dashboard() {
         <div className="kpi-tile kpi-booked">
           <div>
             <div className="kpi-num">{occRoomCount}</div>
-            <div className="kpi-label" title="Accommodations booked">Booked</div>
+            <div className="kpi-label" title="Accommodations booked">
+              Booked
+            </div>
           </div>
           <span className="kpi-pct">{occPct.toFixed(2)}%</span>
         </div>
@@ -332,7 +365,9 @@ export default function Dashboard() {
             <div className="kpi-tile">
               <div>
                 <div className="kpi-num">{(lastDay.occupancyPct ?? 0).toFixed(1)}%</div>
-                <div className="kpi-label" title="Occupancy (last audit)">Occupancy</div>
+                <div className="kpi-label" title="Occupancy (last audit)">
+                  Occupancy
+                </div>
               </div>
             </div>
             <div className="kpi-tile">
@@ -350,7 +385,9 @@ export default function Dashboard() {
             <div className="kpi-tile">
               <div>
                 <div className="kpi-num">{formatPeso(lastDay.roomRevenueCents)}</div>
-                <div className="kpi-label" title="Room revenue (last audit)">Room revenue</div>
+                <div className="kpi-label" title="Room revenue (last audit)">
+                  Room revenue
+                </div>
               </div>
             </div>
           </>
@@ -442,6 +479,22 @@ export default function Dashboard() {
                       >
                         <Icon name="log-in" size={14} />
                       </button>
+                      {/* r.confirmationNumber, not resTab: it's what tells a real
+                          Reservation row (Arrivals/Departures/Pending Payment)
+                          apart from a Stay row (Stayovers/In-House Guests), which
+                          has no reservation of its own to delete here. */}
+                      {canDelete && r.confirmationNumber && (
+                        <button
+                          className="icon danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteReservation(r);
+                          }}
+                          title="Delete reservation"
+                        >
+                          <Icon name="trash" size={14} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -502,9 +555,7 @@ export default function Dashboard() {
           <div className="dash-chart">
             <BarChart
               data={activity.series}
-              labels={activity.dayList.map((d, i) =>
-                i % 2 === 0 ? String(d.getDate()) : ''
-              )}
+              labels={activity.dayList.map((d, i) => (i % 2 === 0 ? String(d.getDate()) : ''))}
               color={activity.color}
               width={620}
               height={96}

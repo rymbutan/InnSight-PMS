@@ -85,7 +85,7 @@ function GameLockNotice() {
       <Icon name="ban" size={14} strokeWidth={1.9} />
       <span>
         Room inspection is assigned work. Ask your instructor to give you the
-        <strong> Housekeeping</strong> role to run it.
+        <strong> Housekeeping &amp; Maintenance</strong> role to run it.
       </span>
     </p>
   );
@@ -190,7 +190,7 @@ export default function Housekeeping() {
   const { hasRole } = useAuth();
   // The inspection is training assigned to the housekeeping role; instructors
   // (ADMIN/MANAGER) can preview it.
-  const canPlay = hasRole('HOUSEKEEPING', 'ADMIN', 'MANAGER');
+  const canPlay = hasRole('HOUSEKEEPING_MAINTENANCE', 'ADMIN', 'MANAGER');
   const isSupervisor = hasRole('ADMIN', 'MANAGER'); // can assign rooms to housekeepers
   const [hkUsers, setHkUsers] = useState([]);
 
@@ -277,7 +277,9 @@ export default function Housekeeping() {
       if (isSupervisor && hkUsers.length === 0) {
         const u = await api.get('/api/users').catch(() => ({ data: [] }));
         setHkUsers(
-          (u.data || []).filter((x) => (x.roles || []).some((rr) => (rr.roleCode || rr) === 'HOUSEKEEPING'))
+          (u.data || []).filter((x) =>
+            (x.roles || []).some((rr) => (rr.roleCode || rr) === 'HOUSEKEEPING_MAINTENANCE')
+          )
         );
       }
     } catch (e) {
@@ -402,8 +404,9 @@ export default function Housekeeping() {
           <div className="hk-map-scroll">
             <svg
               viewBox={`0 0 ${mapW} ${mapH || 420}`}
+              width={mapW}
+              height={mapH || 420}
               className="hk-map"
-              style={{ minWidth: mapW }}
               role="img"
               aria-label="Interactive hotel floor map"
             >
@@ -486,89 +489,91 @@ export default function Housekeeping() {
           </div>
 
           {selected && (
-          <div className="panel hk-detail">
-            <div className="hk-detail-head">
-              <h3 style={{ margin: 0 }}>Room {selected.number}</h3>
-              <button className="icon" aria-label="Close" onClick={() => setSelectedId(null)}>
-                <Icon name="x" size={16} />
-              </button>
-            </div>
-            <div
-              className="hk-detail-status"
-              style={{
-                background: statusMeta(selected.status).fill,
-                color: statusMeta(selected.status).color,
-              }}
-            >
-              {statusMeta(selected.status).code} — {statusMeta(selected.status).label}
-            </div>
-            <dl className="hk-detail-meta">
-              <dt>Type</dt>
-              <dd>{selected.roomType?.name || selected.typeCode}</dd>
-              <dt>Rate</dt>
-              <dd>{selected.roomType ? `${formatPeso(selected.roomType.baseRate)} / night` : '—'}</dd>
-              <dt>Floor</dt>
-              <dd>{selected.floor}</dd>
-              <dt>Sleeps</dt>
-              <dd>{selected.roomType?.maxOccupancy ?? '—'}</dd>
-              <dt>Assigned</dt>
-              <dd>{selected.assignedToName || <span className="muted">unassigned</span>}</dd>
-            </dl>
-            {isSupervisor && (
-              <div style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
-                <label style={{ margin: 0 }}>Assign to</label>
-                <select
-                  value={selected.assignedTo || ''}
-                  onChange={(e) => assign(selected.id, hkUsers.find((u) => u.id === e.target.value) || null)}
-                >
-                  <option value="">— unassigned —</option>
-                  {hkUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.displayName}
-                    </option>
-                  ))}
-                </select>
+            <div className="panel hk-detail">
+              <div className="hk-detail-head">
+                <h3 style={{ margin: 0 }}>Room {selected.number}</h3>
+                <button className="icon" aria-label="Close" onClick={() => setSelectedId(null)}>
+                  <Icon name="x" size={16} />
+                </button>
               </div>
-            )}
+              <div
+                className="hk-detail-status"
+                style={{
+                  background: statusMeta(selected.status).fill,
+                  color: statusMeta(selected.status).color,
+                }}
+              >
+                {statusMeta(selected.status).code} — {statusMeta(selected.status).label}
+              </div>
+              <dl className="hk-detail-meta">
+                <dt>Type</dt>
+                <dd>{selected.roomType?.name || selected.typeCode}</dd>
+                <dt>Rate</dt>
+                <dd>{selected.roomType ? `${formatPeso(selected.roomType.baseRate)} / night` : '—'}</dd>
+                <dt>Floor</dt>
+                <dd>{selected.floor}</dd>
+                <dt>Sleeps</dt>
+                <dd>{selected.roomType?.maxOccupancy ?? '—'}</dd>
+                <dt>Assigned</dt>
+                <dd>{selected.assignedToName || <span className="muted">unassigned</span>}</dd>
+              </dl>
+              {isSupervisor && (
+                <div style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <label style={{ margin: 0 }}>Assign to</label>
+                  <select
+                    value={selected.assignedTo || ''}
+                    onChange={(e) =>
+                      assign(selected.id, hkUsers.find((u) => u.id === e.target.value) || null)
+                    }
+                  >
+                    <option value="">— unassigned —</option>
+                    {hkUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-            {/* Which faults this room hands out. Only scenarios authored for
+              {/* Which faults this room hands out. Only scenarios authored for
                 this room's tier are offered: a Suite scenario laid over a
                 Standard room would tag fixtures that room does not have, and
                 every one of those tags would silently fail to resolve. */}
-            {isSupervisor && (
-              <div style={{ margin: '6px 0 12px' }}>
-                <label style={{ margin: '0 0 4px' }}>Inspection scenario</label>
-                <select
-                  style={{ width: '100%' }}
-                  value={assignments[selected.id] || ''}
-                  onChange={(e) => setScenarioPin(selected, e.target.value)}
-                >
-                  <option value="">— generate faults automatically —</option>
-                  {scenarios
-                    .filter((s) => s.roomTier === (selected.roomType?.name || ''))
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                        {s.active === false ? ' (inactive)' : ''}
-                      </option>
-                    ))}
-                </select>
-                <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
-                  {assignments[selected.id]
-                    ? 'Every student inspecting this room gets these exact faults.'
-                    : 'Faults are generated, or drawn from an authored scenario for this room type. The booking on the clipboard is this room’s real reservation either way — a room with nobody booked in gets a practice booking, marked as such.'}
-                </p>
-              </div>
-            )}
-            <div className="hk-actions">
-              {panelActions(
-                selected,
-                (status, msg) => act(selected.id, status, msg),
-                (type, room) => launchInspection(type, room),
-                canPlay
+              {isSupervisor && (
+                <div style={{ margin: '6px 0 12px' }}>
+                  <label style={{ margin: '0 0 4px' }}>Inspection scenario</label>
+                  <select
+                    style={{ width: '100%' }}
+                    value={assignments[selected.id] || ''}
+                    onChange={(e) => setScenarioPin(selected, e.target.value)}
+                  >
+                    <option value="">— generate faults automatically —</option>
+                    {scenarios
+                      .filter((s) => s.roomTier === (selected.roomType?.name || ''))
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                          {s.active === false ? ' (inactive)' : ''}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+                    {assignments[selected.id]
+                      ? 'Every student inspecting this room gets these exact faults.'
+                      : 'Faults are generated, or drawn from an authored scenario for this room type. The booking on the clipboard is this room’s real reservation either way — a room with nobody booked in gets a practice booking, marked as such.'}
+                  </p>
+                </div>
               )}
+              <div className="hk-actions">
+                {panelActions(
+                  selected,
+                  (status, msg) => act(selected.id, status, msg),
+                  (type, room) => launchInspection(type, room),
+                  canPlay
+                )}
+              </div>
             </div>
-          </div>
           )}
         </div>
       </div>
@@ -624,7 +629,11 @@ export default function Housekeeping() {
                   if (passesInspection(items)) {
                     act(room.id, 'CLEAN_INSPECTED', `Room ${room.number} inspected — now guest-ready.`);
                   } else {
-                    act(room.id, 'DIRTY', `Room ${room.number} inspection found problems — needs re-cleaning.`);
+                    act(
+                      room.id,
+                      'DIRTY',
+                      `Room ${room.number} inspection found problems — needs re-cleaning.`
+                    );
                   }
                 }}
               />

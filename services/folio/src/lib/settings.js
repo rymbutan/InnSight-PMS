@@ -162,6 +162,27 @@ function validateHotel(body = {}) {
   return { ok: true, hotel };
 }
 
+// A single global percentage surcharge for CARD/BANK_TRANSFER payments (see
+// POST /folios/:id/payments and policies.js's paymentProcessingFeeCents).
+// Defaults to 0 — a fresh install charges no fee until an operator sets one,
+// same "nothing fabricated" discipline as localTax/realPropertyTax defaulting
+// to zero in policies.js.
+const PAYMENT_FEE_KEY = 'payment_processing_fee_percent';
+const DEFAULT_PAYMENT_FEE_PERCENT = 0;
+
+function parsePaymentFeePercent(row) {
+  const n = Number(row?.value);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_PAYMENT_FEE_PERCENT;
+}
+
+function validatePaymentFeePercent(body = {}) {
+  const n = Number(body.feePercent);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    return { ok: false, error: 'feePercent must be a number between 0 and 100.' };
+  }
+  return { ok: true, feePercent: n };
+}
+
 module.exports = {
   TAX_COMPONENT_KEYS,
   taxRateKey,
@@ -174,4 +195,8 @@ module.exports = {
   validateTaxRates,
   parseHotel,
   validateHotel,
+  PAYMENT_FEE_KEY,
+  DEFAULT_PAYMENT_FEE_PERCENT,
+  parsePaymentFeePercent,
+  validatePaymentFeePercent,
 };

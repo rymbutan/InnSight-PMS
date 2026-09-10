@@ -9,6 +9,9 @@ const {
   TAX_COMPONENT_KEYS,
   taxRateKey,
   normalizeCountry,
+  parsePaymentFeePercent,
+  validatePaymentFeePercent,
+  DEFAULT_PAYMENT_FEE_PERCENT,
 } = require('./settings');
 
 test('missing rows fall back to PH\'s shipped defaults', () => {
@@ -192,4 +195,32 @@ test('check-out at or after check-in is refused — it would invert every stay',
 test('the normal hotel shape — out in the morning, in the afternoon — is accepted', () => {
   const out = validateHotel({ checkInTime: '14:00', checkOutTime: '12:00' });
   assert.strictEqual(out.ok, true);
+});
+
+test('a missing payment fee setting row falls back to the shipped default (0)', () => {
+  assert.equal(parsePaymentFeePercent(undefined), DEFAULT_PAYMENT_FEE_PERCENT);
+  assert.equal(parsePaymentFeePercent(null), DEFAULT_PAYMENT_FEE_PERCENT);
+});
+
+test('a corrupt stored payment fee value falls back to the default rather than becoming NaN', () => {
+  assert.equal(parsePaymentFeePercent({ value: 'not-a-number' }), DEFAULT_PAYMENT_FEE_PERCENT);
+  assert.equal(parsePaymentFeePercent({ value: '-5' }), DEFAULT_PAYMENT_FEE_PERCENT);
+  assert.equal(parsePaymentFeePercent({ value: '150' }), DEFAULT_PAYMENT_FEE_PERCENT);
+});
+
+test('a valid stored payment fee value parses through', () => {
+  assert.equal(parsePaymentFeePercent({ value: '2.5' }), 2.5);
+});
+
+test('validatePaymentFeePercent accepts 0 through 100', () => {
+  assert.deepEqual(validatePaymentFeePercent({ feePercent: 0 }), { ok: true, feePercent: 0 });
+  assert.deepEqual(validatePaymentFeePercent({ feePercent: 100 }), { ok: true, feePercent: 100 });
+  assert.deepEqual(validatePaymentFeePercent({ feePercent: 2.5 }), { ok: true, feePercent: 2.5 });
+});
+
+test('validatePaymentFeePercent refuses anything outside 0-100, or non-numeric', () => {
+  for (const bad of [-1, 101, NaN, undefined, 'abc']) {
+    const out = validatePaymentFeePercent({ feePercent: bad });
+    assert.strictEqual(out.ok, false, `${JSON.stringify(bad)} should be refused`);
+  }
 });

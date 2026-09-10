@@ -24,7 +24,6 @@ import GuestPortal from './pages/GuestPortal';
 import SimulatedPayment from './pages/SimulatedPayment';
 import Revenue from './pages/Revenue';
 import Amenities from './pages/Amenities';
-import Training from './pages/Training';
 import RoomLayouts from './pages/RoomLayouts';
 import InspectionScenarios from './pages/InspectionScenarios';
 import Settings from './pages/Settings';
@@ -78,7 +77,7 @@ export default function App() {
         <Route
           path="/calendar"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING']}>
+            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
               <Calendar />
             </ProtectedRoute>
           }
@@ -110,7 +109,7 @@ export default function App() {
         <Route
           path="/rooms"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING']}>
+            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
               <Rooms />
             </ProtectedRoute>
           }
@@ -126,16 +125,8 @@ export default function App() {
         <Route
           path="/housekeeping"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING']}>
+            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
               <Housekeeping />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/training"
-          element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'HOUSEKEEPING', 'FRONT_DESK']}>
-              <Training />
             </ProtectedRoute>
           }
         />
