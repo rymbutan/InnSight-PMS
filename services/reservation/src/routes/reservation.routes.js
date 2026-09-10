@@ -2,12 +2,18 @@ const express = require('express');
 const crypto = require('crypto');
 const Redis = require('ioredis');
 const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
-const { cancellationFeeCents } = require('../lib/policies');
+const { cancellationFeeCents, paymentProcessingFeeCents } = require('../lib/policies');
+const { missingDepositField } = require('../lib/missingDepositField');
 const { computeAddOns } = require('../lib/addOns');
 const { makeInventoryClient, NoInventoryError } = require('../lib/inventoryClient');
 const { nightsBetween: nightsBetweenDates, utcDayKey } = require('../lib/date');
 const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
-const { pickAssignableRoom, freeRoomIds, normaliseRoomId, MAX_ASSIGN_ATTEMPTS } = require('../lib/roomAssignment');
+const {
+  pickAssignableRoom,
+  freeRoomIds,
+  normaliseRoomId,
+  MAX_ASSIGN_ATTEMPTS,
+} = require('../lib/roomAssignment');
 const { makeFolioClient } = require('../lib/folioClient');
 const { stampWindow, DEFAULT_SERVICE_TIMES } = require('../lib/stayWindow');
 const { send: sendMail, TEMPLATES } = require('../lib/notifier');
@@ -54,7 +60,24 @@ async function serviceTimes() {
   }
 }
 
+// Server-side deposit processing fee: 0 unless the method rides a gateway
+// (CARD/BANK_TRANSFER), same rule as Folio's own POST /folios/:id/payments.
+// Never trust a client-sent fee — this is the only place depositFeeCents is
+// computed, whether the booking is created here or completed later via PATCH.
+async function depositFeeCentsFor(paymentType, depositCents) {
+  if (paymentType !== 'CARD' && paymentType !== 'BANK_TRANSFER') return 0n;
+  const feePercent = await folio.getPaymentFeePercent().catch(() => 0);
+  return paymentProcessingFeeCents({ amountCents: BigInt(depositCents || 0), feePercent });
+}
+
 const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK'];
+
+// Mandatory Downpayment Constraint: a booking may not be created, nor moved to
+// CONFIRMED, without a recorded downpayment against one of these methods.
+// Mirrors web/src/lib/paymentMethods.js's PAYMENT_METHODS codes — the same
+// list the front desk's payment dropdowns already offer, so nothing here can
+// be rejected that the UI could not have submitted in the first place.
+const VALID_DEPOSIT_PAYMENT_TYPES = ['CASH', 'CARD', 'E_WALLET', 'BANK_TRANSFER'];
 
 // Upper bound on one page of the reservation list. A 14-night calendar window
 // for a large property, plus the night audit's no-show sweep, both fit inside
@@ -205,11 +228,42 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
       ratePlan,
       origin,
       addOns: rawAddOns,
+      isNonRefundable,
+      // Per-method deposit detail, same request-body shape Folio's own
+      // payment endpoint accepts (see missingDepositField.js).
+      cardMasked,
+      cardholderName,
+      bankName,
+      transferNetwork,
+      senderName,
+      gatewayRef,
+      reference,
+      transferredAt,
     } = req.body;
 
     if (!guestName || !roomTypeCode || !checkIn || !checkOut) {
       return res.status(400).json({ error: 'guestName, roomTypeCode, checkIn, checkOut required.' });
     }
+
+    // Mandatory Downpayment Constraint: no booking is created without proof of
+    // a required downpayment already settled. `depositCents` and `paymentType`
+    // are both staff-entered at the same step (NewReservation.jsx's Step 5), so
+    // this is a payload shape check, not a payment integration — the actual
+    // charge is taken by the front desk before they submit.
+    if (!(Number(depositCents) > 0) || !VALID_DEPOSIT_PAYMENT_TYPES.includes(paymentType)) {
+      return res.status(400).json({
+        error:
+          'A downpayment is required to create a booking: depositCents must be greater than 0 and ' +
+          `paymentType must be one of ${VALID_DEPOSIT_PAYMENT_TYPES.join(', ')}.`,
+      });
+    }
+
+    // Same per-method requirements Folio holds a folio payment to (card needs
+    // a masked number + cardholder, a bank transfer needs the bank/network/
+    // sender/reference) — checked here so an incomplete deposit record can
+    // never leave the wizard in the first place.
+    const missingDeposit = missingDepositField(paymentType, req.body);
+    if (missingDeposit) return res.status(400).json({ error: missingDeposit });
 
     const rawCi = new Date(checkIn);
     const rawCo = new Date(checkOut);
@@ -276,6 +330,12 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
     // the answer is a different room, not a failed booking. A room chosen
     // EXPLICITLY by staff is never retried: "that room is taken" is the correct
     // thing to tell them.
+    //
+    // The processing fee is never client-supplied — computed once here, ahead
+    // of the room-assignment retry loop, since it depends only on the deposit
+    // amount/method, not on which room ends up assigned.
+    const depositFeeCents = await depositFeeCentsFor(paymentType, depositCents);
+
     let reservation;
     try {
       const roomsTried = [];
@@ -313,6 +373,21 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
               addOns: enrichedAddOns,
               expectedArrivalTime,
               paymentType,
+              // Only the sub-fields relevant to the chosen method are ever
+              // persisted — same discipline as Folio's own payment route.
+              depositCardMasked: paymentType === 'CARD' ? cardMasked : undefined,
+              depositCardholderName: paymentType === 'CARD' ? cardholderName : undefined,
+              depositBankName: paymentType === 'BANK_TRANSFER' ? bankName : undefined,
+              depositTransferNetwork: paymentType === 'BANK_TRANSFER' ? transferNetwork : undefined,
+              depositSenderName: paymentType === 'BANK_TRANSFER' ? senderName : undefined,
+              depositGatewayRef:
+                paymentType === 'BANK_TRANSFER' || paymentType === 'CARD'
+                  ? gatewayRef || reference || undefined
+                  : undefined,
+              depositTransferredAt:
+                paymentType === 'BANK_TRANSFER' ? new Date(transferredAt || Date.now()) : undefined,
+              depositFeeCents,
+              isNonRefundable: Boolean(isNonRefundable),
               ratePlan,
               origin,
               createdBy: req.user?.sub,
@@ -464,12 +539,54 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
       assignedRoomId,
       expectedArrivalTime,
       paymentType,
+      depositCents,
       source,
       origin,
       ratePlan,
+      isNonRefundable,
+      cardMasked,
+      cardholderName,
+      bankName,
+      transferNetwork,
+      senderName,
+      gatewayRef,
+      reference,
+      transferredAt,
     } = req.body;
     const before = await prisma.reservation.findUnique({ where: { id: req.params.id } });
     if (!before) return res.status(404).json({ error: 'Not found.' });
+
+    // A publicly-created booking (services/reservation/src/index.js's
+    // /api/public/reservations) starts with no deposit at all — this is the
+    // only route that lets staff record one against it before confirming, per
+    // the Mandatory Downpayment Constraint enforced below on /confirm.
+    if (paymentType !== undefined && !VALID_DEPOSIT_PAYMENT_TYPES.includes(paymentType)) {
+      return res.status(400).json({
+        error: `paymentType must be one of ${VALID_DEPOSIT_PAYMENT_TYPES.join(', ')}.`,
+      });
+    }
+    if (depositCents !== undefined && !(Number(depositCents) > 0)) {
+      return res.status(400).json({ error: 'depositCents must be greater than 0.' });
+    }
+    // Validate against the EFFECTIVE method/fields (existing row + this
+    // patch), so completing a deposit over several PATCH calls is held to the
+    // same standard as setting it all at once in the wizard.
+    const effectivePaymentType = paymentType !== undefined ? paymentType : before.paymentType;
+    if (paymentType !== undefined || depositCents !== undefined || cardMasked !== undefined ||
+        cardholderName !== undefined || bankName !== undefined || transferNetwork !== undefined ||
+        senderName !== undefined || gatewayRef !== undefined || reference !== undefined) {
+      const effectiveDepositBody = {
+        cardMasked: cardMasked !== undefined ? cardMasked : before.depositCardMasked,
+        cardholderName: cardholderName !== undefined ? cardholderName : before.depositCardholderName,
+        bankName: bankName !== undefined ? bankName : before.depositBankName,
+        transferNetwork: transferNetwork !== undefined ? transferNetwork : before.depositTransferNetwork,
+        senderName: senderName !== undefined ? senderName : before.depositSenderName,
+        gatewayRef: gatewayRef !== undefined ? gatewayRef : before.depositGatewayRef,
+        reference,
+      };
+      const missingDeposit = missingDepositField(effectivePaymentType, effectiveDepositBody);
+      if (missingDeposit) return res.status(400).json({ error: missingDeposit });
+    }
 
     // Validate dates BEFORE anything else. An unparseable value used to sail
     // past the comparison guards (every comparison with NaN is false) and then
@@ -502,12 +619,31 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
     if (assignedRoomId !== undefined) data.assignedRoomId = normaliseRoomId(assignedRoomId);
     if (expectedArrivalTime !== undefined) data.expectedArrivalTime = expectedArrivalTime;
     if (paymentType !== undefined) data.paymentType = paymentType;
+    if (depositCents !== undefined) data.depositCents = BigInt(depositCents);
     if (source !== undefined) data.source = source;
     // Both are columns the reservation header displays and Quick Edit edits.
     // `ratePlan` is the free-text label shown as "Rate Plan(s)"; `ratePlanId` is
     // the FK above and is set independently.
     if (origin !== undefined) data.origin = origin;
     if (ratePlan !== undefined) data.ratePlan = ratePlan;
+    if (isNonRefundable !== undefined) data.isNonRefundable = Boolean(isNonRefundable);
+    if (cardMasked !== undefined) data.depositCardMasked = cardMasked;
+    if (cardholderName !== undefined) data.depositCardholderName = cardholderName;
+    if (bankName !== undefined) data.depositBankName = bankName;
+    if (transferNetwork !== undefined) data.depositTransferNetwork = transferNetwork;
+    if (senderName !== undefined) data.depositSenderName = senderName;
+    if (gatewayRef !== undefined || reference !== undefined) {
+      data.depositGatewayRef = gatewayRef || reference;
+    }
+    if (transferredAt !== undefined) data.depositTransferredAt = new Date(transferredAt);
+    // Never trust a client-sent fee — recompute authoritatively whenever the
+    // method or amount that determines it changes.
+    if (paymentType !== undefined || depositCents !== undefined) {
+      data.depositFeeCents = await depositFeeCentsFor(
+        effectivePaymentType,
+        depositCents !== undefined ? depositCents : before.depositCents
+      );
+    }
 
     // ── Re-hold on a date change ─────────────────────────────────────────────
     // Moving a booking's dates invalidates the inventory hold that was taken for
@@ -636,6 +772,32 @@ router.post('/reservations/:id/confirm', requireRole(...STAFF), async (req, res)
         .status(409)
         .json({ error: `Only a pending reservation can be confirmed (current: ${existing.status}).` });
     }
+    // Mandatory Downpayment Constraint: confirmation is the other side of the
+    // gate this file enforces at creation. A publicly-created booking (which
+    // starts with no deposit at all) reaches this route with nothing recorded,
+    // so it lands here rather than at create — PATCH /reservations/:id is how
+    // staff record the deposit before confirming.
+    if (!(existing.depositCents > 0n) || !VALID_DEPOSIT_PAYMENT_TYPES.includes(existing.paymentType)) {
+      return res.status(409).json({
+        error:
+          'Cannot confirm without a recorded downpayment. Record depositCents and paymentType ' +
+          `(${VALID_DEPOSIT_PAYMENT_TYPES.join(', ')}) first.`,
+      });
+    }
+    // Closes the gap PATCH leaves open: a deposit completed over several PATCH
+    // calls must satisfy the same per-method requirements as one set at
+    // creation before it is allowed to confirm.
+    const missingDeposit = missingDepositField(existing.paymentType, {
+      cardMasked: existing.depositCardMasked,
+      cardholderName: existing.depositCardholderName,
+      bankName: existing.depositBankName,
+      transferNetwork: existing.depositTransferNetwork,
+      senderName: existing.depositSenderName,
+      gatewayRef: existing.depositGatewayRef,
+    });
+    if (missingDeposit) {
+      return res.status(409).json({ error: `Cannot confirm: ${missingDeposit}` });
+    }
     const r = await prisma.reservation.update({
       where: { id: req.params.id },
       data: { status: 'CONFIRMED' },
@@ -746,7 +908,8 @@ router.post('/reservations/:id/documents', requireRole(...STAFF), async (req, re
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
     const { filename, contentType, contentBase64 } = req.body || {};
-    if (!filename || !String(filename).trim()) return res.status(400).json({ error: 'filename is required.' });
+    if (!filename || !String(filename).trim())
+      return res.status(400).json({ error: 'filename is required.' });
     if (!contentBase64) return res.status(400).json({ error: 'contentBase64 is required.' });
 
     let buffer;
@@ -877,7 +1040,7 @@ router.post('/reservations/:id/send-confirmation-email', requireRole(...STAFF), 
 // POST /api/reservations/:id/cancel
 router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) => {
   try {
-    const { reason, cancellationFeeCents: explicitFee, note, policy = 'STANDARD' } = req.body;
+    const { reason, cancellationFeeCents: explicitFee, note } = req.body;
     const cancellationNumber = nextCancellationNumber();
     // Look up reservation first so we can compute the fee from policy if not supplied.
     const existing = await prisma.reservation.findUnique({ where: { id: req.params.id } });
@@ -904,8 +1067,8 @@ router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) 
         cancellationFeeCents({
           totalEstimateCents: Number(existing.totalEstimateCents || 0),
           checkIn: existing.checkIn,
-          nights: existing.nights || 1,
-          policy,
+          method: existing.paymentType,
+          isNonRefundable: existing.isNonRefundable,
         }) || 0
       );
     }
@@ -929,7 +1092,7 @@ router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) 
       r.id,
       req.user,
       'cancel',
-      `Cancelled (${cancellationNumber}) — reason: ${reason || 'unspecified'}${computedFeeCents ? `, fee ₱${(computedFeeCents / 100).toFixed(2)} [${policy}]` : ''}`
+      `Cancelled (${cancellationNumber}) — reason: ${reason || 'unspecified'}${computedFeeCents ? `, fee ₱${(computedFeeCents / 100).toFixed(2)}` : ''}`
     );
     // Return the capacity DIRECTLY rather than relying on the event below.
     // Redis pub/sub has no persistence and no retry: if the inventory service
@@ -958,6 +1121,50 @@ router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) 
     res.json(r);
   } catch (err) {
     console.error('[Reservation] Cancel error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// DELETE /api/reservations/:id — Admin/Manager ONLY (not the broader STAFF
+// group every other write route here uses). Front desk still cancels a
+// booking; this is a separate, stricter action for permanently ERASING the
+// record — a duplicate entry, a mistaken booking, a stale no-show nobody
+// needs a paper trail for.
+//
+// Refused once a real stay ever existed against this reservation
+// (CHECKED_IN/IN_HOUSE/CHECKED_OUT): at that point folios, charges and guest
+// history reference it, and deleting the booking behind them would orphan
+// all of that silently (Stay.reservationId is a plain string, not a foreign
+// key, so nothing in the database would even complain). Cancel remains the
+// right tool once a stay is real; Delete is for a booking that never became
+// one.
+router.delete('/reservations/:id', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const existing = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+    if (['CHECKED_IN', 'IN_HOUSE', 'CHECKED_OUT'].includes(existing.status)) {
+      return res.status(409).json({
+        error:
+          `Cannot delete a ${existing.status.toLowerCase().replace('_', ' ')} reservation — ` +
+          'a real stay exists against it. Cancel it instead if it must go away.',
+      });
+    }
+    // Same discipline as /cancel: return the capacity directly rather than
+    // relying purely on the event below, so a slow/restarting inventory
+    // service does not leave this room type's hold blocking sales.
+    if (existing.inventoryHoldGroupId) {
+      await inventory.releaseHold(existing.inventoryHoldGroupId);
+    }
+    // Every child row (activity log, cards, documents, notes, notification
+    // log) is onDelete: Cascade in the schema, so this alone removes them.
+    await prisma.reservation.delete({ where: { id: req.params.id } });
+    redis.publish(
+      'reservation:deleted',
+      JSON.stringify({ reservationId: req.params.id, confirmationNumber: existing.confirmationNumber })
+    );
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Reservation] Delete error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -1051,6 +1258,19 @@ router.get('/settings/addon-fee-percent', requireRole(...ROLE_GROUPS.DESK), asyn
     res.json({ feePercent: Number(row?.value ?? 10) });
   } catch (err) {
     console.error('[Reservation] Get setting error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/settings/payment-fee-percent — proxies Folio's own setting (Folio
+// owns it; this just lets the wizard show the same CARD/BANK_TRANSFER
+// surcharge preview without the frontend calling folio directly). 0 on any
+// failure — a fee preview is a nicety, never a reason to block a booking.
+router.get('/settings/payment-fee-percent', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
+  try {
+    res.json({ feePercent: await folio.getPaymentFeePercent().catch(() => 0) });
+  } catch (err) {
+    console.error('[Reservation] Get payment fee percent error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

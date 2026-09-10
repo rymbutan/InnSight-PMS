@@ -165,7 +165,13 @@ router.get('/arrivals', requireRole(...ROLE_GROUPS.OPS_READ), async (req, res) =
           // overdueBefore === checkInFrom means nothing can be overdue: the audit
           // asks a bounded historical question, and rows from other days would
           // inflate its count.
-          return { range: null, checkInFrom: day, checkInTo: next, overdueBefore: day, includeOverdue: false };
+          return {
+            range: null,
+            checkInFrom: day,
+            checkInTo: next,
+            overdueBefore: day,
+            includeOverdue: false,
+          };
         })()
       : arrivalsWindow(req.query.range);
 
@@ -389,6 +395,7 @@ router.post('/check-in', requireRole(...STAFF), async (req, res) => {
         guestName,
         guestId,
         reservationId,
+        depositAmount: stay.depositAmount,
       })
     );
 
@@ -497,6 +504,7 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
         guestName,
         guestId,
         walkIn: true,
+        depositAmount: stay.depositAmount,
       })
     );
 
@@ -720,9 +728,7 @@ router.get('/stays/:id/registration-card', requireRole(...ROLE_GROUPS.DESK), asy
           )
         : null,
       stay.guestId
-        ? soft('guest', () =>
-            guestCall.call(`${GUEST_URL}/api/guests/${encodeURIComponent(stay.guestId)}`)
-          )
+        ? soft('guest', () => guestCall.call(`${GUEST_URL}/api/guests/${encodeURIComponent(stay.guestId)}`))
         : null,
       soft('hotel settings', () => settingsCall.call(`${FOLIO_URL}/api/settings/hotel`)),
       soft('room types', () => roomTypeCall.call(`${INVENTORY_URL}/api/room-types`)),

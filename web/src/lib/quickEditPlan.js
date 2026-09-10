@@ -12,14 +12,9 @@
 //
 // Arrival is a status, not the existence of a row.
 
-const TEXT_FIELDS = [
-  'source',
-  'paymentType',
-  'ratePlan',
-  'origin',
-  'expectedArrivalTime',
-  'specialRequests',
-];
+import { pesosToCents } from './money.js';
+
+const TEXT_FIELDS = ['source', 'paymentType', 'ratePlan', 'origin', 'expectedArrivalTime', 'specialRequests'];
 
 const day = (v) => (v ? String(v).slice(0, 10) : '');
 
@@ -50,6 +45,19 @@ export function planQuickEdit({ res, stay, form }) {
     // '' would store an empty string that renders as a blank value rather than
     // the '—' placeholder.
     if (after !== before) resPatch[k] = after || null;
+  }
+
+  // Mandatory Downpayment Constraint: this is the only place a publicly-created
+  // booking (which starts with no deposit at all) can have one recorded, so
+  // staff can then confirm it. Blank stays blank — leaving it untouched is not
+  // an attempt to record a zero deposit, and the route rejects one anyway.
+  if (form.depositPesos) {
+    const depositCents = pesosToCents(form.depositPesos);
+    if (depositCents <= 0) {
+      errors.push('Deposit amount must be greater than 0.');
+    } else if (depositCents !== Number(res.depositCents || 0)) {
+      resPatch.depositCents = depositCents;
+    }
   }
 
   const outMoved = day(form.checkOut) !== day(res.checkOut);

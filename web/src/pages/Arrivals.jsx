@@ -4,6 +4,7 @@ import api from '../api';
 import Modal from '../components/Modal';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useAuth } from '../auth';
 import { pesosToCents } from '../lib/money';
 import { localDay } from '../lib/date';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -15,6 +16,8 @@ import StatusPill from '../components/StatusPill';
 export default function Arrivals() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { hasRole } = useAuth();
+  const canDelete = hasRole('ADMIN', 'MANAGER');
   const confirm = useConfirm();
   const [arrivals, setArrivals] = useState([]);
   const [inHouse, setInHouse] = useState([]);
@@ -70,6 +73,32 @@ export default function Arrivals() {
   const availableRooms = rooms.filter(
     (r) => ['CLEAN', 'CLEAN_INSPECTED'].includes(r.status) && !occupiedRoomIds.has(r.id)
   );
+
+  // Admin/Manager only — server-enforced (services/reservation's
+  // requireRole('ADMIN', 'MANAGER') on DELETE); the button itself is also
+  // gated by canDelete so a lower-tier role never sees it at all. Refused by
+  // the server once a real stay exists against the reservation (an arrival
+  // row is always pre-check-in, so that guard essentially never fires here —
+  // it exists for the departures row below, where a guest may already be
+  // in-house).
+  async function deleteReservation(reservationId, label) {
+    if (!reservationId) return;
+    const ok = await confirm({
+      title: 'Delete reservation',
+      message: `Permanently delete the reservation for ${label || 'this guest'}?`,
+      detail: 'This cannot be undone.',
+      confirmLabel: 'Delete permanently',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/reservations/${reservationId}`);
+      toast.success('Reservation deleted.');
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
 
   async function submitCheckIn(e) {
     e.preventDefault();
@@ -185,9 +214,7 @@ export default function Arrivals() {
 
       <div className="panel">
         <div className="panel-head">
-          <h3>
-            Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}
-          </h3>
+          <h3>Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}</h3>
           {/* The range switcher sits in the panel header, top right. */}
           <div className="seg-rect" role="group" aria-label="Arrival window">
             {[
@@ -212,8 +239,8 @@ export default function Arrivals() {
             exist is the exact failure this screen was rebuilt to remove. */}
         {degraded && (
           <p className="error" style={{ marginTop: 0 }}>
-            Showing locally-known arrivals only — the reservation service is
-            unreachable, so this list may be incomplete.
+            Showing locally-known arrivals only — the reservation service is unreachable, so this list may be
+            incomplete.
           </p>
         )}
 
@@ -268,9 +295,7 @@ export default function Arrivals() {
                       : '—'}
                   </td>
                   <td className="t-c">{s.nights ?? '—'}</td>
-                  <td className="t-c">
-                    {s.adults == null ? '—' : s.adults + (s.children || 0)}
-                  </td>
+                  <td className="t-c">{s.adults == null ? '—' : s.adults + (s.children || 0)}</td>
                   <td className="t-actions">
                     <button
                       className="small"
@@ -278,6 +303,16 @@ export default function Arrivals() {
                     >
                       Check-in
                     </button>
+                    {canDelete && (
+                      <button
+                        className="small danger"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => deleteReservation(s.reservationId, s.guestName)}
+                        title="Delete this reservation"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

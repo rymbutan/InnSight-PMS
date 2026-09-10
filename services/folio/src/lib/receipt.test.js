@@ -43,7 +43,10 @@ test('a voided payment cannot be receipted', () => {
 
 test('a failed payment cannot be receipted', () => {
   // Handing a guest proof of payment for a declined card is worse than no receipt.
-  assert.throws(() => receiptModel({ ...PAYMENT, status: 'FAILED' }, FOLIO, 'X'), /not been captured|failed/i);
+  assert.throws(
+    () => receiptModel({ ...PAYMENT, status: 'FAILED' }, FOLIO, 'X'),
+    /not been captured|failed/i
+  );
 });
 
 test('a refunded payment is still receipted, and says so', () => {
@@ -56,4 +59,52 @@ test('a refunded payment is still receipted, and says so', () => {
 test('string amounts from JSON are coerced', () => {
   const m = receiptModel({ ...PAYMENT, amountCents: '250000' }, FOLIO, 'X');
   assert.equal(m.paidCents, 250000n);
+});
+
+test('a card payment carries its card block, and no bank block', () => {
+  const m = receiptModel(
+    {
+      ...PAYMENT,
+      method: 'CARD',
+      cardMasked: 'VISA •••• 4242',
+      cardholderName: 'Dela Cruz, Juan',
+      gatewayRef: 'AUTH-ABC123',
+    },
+    FOLIO,
+    'Dela Cruz, Juan'
+  );
+  assert.deepEqual(m.card, { masked: 'VISA •••• 4242', cardholderName: 'Dela Cruz, Juan' });
+  assert.equal(m.bankTransfer, null);
+  assert.equal(m.gatewayRef, 'AUTH-ABC123');
+});
+
+test('a bank transfer payment carries its bank block, and no card block', () => {
+  const transferredAt = new Date('2026-09-10T08:15:00Z');
+  const m = receiptModel(
+    {
+      ...PAYMENT,
+      method: 'BANK_TRANSFER',
+      bankName: 'BDO',
+      transferNetwork: 'InstaPay',
+      senderName: 'Santos, Grace',
+      transferredAt,
+      gatewayRef: 'BANKREF-20260910-8812',
+    },
+    FOLIO,
+    'Santos, Grace'
+  );
+  assert.deepEqual(m.bankTransfer, {
+    bankName: 'BDO',
+    transferNetwork: 'InstaPay',
+    senderName: 'Santos, Grace',
+    transferredAt,
+  });
+  assert.equal(m.card, null);
+  assert.equal(m.gatewayRef, 'BANKREF-20260910-8812');
+});
+
+test('cash carries neither a card nor a bank block', () => {
+  const m = receiptModel(PAYMENT, FOLIO, 'X');
+  assert.equal(m.card, null);
+  assert.equal(m.bankTransfer, null);
 });

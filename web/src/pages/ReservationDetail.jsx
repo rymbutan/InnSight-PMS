@@ -4,7 +4,7 @@ import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth';
-import { formatPeso, pesosToCents } from '../lib/money';
+import { formatPeso, pesosToCents, centsToPesos } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
 import StatusPill from '../components/StatusPill';
@@ -17,6 +17,7 @@ import { labelize } from '../lib/labels';
 import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
 import { paymentMethodGroups } from '../lib/paymentMethods';
 import { planQuickEdit } from '../lib/quickEditPlan';
+import { suggestedCancellationFeeCents } from '../lib/cancellationFee';
 
 const TABS = [
   'Accommodations',
@@ -118,6 +119,29 @@ export default function ReservationDetail() {
     try {
       const { data } = await api.post(`/api/reservations/${id}/send-confirmation-email`);
       toast.success(`Confirmation email sent to ${data.to}.`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  // Admin/Manager only — server-enforced (services/reservation's
+  // requireRole('ADMIN', 'MANAGER') on DELETE), and not even offered to a
+  // lower-tier role here: the ActionsMenu item below is gated by the same
+  // hasRole check, so it isn't visible for anyone the server would refuse.
+  // Distinct from Cancel: this permanently ERASES the record (refused once a
+  // real stay exists against it — see the server's own guard).
+  async function doDelete() {
+    const ok = await confirm({
+      title: 'Delete reservation',
+      message: `Permanently delete ${res.confirmationNumber || 'this reservation'}?`,
+      detail: 'This cannot be undone. The booking, its notes, cards and documents are all erased.',
+      confirmLabel: 'Delete permanently',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/reservations/${id}`);
+      toast.success('Reservation deleted.');
+      navigate('/reservations');
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -235,6 +259,15 @@ export default function ReservationDetail() {
                 !['CANCELLED', 'CHECKED_OUT'].includes(res.status) && {
                   label: 'Cancel Reservation',
                   onClick: () => setCancelOpen(true),
+                  danger: true,
+                },
+                // Not offered at all to a role the server would refuse anyway —
+                // a visible-but-rejected button reads as broken, not showing it
+                // reads as "not yours to do" (same reasoning Users.jsx documents
+                // for its own role-gated controls).
+                hasRole('ADMIN', 'MANAGER') && {
+                  label: 'Delete Record',
+                  onClick: doDelete,
                   danger: true,
                 },
               ].filter(Boolean)}
@@ -372,6 +405,7 @@ export default function ReservationDetail() {
         open={cancelOpen}
         onClose={() => setCancelOpen(false)}
         reservationId={id}
+        reservation={res}
         onDone={() => {
           setCancelOpen(false);
           load();
@@ -828,12 +862,16 @@ function CreditCardsTab({ reservationId }) {
       </div>
       <div className="panel">
         {adding && (
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
+          <div
+            style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}
+          >
             <div>
               <label>Brand</label>
               <select value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })}>
                 {CARD_BRANDS.map((b) => (
-                  <option key={b} value={b}>{b}</option>
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
                 ))}
               </select>
             </div>
@@ -849,7 +887,9 @@ function CreditCardsTab({ reservationId }) {
             <div>
               <label>Exp. month</label>
               <input
-                type="number" min="1" max="12"
+                type="number"
+                min="1"
+                max="12"
                 value={form.expMonth}
                 onChange={(e) => setForm({ ...form, expMonth: e.target.value })}
                 style={{ width: 70 }}
@@ -858,7 +898,8 @@ function CreditCardsTab({ reservationId }) {
             <div>
               <label>Exp. year</label>
               <input
-                type="number" min={new Date().getFullYear()}
+                type="number"
+                min={new Date().getFullYear()}
                 value={form.expYear}
                 onChange={(e) => setForm({ ...form, expYear: e.target.value })}
                 style={{ width: 90 }}
@@ -892,13 +933,19 @@ function CreditCardsTab({ reservationId }) {
             <div
               key={c.id}
               style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: 12, borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: 12,
+                borderBottom: '1px solid var(--border)',
               }}
             >
               <div>
-                <strong>{c.brand}</strong> •••• {c.last4} — exp {String(c.expMonth).padStart(2, '0')}/{c.expYear}
-                <div className="muted" style={{ fontSize: 12 }}>{c.cardholderName}</div>
+                <strong>{c.brand}</strong> •••• {c.last4} — exp {String(c.expMonth).padStart(2, '0')}/
+                {c.expYear}
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {c.cardholderName}
+                </div>
               </div>
               <button className="secondary small" onClick={() => remove(c.id)}>
                 Remove
@@ -985,7 +1032,10 @@ function NotesTab({ notes, reservationId, onChanged }) {
                 </div>
                 <div>{n.body}</div>
                 <div style={{ textAlign: 'right', marginTop: 6 }}>
-                  <button className="secondary small" onClick={() => setArchived(n.id, activeKind === 'Active')}>
+                  <button
+                    className="secondary small"
+                    onClick={() => setArchived(n.id, activeKind === 'Active')}
+                  >
                     {activeKind === 'Active' ? 'Archive' : 'Restore'}
                   </button>
                 </div>
@@ -1024,7 +1074,9 @@ function DocumentsTab({ reservationId }) {
   const [uploading, setUploading] = useState(false);
 
   async function load() {
-    const { data } = await api.get(`/api/reservations/${reservationId}/documents`).catch(() => ({ data: [] }));
+    const { data } = await api
+      .get(`/api/reservations/${reservationId}/documents`)
+      .catch(() => ({ data: [] }));
     setDocs(data || []);
   }
   useEffect(() => {
@@ -1103,8 +1155,11 @@ function DocumentsTab({ reservationId }) {
           <div
             key={d.id}
             style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: 12, borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: 12,
+              borderBottom: '1px solid var(--border)',
             }}
           >
             <div>
@@ -1114,8 +1169,12 @@ function DocumentsTab({ reservationId }) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="secondary small" onClick={() => download(d)}>Download</button>
-              <button className="secondary small" onClick={() => remove(d.id)}>Remove</button>
+              <button className="secondary small" onClick={() => download(d)}>
+                Download
+              </button>
+              <button className="secondary small" onClick={() => remove(d.id)}>
+                Remove
+              </button>
             </div>
           </div>
         ))
@@ -1146,8 +1205,8 @@ function NotificationsTab({ notifications }) {
       <div className="panel">
         <h3>Notifications</h3>
         <p className="muted">
-          No confirmations have gone out yet. Confirming the booking sends one over every channel
-          the guest has an address for (email, and SMS/Viber to their phone).
+          No confirmations have gone out yet. Confirming the booking sends one over every channel the guest
+          has an address for (email, and SMS/Viber to their phone).
         </p>
       </div>
     );
@@ -1309,12 +1368,26 @@ function PayLinkTab({ res, folio }) {
 
 /* ============= Modals ============= */
 
-function CancelModal({ open, onClose, reservationId, onDone }) {
+function CancelModal({ open, onClose, reservationId, reservation, onDone }) {
   const toast = useToast();
   const [reason, setReason] = useState('Guest request');
   const [feePesos, setFeePesos] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  // Pre-fill with a terms-based suggestion each time the modal opens, rather
+  // than leaving it blank — staff can still edit it (e.g. for the Terms &
+  // Conditions' own Force Majeure/PAGASA carve-out).
+  useEffect(() => {
+    if (!open || !reservation) return;
+    const suggested = suggestedCancellationFeeCents({
+      totalEstimateCents: reservation.totalEstimateCents,
+      checkIn: reservation.checkIn,
+      method: reservation.paymentType,
+      isNonRefundable: reservation.isNonRefundable,
+    });
+    setFeePesos(centsToPesos(suggested));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, reservation?.id]);
   async function submit() {
     setBusy(true);
     try {
@@ -1702,6 +1775,7 @@ function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) 
     children: 0,
     source: 'DIRECT',
     paymentType: '',
+    depositPesos: '',
     ratePlan: '',
     origin: '',
     expectedArrivalTime: '',
@@ -1736,6 +1810,7 @@ function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) 
       children: res.children ?? 0,
       source: res.source || 'DIRECT',
       paymentType: res.paymentType || '',
+      depositPesos: res.depositCents ? String(centsToPesos(res.depositCents)) : '',
       ratePlan: res.ratePlan || '',
       origin: res.origin || '',
       expectedArrivalTime: res.expectedArrivalTime || '',
@@ -1782,10 +1857,7 @@ function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) 
 
   // What Save will actually do. See lib/quickEditPlan.js — the arrival branch is
   // subtle enough to be worth unit tests of its own.
-  const plan = useMemo(
-    () => planQuickEdit({ res: res || {}, stay, form }),
-    [res, stay, form]
-  );
+  const plan = useMemo(() => planQuickEdit({ res: res || {}, stay, form }), [res, stay, form]);
 
   async function submit() {
     if (!res) return;
@@ -1937,12 +2009,7 @@ function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) 
       <div className="row">
         <div>
           <label>Check-in date</label>
-          <input
-            type="date"
-            value={form.checkIn}
-            onChange={set('checkIn')}
-            disabled={plan.checkInLocked}
-          />
+          <input type="date" value={form.checkIn} onChange={set('checkIn')} disabled={plan.checkInLocked} />
           {plan.checkInLocked && (
             <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
               The guest has checked in — check-in is fixed.
@@ -2016,6 +2083,23 @@ function QuickEditModal({ open, onClose, res, stay, onDone, balanceCents = 0 }) 
             )}
           </select>
         </div>
+        <div>
+          {/* A publicly-created booking (the guest portal's self-service
+              widget) starts with no deposit at all — this is how staff record
+              one, which the Mandatory Downpayment Constraint then requires
+              before /confirm will move it out of PENDING. */}
+          <label>Deposit amount (₱)</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.depositPesos}
+            onChange={set('depositPesos')}
+            placeholder="Not yet recorded"
+          />
+        </div>
+      </div>
+      <div className="row">
         <div>
           <label>Rate plan</label>
           <input value={form.ratePlan} onChange={set('ratePlan')} placeholder="Base Rate" />
