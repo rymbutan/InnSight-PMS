@@ -34,6 +34,7 @@ export default function SimulatedPayment() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [paid, setPaid] = useState(false);
+  const [reference, setReference] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +50,8 @@ export default function SimulatedPayment() {
   async function confirm() {
     setBusy(true);
     try {
-      await api.post(`/api/public/payment-intents/${encodeURIComponent(token)}/confirm`);
+      const { data } = await api.post(`/api/public/payment-intents/${encodeURIComponent(token)}/confirm`);
+      setReference(data.reference || '');
       setPaid(true);
     } catch (e) {
       // The server answers 409 with the actual state, so the guest is told what
@@ -97,9 +99,12 @@ export default function SimulatedPayment() {
               ✓
             </div>
             <div className="pay-amount">{formatPeso(intent.amountCents)}</div>
-            <p>
-              Paid. The front desk has been notified — your folio is already updated.
-            </p>
+            <p>Paid. The front desk has been notified — your folio is already updated.</p>
+            {reference && (
+              <p className="pay-reference">
+                Reference: <strong>{reference}</strong>
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -138,8 +138,11 @@ const R = {
   ADMIN: 'ADMIN',
   MANAGER: 'MANAGER',
   FRONT_DESK: 'FRONT_DESK',
-  HOUSEKEEPING: 'HOUSEKEEPING',
-  MAINTENANCE: 'MAINTENANCE',
+  // Housekeeping and Maintenance were two separate roles; merged into one
+  // (Unified Staff Role) since the same on-the-ground staff clean/inspect
+  // rooms AND log/work maintenance tickets — a split role meant
+  // re-assigning every account that already did both jobs.
+  HOUSEKEEPING_MAINTENANCE: 'HOUSEKEEPING_MAINTENANCE',
   AUDITOR: 'AUDITOR',
 };
 const ROLE_GROUPS = {
@@ -153,12 +156,12 @@ const ROLE_GROUPS = {
   DESK_AUDIT: [R.ADMIN, R.MANAGER, R.FRONT_DESK, R.AUDITOR],
   // Operational day-sheets (arrivals/departures/in-house) — housekeeping genuinely
   // needs these to know which rooms to turn over, so they are not desk-only.
-  OPS_READ: [R.ADMIN, R.MANAGER, R.FRONT_DESK, R.HOUSEKEEPING, R.AUDITOR],
-  // Maintenance work: work orders, assets, parts.
-  MAINT: [R.ADMIN, R.MANAGER, R.MAINTENANCE],
+  OPS_READ: [R.ADMIN, R.MANAGER, R.FRONT_DESK, R.HOUSEKEEPING_MAINTENANCE, R.AUDITOR],
+  // Housekeeping & maintenance work: room status, inspections, work orders, assets.
+  MAINT: [R.ADMIN, R.MANAGER, R.HOUSEKEEPING_MAINTENANCE],
   // Non-sensitive shared reference data (room list, room types, facilities) that
   // every staff role needs to do its job. Deliberately still authenticated.
-  ALL_STAFF: [R.ADMIN, R.MANAGER, R.FRONT_DESK, R.HOUSEKEEPING, R.MAINTENANCE, R.AUDITOR],
+  ALL_STAFF: [R.ADMIN, R.MANAGER, R.FRONT_DESK, R.HOUSEKEEPING_MAINTENANCE, R.AUDITOR],
 };
 
 // Shared revocation store. Logout denylists a single `jti`; disabling a user,

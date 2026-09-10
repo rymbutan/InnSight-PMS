@@ -1,7 +1,68 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { computeTax, DEFAULT_TAX_RATES, TAX_COMPONENTS } = require('./policies');
+const {
+  computeTax,
+  DEFAULT_TAX_RATES,
+  TAX_COMPONENTS,
+  paymentProcessingFeeCents,
+  cancellationFeeCents,
+} = require('./policies');
+
+// Terms & Conditions, section 4 — same tiers as
+// services/reservation/src/lib/policies.test.js, since this is a kept-in-sync
+// copy of that file.
+const DAY = 24 * 3600 * 1000;
+
+test('cancellationFeeCents: >= 72h, CASH → flat PHP 200', () => {
+  assert.equal(
+    cancellationFeeCents({
+      totalEstimateCents: 1000000,
+      checkIn: new Date(Date.now() + 96 * 3600 * 1000),
+      method: 'CASH',
+    }),
+    20000
+  );
+});
+
+test('cancellationFeeCents: >= 72h, gateway rail → 3%', () => {
+  assert.equal(
+    cancellationFeeCents({
+      totalEstimateCents: 1000000,
+      checkIn: new Date(Date.now() + 96 * 3600 * 1000),
+      method: 'CARD',
+    }),
+    30000
+  );
+});
+
+test('cancellationFeeCents: 24-72h → 50%', () => {
+  assert.equal(
+    cancellationFeeCents({
+      totalEstimateCents: 1000000,
+      checkIn: new Date(Date.now() + 48 * 3600 * 1000),
+    }),
+    500000
+  );
+});
+
+test('cancellationFeeCents: < 24h or past check-in → 100%', () => {
+  assert.equal(
+    cancellationFeeCents({ totalEstimateCents: 1000000, checkIn: new Date(Date.now() - DAY) }),
+    1000000
+  );
+});
+
+test('cancellationFeeCents: non-refundable tier is always 100%', () => {
+  assert.equal(
+    cancellationFeeCents({
+      totalEstimateCents: 1000000,
+      checkIn: new Date(Date.now() + 30 * DAY),
+      isNonRefundable: true,
+    }),
+    1000000
+  );
+});
 
 // The reference invoice (FELISMINO-JANA-MARIE_GUEST-FOLIO.pdf): a room charge of
 // 25,350.00 P produces 3,042.00 VAT and 2,535.00 service charge. If these two
@@ -132,4 +193,23 @@ test('positive results are unchanged by the sign-aware rounding', () => {
   });
   const by = Object.fromEntries(breakdown.map((b) => [b.key, b.amountCents]));
   assert.equal(by.vat, 304200n, 'VAT at 12% of 25,350.00 is still exactly 304200');
+});
+
+test('paymentProcessingFeeCents computes a round-half-up percentage of the payment', () => {
+  assert.equal(paymentProcessingFeeCents({ amountCents: 500000n, feePercent: 2 }), 10000n);
+  assert.equal(paymentProcessingFeeCents({ amountCents: 150000n, feePercent: 2.5 }), 3750n);
+});
+
+test('paymentProcessingFeeCents is zero with no percent, a zero percent, or a missing one', () => {
+  assert.equal(paymentProcessingFeeCents({ amountCents: 500000n, feePercent: 0 }), 0n);
+  assert.equal(paymentProcessingFeeCents({ amountCents: 500000n }), 0n);
+  assert.equal(paymentProcessingFeeCents({ amountCents: 500000n, feePercent: -5 }), 0n);
+});
+
+test('paymentProcessingFeeCents handles a negative base (a refund of the fee itself) with the same sign', () => {
+  assert.equal(paymentProcessingFeeCents({ amountCents: -500000n, feePercent: 2 }), -10000n);
+});
+
+test('paymentProcessingFeeCents accepts a string amountCents, like every JSON-round-tripped BigInt in this codebase', () => {
+  assert.equal(paymentProcessingFeeCents({ amountCents: '500000', feePercent: 2 }), 10000n);
 });

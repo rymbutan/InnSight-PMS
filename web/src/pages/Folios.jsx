@@ -12,6 +12,48 @@ import SplitBillDialog from '../components/SplitBillDialog';
 import Modal from '../components/Modal';
 import { paymentMethodGroups, isEWallet } from '../lib/paymentMethods';
 
+// Mirrors ReservationDetail.jsx's CreditCardsTab — never a full card number,
+// only what a terminal receipt already shows.
+const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'JCB', 'OTHER'];
+const BANK_NAMES = ['BDO', 'BPI', 'Metrobank', 'UnionBank', 'Landbank', 'OTHER'];
+const TRANSFER_NETWORKS = ['InstaPay', 'PESONet', 'Direct OTC Deposit', 'Wire Transfer', 'OTHER'];
+const MAX_PROOF_BYTES = 10 * 1024 * 1024;
+
+// 'YYYY-MM-DDTHH:mm' in LOCAL time, what <input type="datetime-local"> both
+// accepts and returns — toISOString() would shift this to UTC and silently
+// move the displayed time.
+function nowForDateTimeLocal() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.readAsDataURL(file);
+  });
+}
+
+const EMPTY_PAYMENT = {
+  method: 'CASH',
+  amount: '',
+  cardBrand: 'VISA',
+  cardLast4: '',
+  cardholderName: '',
+  gatewayRef: '',
+  bankName: 'BDO',
+  bankNameOther: '',
+  transferNetwork: 'InstaPay',
+  transferNetworkOther: '',
+  senderName: '',
+  bankRef: '',
+  transferredAt: '',
+  proofFile: null,
+};
+
 export default function Folios() {
   const [searchParams] = useSearchParams();
   const toast = useToast();
@@ -20,7 +62,17 @@ export default function Folios() {
   const [folio, setFolio] = useState(null);
   const [statement, setStatement] = useState(null);
   const [charge, setCharge] = useState({ chargeCode: '', description: '', amount: '' });
-  const [payment, setPayment] = useState({ method: 'CASH', amount: '' });
+  // Everything past `method`/`amount` only matters for CARD/BANK_TRANSFER
+  // (see the Payment tab below) — never a full card number, matching the
+  // guarantee-card-on-file rule in ReservationDetail.jsx's CreditCardsTab.
+  const [payment, setPayment] = useState(EMPTY_PAYMENT);
+  const [processingPayment, setProcessingPayment] = useState(false);
+  const [uploadingProof, setUploadingProof] = useState(false);
+  // The CARD/BANK_TRANSFER surcharge (Settings' Payment Processing Fee card) —
+  // fetched once so the Amount field can preview it before posting; the
+  // server computes and posts the real charge independently, so a stale
+  // preview here can never desync the actual fee charged.
+  const [paymentFeePercent, setPaymentFeePercent] = useState(0);
   const [deposit, setDeposit] = useState({ method: 'CASH', amount: '' });
   const [codes, setCodes] = useState([]);
   // Bill splitting: the other open folios on the same stay, and which transaction
@@ -65,6 +117,10 @@ export default function Folios() {
       .get('/api/charge-codes')
       .then((r) => setCodes(r.data))
       .catch(() => {});
+    api
+      .get('/api/settings/payment-fee-percent')
+      .then((r) => setPaymentFeePercent(r.data.feePercent))
+      .catch(() => {}); // 0% default already set; a failed fetch just keeps it
   }, []);
 
   async function load(id) {
@@ -133,7 +189,9 @@ export default function Folios() {
     try {
       await api.post(`/api/payment-disputes/${disputeId}/resolve`, { decision });
       toast.success(
-        decision === 'APPROVED' ? 'Dispute approved — refund posted.' : `Dispute marked ${decision.toLowerCase()}.`
+        decision === 'APPROVED'
+          ? 'Dispute approved — refund posted.'
+          : `Dispute marked ${decision.toLowerCase()}.`
       );
       loadDisputes(folioId);
       load(folioId);
@@ -257,9 +315,16 @@ export default function Folios() {
       .then((r) => {
         if (cancelled) return;
         setSiblings(r.data.filter((f) => f.id !== folio.id && f.status === 'OPEN'));
-        // Every folio on a stay shares its guest, so the first name present is
-        // the right one whichever row it came from.
-        setStayGuestName(r.data.find((f) => f.guestName)?.guestName || '');
+        // Every folio on a stay shares its guest, but a SPLIT folio's own
+        // guestName is its distinct payer (e.g. "Andrei Sumilang"), not the
+        // stay's guest — prefer a row with no payerName of its own first, and
+        // only fall back to whichever name is present if every folio on this
+        // stay happens to have a distinct payer.
+        setStayGuestName(
+          r.data.find((f) => f.guestName && !f.payerName)?.guestName ||
+            r.data.find((f) => f.guestName)?.guestName ||
+            ''
+        );
       })
       .catch(() => {
         if (cancelled) return;
@@ -318,18 +383,108 @@ export default function Folios() {
       toast.error(errMsg(e));
     }
   }
+  // Required fields per method — checked here so the "Post payment" button
+  // never even reaches the server with something it will reject anyway (the
+  // server enforces the SAME rules independently — see
+  // missingPaymentField() in folio.routes.js — this is just the fast,
+  // in-modal feedback for it).
+  function missingPaymentField() {
+    const p = payment;
+    if (p.method === 'CARD') {
+      if (!/^\d{4}$/.test(p.cardLast4)) return 'Enter the last 4 digits of the card.';
+      if (!p.cardholderName.trim()) return 'Cardholder name is required.';
+    }
+    if (p.method === 'BANK_TRANSFER') {
+      if (p.bankName === 'OTHER' && !p.bankNameOther.trim()) return 'Enter the bank name.';
+      if (p.transferNetwork === 'OTHER' && !p.transferNetworkOther.trim()) {
+        return 'Enter the transfer network/channel.';
+      }
+      if (!p.senderName.trim()) return "Sender/account holder's name is required.";
+      if (!p.bankRef.trim()) return 'Bank reference/control number is required.';
+      // transferredAt is NOT required here: the field's own displayed default
+      // is "now" (see the input's value fallback below), and that default is
+      // sent as-is if the field was never touched — see postPayment.
+    }
+    return null;
+  }
+
+  // CARD and BANK_TRANSFER are the two methods with something to simulate
+  // processing THROUGH — a terminal authorization, a bank confirming a
+  // transfer — so those two get the extra fields below and a brief
+  // simulated "Processing…" delay before posting, the same shape the QR
+  // flow's own confirm step has (SimulatedPayment.jsx). Cash and a manual
+  // e-wallet entry stay instant: there's no gateway behind either.
   async function postPayment(e) {
     e.preventDefault();
+    const method = payment.method;
+    const missing = missingPaymentField();
+    if (missing) return toast.error(missing);
+
     try {
-      await api.post(`/api/folios/${folioId}/payments`, {
-        method: payment.method,
+      setProcessingPayment(method === 'CARD' || method === 'BANK_TRANSFER');
+      if (method === 'CARD' || method === 'BANK_TRANSFER') {
+        // Simulated gateway/bank latency — nothing here talks to a real
+        // processor, but a payment that resolves instantly teaches the wrong
+        // lesson about what "processing" a card or a transfer feels like.
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      }
+      const { data } = await api.post(`/api/folios/${folioId}/payments`, {
+        method,
         amountCents: pesosToCents(payment.amount),
+        ...(method === 'CARD' && {
+          cardMasked: `${payment.cardBrand} •••• ${payment.cardLast4}`,
+          cardholderName: payment.cardholderName.trim(),
+        }),
+        // Blank fields are NOT sent as '' — the server falls back to
+        // simulateGatewayRef() only when the field is genuinely absent, so a
+        // typed-in gateway transaction number always wins for CARD. BANK_
+        // TRANSFER's reference is required above, so it is always sent.
+        ...(method === 'CARD' && payment.gatewayRef.trim() && { reference: payment.gatewayRef.trim() }),
+        ...(method === 'BANK_TRANSFER' && {
+          bankName: payment.bankName === 'OTHER' ? payment.bankNameOther.trim() : payment.bankName,
+          transferNetwork:
+            payment.transferNetwork === 'OTHER'
+              ? payment.transferNetworkOther.trim()
+              : payment.transferNetwork,
+          senderName: payment.senderName.trim(),
+          reference: payment.bankRef.trim(),
+          // Falls back to "now" if the field was never touched — matches
+          // what the (otherwise identical) input already displays.
+          transferredAt: new Date(payment.transferredAt || nowForDateTimeLocal()).toISOString(),
+        }),
       });
-      toast.success('Payment posted.');
-      setPayment({ method: 'CASH', amount: '' });
+
+      // The proof slip/screenshot, if one was picked, uploads AFTER the
+      // payment exists — the proof route is keyed by paymentId. A failed
+      // upload does not undo the payment: it already happened, and staff can
+      // retry attaching evidence for it separately (see the ledger's
+      // collapsed details, which offer an upload/replace control per payment).
+      if (method === 'BANK_TRANSFER' && payment.proofFile) {
+        setUploadingProof(true);
+        try {
+          const contentBase64 = await readFileAsBase64(payment.proofFile);
+          await api.post(`/api/folios/${folioId}/payments/${data.id}/proof`, {
+            filename: payment.proofFile.name,
+            contentType: payment.proofFile.type || 'application/octet-stream',
+            contentBase64,
+          });
+        } catch (proofErr) {
+          toast.error(`Payment posted, but the proof upload failed: ${errMsg(proofErr)}`);
+        } finally {
+          setUploadingProof(false);
+        }
+      }
+
+      const feeNote = Number(data.feeCents) > 0 ? ` (+ ${formatPeso(data.feeCents)} processing fee)` : '';
+      toast.success(
+        data.gatewayRef ? `Payment posted — Ref: ${data.gatewayRef}${feeNote}` : `Payment posted.${feeNote}`
+      );
+      setPayment(EMPTY_PAYMENT);
       load();
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setProcessingPayment(false);
     }
   }
   async function postDeposit(e) {
@@ -374,7 +529,8 @@ export default function Folios() {
   useEffect(() => {
     if (!qr || !statement) return;
     const paid = (statement.folio.payments || []).some(
-      (p) => String(p.amountCents) === String(qr.amountCents) && new Date(p.createdAt) > new Date(qr.issuedAt || 0)
+      (p) =>
+        String(p.amountCents) === String(qr.amountCents) && new Date(p.createdAt) > new Date(qr.issuedAt || 0)
     );
     if (paid) {
       setQr(null);
@@ -424,7 +580,47 @@ export default function Folios() {
   // by a split — see folio.payerName) takes priority over the stay's overall
   // guest, since a split folio bills a specific person, not necessarily
   // whoever occupies the room. A walk-in folio has neither.
-  const headerGuestName = folio?.payerName || folio?.guestName || stayGuestName || 'Walk-in / no guest on file';
+  const headerGuestName =
+    folio?.payerName || folio?.guestName || stayGuestName || 'Walk-in / no guest on file';
+
+  // The Payment row behind a PAYMENT-type ledger transaction — every payment-
+  // posting route sets FolioTransaction.reference to the Payment's own id
+  // (see folio.routes.js's comment on why that must never be gatewayRef),
+  // which is exactly what makes this lookup possible.
+  function paymentForTransaction(t) {
+    if (t.type !== 'PAYMENT' || !t.reference) return null;
+    return (folio.payments || []).find((p) => p.id === t.reference) || null;
+  }
+
+  // The one-line summary a collapsed <details> shows under a payment line —
+  // "Card: Visa ****4321 | Ref: TXN-99812" / "Bank: BDO (InstaPay) | Ref:
+  // 20260910-8812" — falling back to a bare reference line for any other
+  // method that has one (QR/e-wallet's SIM-…), and nothing at all for a
+  // payment with no gateway/bank behind it (cash, or an e-wallet entry with
+  // no reference typed in).
+  function paymentSummaryTag(p) {
+    if (!p) return null;
+    if (p.method === 'CARD' && (p.cardMasked || p.gatewayRef)) {
+      return `Card: ${p.cardMasked || '—'}${p.gatewayRef ? ` | Ref: ${p.gatewayRef}` : ''}`;
+    }
+    if (p.method === 'BANK_TRANSFER' && (p.bankName || p.gatewayRef)) {
+      const bank = p.transferNetwork ? `${p.bankName} (${p.transferNetwork})` : p.bankName;
+      return `Bank: ${bank || '—'}${p.gatewayRef ? ` | Ref: ${p.gatewayRef}` : ''}`;
+    }
+    if (p.gatewayRef) return `Ref: ${p.gatewayRef}`;
+    return null;
+  }
+
+  async function viewPaymentProof(p) {
+    try {
+      await downloadAuthed(`/api/folios/${folioId}/payments/${p.id}/proof`, {
+        filename: p.proof?.filename || 'proof',
+        openInTab: true,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
 
   // Shared between the Payment and Deposit tabs — one method list, one place
   // that renders it as <option>s or <optgroup>s.
@@ -503,8 +699,8 @@ export default function Folios() {
             {listMode !== 'browse' && (
               <div className="guest-isolated-bar">
                 <span>
-                  {results.length === 1 ? '1 match' : `${results.length} matches`} for “{q}” — choose
-                  one, or press Enter.
+                  {results.length === 1 ? '1 match' : `${results.length} matches`} for “{q}” — choose one, or
+                  press Enter.
                 </span>
                 <button type="button" className="small secondary" onClick={clearFolioSearch}>
                   Show all folios
@@ -517,6 +713,12 @@ export default function Folios() {
                   <th className="t-c"></th>
                   <th>Folio #</th>
                   <th>Guest</th>
+                  {/* SPLIT when another folio shares this one's stay (a bill split
+                      into several payers), SOLO otherwise — see lib/folioList.js.
+                      Also what makes the Guest column above trustworthy: a split
+                      folio's own payer (e.g. "Andrei Sumilang"), not the stay's
+                      original guest repeated on every row. */}
+                  <th className="t-c">Type of Charge</th>
                   <th className="t-c">Status</th>
                   <th style={{ textAlign: 'right' }}>Balance</th>
                 </tr>
@@ -545,6 +747,11 @@ export default function Folios() {
                     <td>{f.folioNumber}</td>
                     <td>{f.guestName || <span className="muted">—</span>}</td>
                     <td className="t-c">
+                      <span className={`badge ${f.chargeType === 'SPLIT' ? 'split' : 'solo'}`}>
+                        {f.chargeType === 'SPLIT' ? 'Split' : 'Solo Charge'}
+                      </span>
+                    </td>
+                    <td className="t-c">
                       <span className={`badge ${String(f.status).toLowerCase()}`}>{f.status}</span>
                     </td>
                     <td style={{ textAlign: 'right' }}>
@@ -568,7 +775,7 @@ export default function Folios() {
             <div className="folio-summary-top">
               <div className="folio-summary-guest">
                 <Avatar name={headerGuestName} size={40} />
-                <div>
+                <div className="folio-summary-nameline">
                   <div className="folio-summary-name">{headerGuestName}</div>
                   <div className="folio-summary-sub">
                     Folio {folio.folioNumber}
@@ -611,8 +818,7 @@ export default function Folios() {
               <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
                 This stay has {siblings.length + 1} open folios:{' '}
                 {[folio, ...siblings].map((f) => f.folioNumber).join(', ')}. Use <strong>Move</strong> on a
-                charge to put it on another folio. Every folio must be settled before the guest can check
-                out.
+                charge to put it on another folio. Every folio must be settled before the guest can check out.
               </p>
             )}
             <div className="metrics">
@@ -645,6 +851,7 @@ export default function Folios() {
                       <th className="t-c">Type</th>
                       <th>Code</th>
                       <th>Description</th>
+                      <th>Reference</th>
                       <th style={{ textAlign: 'right' }}>Amount</th>
                       {/* Tax was invisible here while every charge carried zero
                           of it. Now that charges attract VAT and service
@@ -656,58 +863,119 @@ export default function Folios() {
                     </tr>
                   </thead>
                   <tbody>
-                    {folio.transactions.map((t) => (
-                      <tr key={t.id}>
-                        <td>{new Date(t.postedAt).toLocaleDateString()}</td>
-                        <td className="t-c">
-                          <span className={`badge ${t.type.toLowerCase()}`}>{t.type}</span>
-                        </td>
-                        <td>{t.chargeCode || '—'}</td>
-                        <td>{t.description}</td>
-                        <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
-                        {/* taxAmountCents arrives as a decimal STRING (BigInt has no
-                            JSON form); formatPeso takes either. Compared as a
-                            string rather than parsed — there is no arithmetic to do
-                            here, and money must never touch a float. A row with no
-                            tax shows a dash rather than 0.00, so a genuinely
-                            untaxed line reads as untaxed at a glance. */}
-                        <td style={{ textAlign: 'right' }}>
-                          {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
-                            ? '—'
-                            : formatPeso(t.taxAmountCents)}
-                        </td>
-                        {siblings.length > 0 && (
-                          <td style={{ textAlign: 'right' }}>
-                            {/* Payments stay where they were taken, and a transfer cannot
-                                itself be transferred — the service refuses both, so the
-                                control is not offered for them. */}
-                            {folio.status === 'OPEN' &&
-                              t.type !== 'PAYMENT' &&
-                              t.type !== 'REFUND' &&
-                              t.type !== 'TRANSFER' &&
-                              (moving === t.id ? (
-                                <select
-                                  autoFocus
-                                  defaultValue=""
-                                  onBlur={() => setMoving(null)}
-                                  onChange={(e) => moveTransaction(t.id, e.target.value)}
-                                >
-                                  <option value="">Move to…</option>
-                                  {siblings.map((f) => (
-                                    <option key={f.id} value={f.id}>
-                                      {f.folioNumber}
-                                    </option>
-                                  ))}
-                                </select>
+                    {folio.transactions.map((t) => {
+                      const linkedPayment = paymentForTransaction(t);
+                      const summaryTag = paymentSummaryTag(linkedPayment);
+                      // Extra gateway/bank metadata beyond the one-line summary — only
+                      // CARD (a cardholder name) and BANK_TRANSFER (sender, transfer
+                      // date, and always either a proof link or "no proof on file")
+                      // ever have any, so a Ref-only tag (e-wallet/QR) or cash gets no
+                      // expando at all rather than an empty one.
+                      const hasExtra =
+                        linkedPayment &&
+                        ((linkedPayment.method === 'CARD' && linkedPayment.cardholderName) ||
+                          linkedPayment.method === 'BANK_TRANSFER');
+                      return (
+                        <tr key={t.id}>
+                          <td>{new Date(t.postedAt).toLocaleDateString()}</td>
+                            <td className="t-c">
+                              <span className={`badge ${t.type.toLowerCase()}`}>{t.type}</span>
+                            </td>
+                            <td>{t.chargeCode || '—'}</td>
+                            <td>{t.description}</td>
+                            {/* The gateway/bank reference now lives in its own column
+                                instead of a full-width row under the date — a payment
+                                with nothing to show (cash, or an e-wallet entry with no
+                                typed-in reference) just reads as "—", same as Code. */}
+                            <td>
+                              {summaryTag ? (
+                                hasExtra ? (
+                                  <details className="payment-tx-details">
+                                    <summary>{summaryTag}</summary>
+                                    <div className="payment-tx-details-body">
+                                      {linkedPayment.method === 'CARD' && linkedPayment.cardholderName && (
+                                        <div>Cardholder: {linkedPayment.cardholderName}</div>
+                                      )}
+                                      {linkedPayment.method === 'BANK_TRANSFER' && (
+                                        <>
+                                          {linkedPayment.senderName && (
+                                            <div>Sender: {linkedPayment.senderName}</div>
+                                          )}
+                                          {linkedPayment.transferredAt && (
+                                            <div>
+                                              Transferred:{' '}
+                                              {new Date(linkedPayment.transferredAt).toLocaleString()}
+                                            </div>
+                                          )}
+                                          {linkedPayment.proof ? (
+                                            <div>
+                                              <button
+                                                type="button"
+                                                className="secondary small"
+                                                onClick={() => viewPaymentProof(linkedPayment)}
+                                              >
+                                                View proof ({linkedPayment.proof.filename})
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div className="muted">No proof of transfer on file.</div>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </details>
+                                ) : (
+                                  summaryTag
+                                )
                               ) : (
-                                <button className="secondary small" onClick={() => setMoving(t.id)}>
-                                  Move
-                                </button>
-                              ))}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
+                                '—'
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                            {/* taxAmountCents arrives as a decimal STRING (BigInt has no
+                                JSON form); formatPeso takes either. Compared as a
+                                string rather than parsed — there is no arithmetic to do
+                                here, and money must never touch a float. A row with no
+                                tax shows a dash rather than 0.00, so a genuinely
+                                untaxed line reads as untaxed at a glance. */}
+                            <td style={{ textAlign: 'right' }}>
+                              {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
+                                ? '—'
+                                : formatPeso(t.taxAmountCents)}
+                            </td>
+                            {siblings.length > 0 && (
+                              <td style={{ textAlign: 'right' }}>
+                                {/* Payments stay where they were taken, and a transfer cannot
+                                    itself be transferred — the service refuses both, so the
+                                    control is not offered for them. */}
+                                {folio.status === 'OPEN' &&
+                                  t.type !== 'PAYMENT' &&
+                                  t.type !== 'REFUND' &&
+                                  t.type !== 'TRANSFER' &&
+                                  (moving === t.id ? (
+                                    <select
+                                      autoFocus
+                                      defaultValue=""
+                                      onBlur={() => setMoving(null)}
+                                      onChange={(e) => moveTransaction(t.id, e.target.value)}
+                                    >
+                                      <option value="">Move to…</option>
+                                      {siblings.map((f) => (
+                                        <option key={f.id} value={f.id}>
+                                          {f.folioNumber}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <button className="secondary small" onClick={() => setMoving(t.id)}>
+                                      Move
+                                    </button>
+                                  ))}
+                              </td>
+                            )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -721,6 +989,13 @@ export default function Folios() {
                         <th>Date</th>
                         <th>Method</th>
                         <th>Status</th>
+                        {/* The gateway/bank reference a real terminal or bank statement
+                            would show — CARD gets an "AUTH-…" code, BANK_TRANSFER a
+                            "BANKREF-…" number, a QR/e-wallet payment its "SIM-…" one
+                            (see lib/paymentMethods.js's simulateGatewayRef and the QR
+                            confirm route). Cash carries none — there's no gateway
+                            behind it — so that row's cell reads "—". */}
+                        <th>Reference</th>
                         <th style={{ textAlign: 'right' }}>Amount</th>
                         <th />
                       </tr>
@@ -733,6 +1008,7 @@ export default function Folios() {
                           <td>
                             <span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span>
                           </td>
+                          <td className="payment-reference">{p.gatewayRef || '—'}</td>
                           <td style={{ textAlign: 'right' }}>{formatPeso(p.amountCents)}</td>
                           <td style={{ textAlign: 'right' }}>
                             {/* A voided or failed payment has no receipt — the service
@@ -903,11 +1179,206 @@ export default function Folios() {
                         value={payment.amount}
                         onChange={(e) => setPayment({ ...payment, amount: e.target.value })}
                       />
+
+                      {/* A preview only — the server computes and posts the real fee
+                          independently (see policies.js's paymentProcessingFeeCents),
+                          so this can never desync what actually lands on the folio. */}
+                      {(payment.method === 'CARD' || payment.method === 'BANK_TRANSFER') &&
+                        paymentFeePercent > 0 &&
+                        Number(payment.amount) > 0 && (
+                          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            + Processing fee ({paymentFeePercent}%):{' '}
+                            {formatPeso(Math.round(pesosToCents(payment.amount) * (paymentFeePercent / 100)))}
+                            {' — Total added to folio: '}
+                            {formatPeso(
+                              pesosToCents(payment.amount) +
+                                Math.round(pesosToCents(payment.amount) * (paymentFeePercent / 100))
+                            )}
+                          </p>
+                        )}
+
+                      {/* A card terminal reads the card, not a typed-in number — this
+                          asks only for what a receipt would show (brand + last 4 +
+                          cardholder name), same rule as the guarantee-card-on-file
+                          tab. Confirming simulates the terminal authorizing it (see
+                          postPayment). */}
+                      {payment.method === 'CARD' && (
+                        <>
+                          <div className="row" style={{ marginTop: 10 }}>
+                            <div>
+                              <label>Card brand</label>
+                              <select
+                                value={payment.cardBrand}
+                                onChange={(e) => setPayment({ ...payment, cardBrand: e.target.value })}
+                              >
+                                {CARD_BRANDS.map((b) => (
+                                  <option key={b} value={b}>
+                                    {b}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Last 4 digits</label>
+                              <input
+                                required
+                                inputMode="numeric"
+                                maxLength={4}
+                                placeholder="4242"
+                                value={payment.cardLast4}
+                                onChange={(e) =>
+                                  setPayment({
+                                    ...payment,
+                                    cardLast4: e.target.value.replace(/\D/g, '').slice(0, 4),
+                                  })
+                                }
+                              />
+                            </div>
+                          </div>
+                          <label style={{ marginTop: 10 }}>Cardholder name</label>
+                          <input
+                            required
+                            placeholder="As printed on the card"
+                            value={payment.cardholderName}
+                            onChange={(e) => setPayment({ ...payment, cardholderName: e.target.value })}
+                          />
+                          {/* Optional: staff can type in the ACTUAL authorization code a
+                              real terminal printed. Left blank, the server simulates
+                              one (AUTH-…) — see lib/paymentMethods.js's
+                              simulateGatewayRef. */}
+                          <label style={{ marginTop: 10 }}>Transaction / Authorization code (optional)</label>
+                          <input
+                            placeholder="Gateway transaction ID or POS approval code — leave blank to simulate one"
+                            value={payment.gatewayRef}
+                            onChange={(e) => setPayment({ ...payment, gatewayRef: e.target.value })}
+                          />
+                        </>
+                      )}
+
+                      {/* Bank transfer has nothing to simulate a control number FROM —
+                          every field here is required before the transfer counts as
+                          confirmed (see missingPaymentField, both here and server-side
+                          in folio.routes.js). */}
+                      {payment.method === 'BANK_TRANSFER' && (
+                        <>
+                          <div className="row" style={{ marginTop: 10 }}>
+                            <div>
+                              <label>Bank name</label>
+                              <select
+                                value={payment.bankName}
+                                onChange={(e) => setPayment({ ...payment, bankName: e.target.value })}
+                              >
+                                {BANK_NAMES.map((b) => (
+                                  <option key={b} value={b}>
+                                    {b === 'OTHER' ? 'Other — type your own…' : b}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Transfer network / channel</label>
+                              <select
+                                value={payment.transferNetwork}
+                                onChange={(e) => setPayment({ ...payment, transferNetwork: e.target.value })}
+                              >
+                                {TRANSFER_NETWORKS.map((n) => (
+                                  <option key={n} value={n}>
+                                    {n === 'OTHER' ? 'Other — type your own…' : n}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          {payment.bankName === 'OTHER' && (
+                            <input
+                              required
+                              style={{ marginTop: 8 }}
+                              placeholder="Bank name"
+                              value={payment.bankNameOther}
+                              onChange={(e) => setPayment({ ...payment, bankNameOther: e.target.value })}
+                            />
+                          )}
+                          {payment.transferNetwork === 'OTHER' && (
+                            <input
+                              required
+                              style={{ marginTop: 8 }}
+                              placeholder="Transfer network / channel"
+                              value={payment.transferNetworkOther}
+                              onChange={(e) =>
+                                setPayment({ ...payment, transferNetworkOther: e.target.value })
+                              }
+                            />
+                          )}
+
+                          <label style={{ marginTop: 10 }}>Sender / account holder name</label>
+                          <input
+                            required
+                            value={payment.senderName}
+                            onChange={(e) => setPayment({ ...payment, senderName: e.target.value })}
+                          />
+
+                          <label style={{ marginTop: 10 }}>Bank reference / control number</label>
+                          <input
+                            required
+                            placeholder="Mandatory transaction ID from the slip or app"
+                            value={payment.bankRef}
+                            onChange={(e) => setPayment({ ...payment, bankRef: e.target.value })}
+                          />
+
+                          <label style={{ marginTop: 10 }}>Transfer date &amp; time</label>
+                          <input
+                            required
+                            type="datetime-local"
+                            value={payment.transferredAt || nowForDateTimeLocal()}
+                            onChange={(e) => setPayment({ ...payment, transferredAt: e.target.value })}
+                          />
+
+                          <label style={{ marginTop: 10 }}>Proof of transfer / deposit slip (optional)</label>
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              if (file && file.size > MAX_PROOF_BYTES) {
+                                toast.error(
+                                  `File is too large — max ${(MAX_PROOF_BYTES / (1024 * 1024)).toFixed(0)}MB.`
+                                );
+                                e.target.value = '';
+                                return;
+                              }
+                              setPayment({ ...payment, proofFile: file });
+                            }}
+                          />
+                          {payment.proofFile && (
+                            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                              {payment.proofFile.name} ({(payment.proofFile.size / 1024).toFixed(0)} KB)
+                            </p>
+                          )}
+                        </>
+                      )}
+
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
-                        <button>Post payment</button>
-                        <button type="button" className="secondary" onClick={chargeByQr}>
-                          Charge by QR
+                        <button disabled={processingPayment || uploadingProof}>
+                          {processingPayment
+                            ? 'Processing…'
+                            : uploadingProof
+                              ? 'Uploading proof…'
+                              : 'Post payment'}
                         </button>
+                        {/* QR/pay-by-link only makes sense for an e-wallet — CARD and
+                            BANK_TRANSFER already have their own dedicated fields above,
+                            and CASH is handed over in person, so none of the three ever
+                            had a QR to scan. */}
+                        {isEWallet(payment.method) && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={chargeByQr}
+                            disabled={processingPayment || uploadingProof}
+                          >
+                            Charge by QR
+                          </button>
+                        )}
                       </div>
                     </form>
 
@@ -922,18 +1393,18 @@ export default function Folios() {
                             <p className="muted">
                               {/* Honest about the offline case: a phone resolving localhost
                                   reaches itself, so the code cannot be scanned from one. */}
-                              This code points at <code>localhost</code>, so it can only be opened on
-                              this machine. Open the link in another tab to demonstrate, or set{' '}
-                              <code>PUBLIC_BASE_URL</code> to this machine&rsquo;s network address to
-                              make it scannable.
+                              This code points at <code>localhost</code>, so it can only be opened on this
+                              machine. Open the link in another tab to demonstrate, or set{' '}
+                              <code>PUBLIC_BASE_URL</code> to this machine&rsquo;s network address to make it
+                              scannable.
                             </p>
                           )}
                           <a href={qr.url} target="_blank" rel="noreferrer" className="qr-charge-link">
                             {qr.url}
                           </a>
                           <p className="muted" style={{ fontSize: 12 }}>
-                            Expires {new Date(qr.expiresAt).toLocaleTimeString()}. The folio updates
-                            itself when the guest confirms.
+                            Expires {new Date(qr.expiresAt).toLocaleTimeString()}. The folio updates itself
+                            when the guest confirms.
                           </p>
                           <button className="secondary small" onClick={() => setQr(null)}>
                             Dismiss

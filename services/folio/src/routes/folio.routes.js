@@ -13,17 +13,29 @@ const { send: sendMail } = require('../lib/notifier');
 const { qrPngBuffer, qrDataUrl } = require('../lib/qr');
 const { newToken, intentState, INTENT_TTL_MS, LINK_TTL_MS } = require('../lib/paymentIntent');
 const { publicUrl } = require('../lib/publicUrl');
-const { validateTaxRates, validateHotel } = require('../lib/settings');
-const { getTaxRates, getHotel, saveTaxRates, saveHotel } = require('../lib/settingsStore');
-const { computeTax } = require('../lib/policies');
+const { validateTaxRates, validateHotel, validatePaymentFeePercent } = require('../lib/settings');
+const {
+  getTaxRates,
+  getHotel,
+  saveTaxRates,
+  saveHotel,
+  getPaymentFeePercent,
+  savePaymentFeePercent,
+} = require('../lib/settingsStore');
+const { computeTax, paymentProcessingFeeCents } = require('../lib/policies');
 const { postRefund } = require('../lib/refund');
-const { PAYMENT_METHODS, isEWallet } = require('../lib/paymentMethods');
+const { PAYMENT_METHODS, isEWallet, simulateGatewayRef } = require('../lib/paymentMethods');
+const storage = require('../lib/storage');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const FINANCE = ['ADMIN', 'MANAGER', 'AUDITOR'];
 // Front-desk cashiering: open folios and post charges/payments/deposits.
 // (ADMIN is included so the night-audit service token can post room charges.)
 const CASHIER = ['ADMIN', 'MANAGER', 'FRONT_DESK'];
+// Same ceiling as the reservation service's own document uploads
+// (services/reservation/src/routes/reservation.routes.js) — a deposit slip
+// photo or PDF, not a large file.
+const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 
 const INVENTORY_URL = process.env.INVENTORY_URL || 'http://inventory-service:3005';
 const GUEST_URL = process.env.GUEST_URL || 'http://guest-service:3008';
@@ -419,6 +431,32 @@ router.put('/settings/hotel', requireRole(...ROLE_GROUPS.MGMT), async (req, res)
   }
 });
 
+// GET /api/settings/payment-fee-percent — the CARD/BANK_TRANSFER surcharge
+// percentage (see POST /folios/:id/payments and policies.js's
+// paymentProcessingFeeCents). 0 until an operator sets one.
+router.get('/settings/payment-fee-percent', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
+  try {
+    res.json({ feePercent: await getPaymentFeePercent() });
+  } catch (err) {
+    console.error('[Folio] Get payment fee percent error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PUT /api/settings/payment-fee-percent — management only. Changes what a
+// guest paying by card or bank transfer is charged from this point on;
+// already-posted fees are untouched.
+router.put('/settings/payment-fee-percent', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
+  try {
+    const result = validatePaymentFeePercent(req.body || {});
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ feePercent: await savePaymentFeePercent(result.feePercent) });
+  } catch (err) {
+    console.error('[Folio] Set payment fee percent error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/folios?q=&status=&stayId=&guestId=
 //
 // `q` matches two ways, unioned: the folio number in this service's own
@@ -437,9 +475,7 @@ router.get('/folios', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) =
     if (term) {
       // Guest-name matches come from the guest service; a failure there narrows
       // the search to folio numbers rather than failing it.
-      const matches = await fetchJsonOrNull(
-        `${GUEST_URL}/api/guests/search?q=${encodeURIComponent(term)}`
-      );
+      const matches = await fetchJsonOrNull(`${GUEST_URL}/api/guests/search?q=${encodeURIComponent(term)}`);
       const guestIds = (matches || []).map((g) => g.id).filter(Boolean);
       where.OR = [
         { folioNumber: { contains: term, mode: 'insensitive' } },
@@ -478,7 +514,31 @@ router.get('/folios', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) =
       for (const g of guests || []) names.set(g.id, g.displayName);
     }
 
-    res.json(folios.map((f) => folioListRow(f, codes, names.get(f.guestId))));
+    // Whether a stay's bill was split: a stay with MORE THAN ONE folio on it.
+    // Counted across ALL folios on that stay, not just the ones matching this
+    // page's search/filter — a split-off folio must still read as "Split"
+    // even if the current search term happens to match only the other one.
+    // One groupBy for the whole page, not a query per row.
+    const stayIds = [...new Set(folios.map((f) => f.stayId).filter(Boolean))];
+    const splitStayIds = new Set();
+    if (stayIds.length) {
+      const counts = await prisma.folio.groupBy({
+        by: ['stayId'],
+        where: { stayId: { in: stayIds } },
+        _count: { _all: true },
+      });
+      for (const c of counts) {
+        if (c._count._all > 1) splitStayIds.add(c.stayId);
+      }
+    }
+
+    res.json(
+      folios.map((f) =>
+        folioListRow(f, codes, names.get(f.guestId), {
+          isSplit: f.stayId ? splitStayIds.has(f.stayId) : false,
+        })
+      )
+    );
   } catch (err) {
     console.error('[Folio] List folios error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -648,7 +708,7 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
   try {
     const folio = await prisma.folio.findUnique({
       where: { id: req.params.id },
-      include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: true },
+      include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: { include: { proof: true } } },
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
@@ -681,7 +741,7 @@ router.get('/folios/:id/statement', requireRole(...ROLE_GROUPS.DESK_AUDIT), asyn
   try {
     const folio = await prisma.folio.findUnique({
       where: { id: req.params.id },
-      include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: true },
+      include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: { include: { proof: true } } },
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
@@ -818,26 +878,105 @@ router.post('/folios/:id/charges', requireRole(...CASHIER), async (req, res) => 
   }
 });
 
+// A method's own required fields, checked BEFORE anything is written — never
+// trust the client-side modal alone to have enforced them (see
+// NewReservation.jsx-style comments elsewhere in this codebase about
+// authoritative server-side checks). Returns an error string, or null when
+// the payload is complete enough to post.
+//
+// Card: brand+last4 (cardMasked) and the cardholder's name are required —
+// what a receipt already shows. The transaction/authorization code is NOT
+// required here: a real terminal doesn't always hand the cashier one to
+// copy, so it falls back to a simulated "AUTH-…" code (simulateGatewayRef)
+// exactly like before.
+//
+// Bank transfer: bank, network, sender name AND the bank's own reference/
+// control number are all required — unlike Card, there is nothing to
+// simulate a bank reference FROM; a bank transfer this system cannot verify
+// against a real control number teaches the wrong lesson about what
+// "confirming" one means.
+function missingPaymentField(method, body) {
+  if (method === 'CARD') {
+    if (!body.cardMasked) return 'Card brand and last 4 digits are required.';
+    if (!body.cardholderName || !String(body.cardholderName).trim()) {
+      return 'Cardholder name is required for a card payment.';
+    }
+  }
+  if (method === 'BANK_TRANSFER') {
+    if (!body.bankName || !String(body.bankName).trim()) return 'Bank name is required.';
+    if (!body.transferNetwork || !String(body.transferNetwork).trim()) {
+      return 'Transfer network/channel is required.';
+    }
+    if (!body.senderName || !String(body.senderName).trim()) {
+      return "Sender/account holder's name is required.";
+    }
+    if (!(body.gatewayRef || body.reference)) {
+      return 'A bank reference/control number is required for a bank transfer.';
+    }
+  }
+  return null;
+}
+
 // POST /api/folios/:id/payments
 router.post('/folios/:id/payments', requireRole(...CASHIER), async (req, res) => {
   try {
-    const { method, amountCents, gatewayRef, cardMasked, reference } = req.body;
+    const {
+      method,
+      amountCents,
+      gatewayRef,
+      cardMasked,
+      reference,
+      cardholderName,
+      bankName,
+      transferNetwork,
+      senderName,
+      transferredAt,
+    } = req.body;
     if ((await requireOpenFolio(req.params.id, res)) === null) return;
     const payCents = parseCents(amountCents);
     if (!method || payCents === null || payCents === 0n) {
       return res.status(400).json({ error: 'method and a positive integer amountCents are required.' });
     }
+    const missing = missingPaymentField(method, req.body);
+    if (missing) return res.status(400).json({ error: missing });
+
+    let transferredAtDate = null;
+    if (transferredAt !== undefined && transferredAt !== null && transferredAt !== '') {
+      transferredAtDate = new Date(transferredAt);
+      if (Number.isNaN(transferredAtDate.getTime())) {
+        return res.status(400).json({ error: 'transferredAt is not a valid date.' });
+      }
+    }
+
+    // A surcharge for the two methods that actually cost the property
+    // something to process — never cash, never a manual e-wallet entry (the
+    // guest's own wallet already took whatever cut it takes; this system has
+    // no visibility into that and must not invent a second fee on top of it).
+    const feePercent = method === 'CARD' || method === 'BANK_TRANSFER' ? await getPaymentFeePercent() : 0;
+    const feeCents = paymentProcessingFeeCents({ amountCents: payCents, feePercent });
+
     // Payment row and its ledger transaction must be written together, or a
     // crash between them leaves the folio balance and the payment record out
     // of sync.
+    // A staff-entered gatewayRef/reference always wins; only a genuinely
+    // blank one falls back to a simulated one (an "AUTH-" code for CARD —
+    // BANK_TRANSFER's reference is validated as mandatory above, so its
+    // fallback in simulateGatewayRef is dead code here on purpose, kept only
+    // as defense-in-depth for a caller that bypasses this validation).
+    const resolvedGatewayRef = gatewayRef || reference || simulateGatewayRef(method);
     const payment = await prisma.$transaction(async (px) => {
       const p = await px.payment.create({
         data: {
           folioId: req.params.id,
           method,
           amountCents: payCents,
-          gatewayRef: gatewayRef || reference,
+          gatewayRef: resolvedGatewayRef,
           cardMasked,
+          cardholderName: method === 'CARD' ? cardholderName : undefined,
+          bankName: method === 'BANK_TRANSFER' ? bankName : undefined,
+          transferNetwork: method === 'BANK_TRANSFER' ? transferNetwork : undefined,
+          senderName: method === 'BANK_TRANSFER' ? senderName : undefined,
+          transferredAt: method === 'BANK_TRANSFER' ? transferredAtDate : undefined,
           status: 'AUTHORIZED',
         },
       });
@@ -849,9 +988,34 @@ router.post('/folios/:id/payments', requireRole(...CASHIER), async (req, res) =>
           amountCents: payCents,
           paymentMethod: method,
           postedBy: req.user?.username || req.user?.sub,
+          // Payment.id, NOT gatewayRef — postRefund() looks up the Payment
+          // row by THIS field (`payment.updateMany({ where: { id:
+          // original.reference } })`) to flip it REFUNDED. Every
+          // payment-posting route in this file keeps this the same;
+          // gatewayRef is a separate, human-facing field, never the lookup
+          // key.
           reference: p.id,
         },
       });
+      // The fee is a CHARGE, not a deduction from the payment: the guest paid
+      // the full amountCents, and now owes a bit more because of HOW they
+      // paid it — the same "surcharge raises the balance" shape a real folio
+      // uses, and it shows up in the Ledger and the folio's overall balance
+      // on its own, with no change needed to classifyTransactions.
+      if (feeCents > 0n) {
+        await px.folioTransaction.create({
+          data: {
+            folioId: req.params.id,
+            type: 'CHARGE',
+            chargeCode: 'PF',
+            description: `Payment processing fee (${feePercent}% of ${method === 'CARD' ? 'card' : 'bank transfer'} payment)`,
+            amountCents: feeCents,
+            postedBy: req.user?.username || req.user?.sub,
+            sourceSystem: 'payment-fee',
+            reference: `PROCESSINGFEE-${p.id}`,
+          },
+        });
+      }
       return p;
     });
     redis.publish(
@@ -869,13 +1033,114 @@ router.post('/folios/:id/payments', requireRole(...CASHIER), async (req, res) =>
         paymentId: payment.id,
       })
     );
-    res.status(201).json(payment);
+    // feeCents rides along on the response (not a Payment/FolioTransaction
+    // field itself) so the desk screen can show what was actually added,
+    // right after posting, without a second round trip.
+    res.status(201).json({ ...payment, feeCents: feeCents.toString(), feePercent });
   } catch (err) {
     console.error('[Folio] Payment error:', err.message);
     redis.publish('payment:failed', JSON.stringify({ folioId: req.params.id, error: err.message }));
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
+// POST /api/folios/:id/payments/:paymentId/proof — attach the deposit
+// slip/bank confirmation image or PDF a BANK_TRANSFER payment was posted
+// with. filename/contentType/contentBase64, same shape as the reservation
+// service's own document upload (services/reservation/src/routes/
+// reservation.routes.js) — bytes go to MinIO (lib/storage.js), only metadata
+// is stored here. A payment carries at most one proof, so a second upload
+// REPLACES the first rather than erroring — front desk fixing a wrong scan
+// shouldn't need a delete-then-upload round trip.
+router.post('/folios/:id/payments/:paymentId/proof', requireRole(...CASHIER), async (req, res) => {
+  try {
+    const payment = await prisma.payment.findFirst({
+      where: { id: req.params.paymentId, folioId: req.params.id },
+    });
+    if (!payment) return res.status(404).json({ error: 'Payment not found on this folio.' });
+
+    const { filename, contentType, contentBase64 } = req.body || {};
+    if (!filename || !String(filename).trim())
+      return res.status(400).json({ error: 'filename is required.' });
+    if (!contentBase64) return res.status(400).json({ error: 'contentBase64 is required.' });
+
+    let buffer;
+    try {
+      buffer = Buffer.from(contentBase64, 'base64');
+    } catch {
+      return res.status(400).json({ error: 'contentBase64 is not valid base64.' });
+    }
+    if (buffer.length === 0) return res.status(400).json({ error: 'The uploaded file is empty.' });
+    if (buffer.length > MAX_PROOF_BYTES) {
+      return res.status(400).json({
+        error: `File is ${(buffer.length / (1024 * 1024)).toFixed(1)}MB, over the ${MAX_PROOF_BYTES / (1024 * 1024)}MB limit.`,
+      });
+    }
+
+    const existing = await prisma.paymentDocument.findUnique({ where: { paymentId: payment.id } });
+    const objectKey = storage.objectKeyFor(payment.id, filename);
+    await storage.ensureBucket();
+    await storage.putDocument(objectKey, buffer, contentType);
+    // The old object is removed AFTER the new one is safely written, so a
+    // failed upload never leaves a payment with no proof at all.
+    if (existing) await storage.removeDocument(existing.objectKey).catch(() => {});
+
+    const doc = await prisma.paymentDocument.upsert({
+      where: { paymentId: payment.id },
+      create: {
+        paymentId: payment.id,
+        filename: String(filename),
+        contentType: contentType || 'application/octet-stream',
+        sizeBytes: buffer.length,
+        objectKey,
+        uploadedBy: req.user?.username || req.user?.sub,
+      },
+      update: {
+        filename: String(filename),
+        contentType: contentType || 'application/octet-stream',
+        sizeBytes: buffer.length,
+        objectKey,
+        uploadedBy: req.user?.username || req.user?.sub,
+      },
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    console.error('[Folio] Upload payment proof error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/folios/:id/payments/:paymentId/proof — streams the file back
+// through this service rather than a direct MinIO link, so it stays behind
+// the same gateway auth as everything else; MinIO itself is never reachable
+// from a browser.
+router.get(
+  '/folios/:id/payments/:paymentId/proof',
+  requireRole(...ROLE_GROUPS.DESK_AUDIT),
+  async (req, res) => {
+    try {
+      const payment = await prisma.payment.findFirst({
+        where: { id: req.params.paymentId, folioId: req.params.id },
+      });
+      if (!payment) return res.status(404).json({ error: 'Payment not found on this folio.' });
+
+      const doc = await prisma.paymentDocument.findUnique({ where: { paymentId: payment.id } });
+      if (!doc) return res.status(404).json({ error: 'No proof of transfer on file for this payment.' });
+
+      const stream = await storage.getDocumentStream(doc.objectKey);
+      res.setHeader('Content-Type', doc.contentType);
+      res.setHeader('Content-Disposition', `inline; filename="${doc.filename.replace(/"/g, '')}"`);
+      stream.on('error', (err) => {
+        console.error('[Folio] Proof stream error:', err.message);
+        if (!res.headersSent) res.status(502).json({ error: 'Could not read the stored file.' });
+      });
+      stream.pipe(res);
+    } catch (err) {
+      console.error('[Folio] Download payment proof error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
 
 // POST /api/folios/:id/refund — refund a previous payment
 router.post('/folios/:id/refund', requireRole(...FINANCE), async (req, res) => {
@@ -940,54 +1205,49 @@ const DISPUTE_TRANSITIONS = {
 };
 
 // POST /api/folios/:id/payments/:paymentId/disputes — file a new case.
-router.post(
-  '/folios/:id/payments/:paymentId/disputes',
-  requireRole(...FINANCE),
-  async (req, res) => {
-    try {
-      const { type, reason } = req.body;
-      if (!DISPUTE_TYPES.includes(type)) {
-        return res.status(400).json({ error: `type must be one of: ${DISPUTE_TYPES.join(', ')}.` });
-      }
-      const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
-      if (!payment || payment.folioId !== req.params.id) {
-        return res.status(404).json({ error: 'Payment not found on this folio.' });
-      }
-      if (!isEWallet(payment.method)) {
-        return res.status(400).json({
-          error: `${payment.method} is not an e-wallet payment. Use /folios/:id/refund for cash, card, or bank transfer.`,
-        });
-      }
-      const amountCents = req.body.amountCents === undefined
-        ? payment.amountCents
-        : parseCents(req.body.amountCents);
-      if (amountCents === null || amountCents <= 0n || amountCents > payment.amountCents) {
-        return res.status(400).json({
-          error: 'amountCents must be a positive integer no greater than the original payment.',
-        });
-      }
-      const dispute = await prisma.paymentDispute.create({
-        data: {
-          folioId: req.params.id,
-          paymentId: payment.id,
-          method: payment.method,
-          type,
-          amountCents,
-          reason,
-          filedBy: req.user?.username || req.user?.sub,
-        },
-      });
-      redis.publish(
-        'folio:dispute_filed',
-        JSON.stringify({ folioId: req.params.id, disputeId: dispute.id, type, method: payment.method })
-      );
-      res.status(201).json(dispute);
-    } catch (err) {
-      console.error('[Folio] File dispute error:', err.message);
-      res.status(500).json({ error: 'Internal server error.' });
+router.post('/folios/:id/payments/:paymentId/disputes', requireRole(...FINANCE), async (req, res) => {
+  try {
+    const { type, reason } = req.body;
+    if (!DISPUTE_TYPES.includes(type)) {
+      return res.status(400).json({ error: `type must be one of: ${DISPUTE_TYPES.join(', ')}.` });
     }
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+    if (!payment || payment.folioId !== req.params.id) {
+      return res.status(404).json({ error: 'Payment not found on this folio.' });
+    }
+    if (!isEWallet(payment.method)) {
+      return res.status(400).json({
+        error: `${payment.method} is not an e-wallet payment. Use /folios/:id/refund for cash, card, or bank transfer.`,
+      });
+    }
+    const amountCents =
+      req.body.amountCents === undefined ? payment.amountCents : parseCents(req.body.amountCents);
+    if (amountCents === null || amountCents <= 0n || amountCents > payment.amountCents) {
+      return res.status(400).json({
+        error: 'amountCents must be a positive integer no greater than the original payment.',
+      });
+    }
+    const dispute = await prisma.paymentDispute.create({
+      data: {
+        folioId: req.params.id,
+        paymentId: payment.id,
+        method: payment.method,
+        type,
+        amountCents,
+        reason,
+        filedBy: req.user?.username || req.user?.sub,
+      },
+    });
+    redis.publish(
+      'folio:dispute_filed',
+      JSON.stringify({ folioId: req.params.id, disputeId: dispute.id, type, method: payment.method })
+    );
+    res.status(201).json(dispute);
+  } catch (err) {
+    console.error('[Folio] File dispute error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
   }
-);
+});
 
 // GET /api/payment-disputes?status=&folioId= — every desk role can see the
 // queue; only FINANCE can file or resolve one (below).
@@ -1230,7 +1490,9 @@ router.post('/folios/:id/transfer', requireRole(...CASHIER), async (req, res) =>
       return res.status(409).json({ error: 'A transfer cannot itself be transferred.' });
     }
     if (tx.type === 'PAYMENT' || tx.type === 'REFUND') {
-      return res.status(409).json({ error: 'Only charges and adjustments can be transferred, not payments.' });
+      return res
+        .status(409)
+        .json({ error: 'Only charges and adjustments can be transferred, not payments.' });
     }
 
     const rows = planTransfer(tx, {
@@ -1444,7 +1706,10 @@ router.post('/folios/:id/split', requireRole(...CASHIER), async (req, res) => {
       'folio:transferred',
       JSON.stringify({
         fromFolioId: source.id,
-        toFolioId: out.folios.slice(1).map((f) => f.id).join(','),
+        toFolioId: out.folios
+          .slice(1)
+          .map((f) => f.id)
+          .join(','),
         stayId: source.stayId,
         split: true,
       })
@@ -1841,25 +2106,90 @@ async function renderReceiptPdf(model, { portalLink } = {}) {
   const fmtDateTime = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
 
-  doc.fontSize(20).text('InnSight PMS', { align: 'left' });
-  doc.fontSize(12).fillColor('#555').text('Payment Receipt', { align: 'left' });
-  // Says plainly what this document is. A training system that prints something
-  // indistinguishable from a BIR official receipt is teaching the wrong lesson.
-  doc.fontSize(8).fillColor('#888').text('Simulation — not a BIR-registered official receipt.');
-  doc.moveDown();
-  doc.fillColor('black').fontSize(10);
+  // Same accent the web app itself uses (styles.css's --accent/--accent-soft,
+  // light theme) — a printed receipt that carries the product's own color
+  // reads as a real document from this property, not a generic template.
+  const ACCENT = '#0a6b3d';
+  const ACCENT_SOFT = '#d5eee2';
+  const INK = '#1a1a1a';
+  const MUTED = '#666';
+
+  const M = 48;
+  const W = doc.page.width - M * 2;
+
+  // ── Header band ── fixed height, so the QR (which pdfkit can't position
+  // relative to text it hasn't drawn yet) always lands inside it regardless
+  // of how many detail rows follow below.
+  const HEADER_H = 100;
+  doc.rect(M, M, W, HEADER_H).fill(ACCENT_SOFT);
+  // Heights computed and accumulated by hand, NOT read back from doc.y after
+  // each draw: pdfkit only advances doc.y reliably the first time a text call
+  // lands away from wherever the cursor already was — chaining doc.y+n across
+  // calls at different font sizes left every line after the first stacked on
+  // top of the one before it (verified empirically while building this).
+  let hy = M + 16;
+  const titleText = 'InnSight PMS';
+  doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(22);
+  doc.text(titleText, M + 16, hy, { width: W - 32, lineBreak: false });
+  hy += doc.heightOfString(titleText, { width: W - 32 }) + 3;
+
+  const subtitleText = 'Payment Receipt';
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(12);
+  doc.text(subtitleText, M + 16, hy, { lineBreak: false });
+  hy += doc.heightOfString(subtitleText) + 3;
+
+  // Says plainly what this document is. A training system that prints
+  // something indistinguishable from a BIR official receipt is teaching the
+  // wrong lesson.
+  const disclaimerText = 'Simulation — not a BIR-registered official receipt.';
+  doc.fillColor(MUTED).font('Helvetica-Oblique').fontSize(8);
+  doc.text(disclaimerText, M + 16, hy, { lineBreak: false });
+
+  // The guest's digital copy, when this folio belongs to a booking worth
+  // linking to — sits in the header's own corner, so its position never
+  // depends on how many detail rows this particular receipt ends up with.
+  if (portalLink) {
+    try {
+      const qrSize = 64;
+      const qrX = M + W - qrSize - 12;
+      doc.image(await qrPngBuffer(portalLink), qrX, M + 12, { width: qrSize });
+      doc
+        .font('Helvetica')
+        .fontSize(6)
+        .fillColor(MUTED)
+        .text('Scan for a digital copy', qrX - 8, M + 12 + qrSize + 2, {
+          width: qrSize + 16,
+          align: 'center',
+        });
+    } catch (err) {
+      // Never fail a guest's proof of payment over the convenience code on it.
+      console.error('[Folio] Receipt QR render failed:', err.message);
+    }
+  }
+
+  doc.y = M + HEADER_H + 20;
+  doc.fillColor(INK).fontSize(10);
 
   // Two real columns at fixed x positions, rather than one continued text flow.
   // The `continued: true` idiom the other PDF routes use makes the label's width
   // constrain the VALUE too, so a long value wraps mid-string: the receipt number
   // broke across two lines and "2026-09-04 14:11" split after the date. Folio
   // numbers here are timestamp-based and genuinely long, so this has to hold.
-  const LABEL_X = 48;
-  const VALUE_X = 168;
+  const LABEL_X = M + 16;
+  const VALUE_X = M + 150;
   const row = (label, value) => {
     const y = doc.y;
-    doc.font('Helvetica-Bold').text(label, LABEL_X, y, { width: 112 });
-    doc.font('Helvetica').text(String(value ?? '—'), VALUE_X, y, { width: 340 });
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(MUTED).text(label.toUpperCase(), LABEL_X, y, {
+      width: 116,
+      lineBreak: false,
+      characterSpacing: 0.3,
+    });
+    doc
+      .font('Helvetica')
+      .fontSize(10)
+      .fillColor(INK)
+      .text(String(value ?? '—'), VALUE_X, y, { width: M + W - VALUE_X });
+    doc.y += 4;
   };
 
   row('Receipt No.:', model.receiptNumber);
@@ -1867,38 +2197,89 @@ async function renderReceiptPdf(model, { portalLink } = {}) {
   row('Received From:', model.guestName);
   row('Date Received:', fmtDateTime(model.paidAt));
   row('Payment Method:', model.method);
-  // Explicit x: the last row() left the cursor in the value column, so without it
-  // the whole amount block sits indented under that column.
-  doc.moveDown(0.5);
-  doc.font('Helvetica-Bold').fontSize(14).text(`Amount Paid: ${money(model.paidCents)}`, LABEL_X, doc.y);
-  doc.font('Helvetica').fontSize(9).text(`Amount in Words: ${model.paidInWords}`, LABEL_X, doc.y);
+  // Whatever gateway/bank metadata this payment actually carries — printed as
+  // proof of what was verified, not just that money changed hands. Only the
+  // block for the method this payment actually used ever has anything to
+  // show; the other stays entirely absent rather than printing empty rows.
+  if (model.card) {
+    if (model.card.masked) row('Card:', model.card.masked);
+    if (model.card.cardholderName) row('Cardholder:', model.card.cardholderName);
+  }
+  if (model.bankTransfer) {
+    if (model.bankTransfer.bankName) {
+      row(
+        'Bank:',
+        model.bankTransfer.transferNetwork
+          ? `${model.bankTransfer.bankName} (${model.bankTransfer.transferNetwork})`
+          : model.bankTransfer.bankName
+      );
+    }
+    if (model.bankTransfer.senderName) row('Sender:', model.bankTransfer.senderName);
+    if (model.bankTransfer.transferredAt) row('Transferred:', fmtDateTime(model.bankTransfer.transferredAt));
+  }
+  if (model.gatewayRef) row('Transaction Ref.:', model.gatewayRef);
+
+  // A perforated "tear line" between the detail rows and the amount — a cheap
+  // visual cue borrowed from a real receipt slip, drawn with the accent so it
+  // doesn't read as a stray horizontal rule.
+  doc.y += 8;
+  doc
+    .dash(2, { space: 3 })
+    .moveTo(M, doc.y)
+    .lineTo(M + W, doc.y)
+    .strokeColor(ACCENT)
+    .lineWidth(1)
+    .stroke();
+  doc.undash();
+  doc.y += 16;
+
+  // ── Amount Paid — the one figure this document exists to prove, set apart
+  // in its own filled panel rather than just a bigger font size. ──
+  const boxY = doc.y;
+  const boxH = model.refunded ? 74 : 58;
+  doc.roundedRect(M, boxY, W, boxH, 6).fill(ACCENT_SOFT);
+  doc
+    .fillColor(ACCENT)
+    .font('Helvetica-Bold')
+    .fontSize(9)
+    .text('AMOUNT PAID', M + 16, boxY + 10, { characterSpacing: 0.5, lineBreak: false });
+  doc
+    .fillColor(INK)
+    .font('Helvetica-Bold')
+    .fontSize(20)
+    .text(money(model.paidCents), M + 16, boxY + 22, { lineBreak: false });
+  doc
+    .fillColor(MUTED)
+    .font('Helvetica-Oblique')
+    .fontSize(8.5)
+    .text(model.paidInWords, M + 16, boxY + 46, { width: W - 32 });
 
   if (model.refunded) {
-    doc.moveDown(0.5);
     doc
       .fillColor('#b8382c')
       .font('Helvetica-Bold')
-      .fontSize(11)
-      .text('THIS PAYMENT HAS BEEN REFUNDED', LABEL_X, doc.y);
-    doc.fillColor('black').font('Helvetica');
+      .fontSize(10)
+      .text('THIS PAYMENT HAS BEEN REFUNDED', M + 16, boxY + 58, { characterSpacing: 0.3, lineBreak: false });
   }
+  doc.y = boxY + boxH + 28;
 
-  // The guest's digital copy, when this folio belongs to a booking worth linking
-  // to. Positioned absolutely because doc.image() does not advance the cursor
-  // predictably and the signature line below has to keep its place.
-  if (portalLink) {
-    try {
-      doc.image(await qrPngBuffer(portalLink), 400, 96, { width: 100 });
-      doc.fontSize(7).fillColor('#666').text('Scan for a digital copy', 400, 200, { width: 100, align: 'center' });
-      doc.fillColor('black');
-    } catch (err) {
-      // Never fail a guest's proof of payment over the convenience code on it.
-      console.error('[Folio] Receipt QR render failed:', err.message);
-    }
-  }
+  // A drawn line, not underscores — the signature sits ON it rather than
+  // floating above a row of text characters.
+  const sigW = 220;
+  doc
+    .moveTo(LABEL_X, doc.y)
+    .lineTo(LABEL_X + sigW, doc.y)
+    .strokeColor('#999')
+    .lineWidth(0.75)
+    .stroke();
+  doc.fillColor(MUTED).font('Helvetica').fontSize(9).text('Received by', LABEL_X, doc.y + 4, { lineBreak: false });
 
-  doc.moveDown(2);
-  doc.fontSize(9).fillColor('#555').text('Received by: ____________________________', LABEL_X, doc.y);
+  doc
+    .fillColor(MUTED)
+    .font('Helvetica')
+    .fontSize(8)
+    .text('Thank you for staying with us.', M, doc.page.height - M - 20, { width: W, align: 'center' });
+
   return doc;
 }
 
@@ -1919,46 +2300,49 @@ function pdfToBuffer(doc) {
 // Distinct from /folios/:id/print, which renders the whole folio: a guest paying a
 // deposit at reservation time has no folio worth printing yet, but does need
 // something showing what they handed over. The client asked for exactly this.
-router.get('/folios/:id/payments/:paymentId/receipt', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
-  try {
-    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
-    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
-
-    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
-    // The folioId check is not redundant: without it, any payment id could be
-    // receipted against any folio, putting one guest's payment on another's paper.
-    if (!payment || payment.folioId !== folio.id) {
-      return res.status(404).json({ error: 'Payment not found on this folio.' });
-    }
-
-    const stay = folio.stayId
-      ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
-      : null;
-    const guest = folio.guestId
-      ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
-      : null;
-    const guestName = stay?.guestName || guest?.displayName || null;
-
-    let model;
+router.get(
+  '/folios/:id/payments/:paymentId/receipt',
+  requireRole(...ROLE_GROUPS.DESK_AUDIT),
+  async (req, res) => {
     try {
-      model = receiptModel(payment, folio, guestName);
+      const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+      if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+
+      const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+      // The folioId check is not redundant: without it, any payment id could be
+      // receipted against any folio, putting one guest's payment on another's paper.
+      if (!payment || payment.folioId !== folio.id) {
+        return res.status(404).json({ error: 'Payment not found on this folio.' });
+      }
+
+      const stay = folio.stayId
+        ? await fetchJsonOrNull(`${STAY_URL}/api/stays/${encodeURIComponent(folio.stayId)}`)
+        : null;
+      const guest = folio.guestId
+        ? await fetchJsonOrNull(`${GUEST_URL}/api/guests/${encodeURIComponent(folio.guestId)}`)
+        : null;
+      const guestName = stay?.guestName || guest?.displayName || null;
+
+      let model;
+      try {
+        model = receiptModel(payment, folio, guestName);
+      } catch (err) {
+        // A voided or failed payment is a 409, not a 500 — the request was
+        // well-formed, the payment is simply not receiptable.
+        return res.status(409).json({ error: err.message });
+      }
+
+      const doc = await renderReceiptPdf(model, { portalLink: portalLinkFor(stay) });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="receipt-${model.receiptNumber}.pdf"`);
+      doc.pipe(res);
+      doc.end();
     } catch (err) {
-      // A voided or failed payment is a 409, not a 500 — the request was
-      // well-formed, the payment is simply not receiptable.
-      return res.status(409).json({ error: err.message });
+      console.error('[Folio] Receipt error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
     }
-
-    const doc = await renderReceiptPdf(model, { portalLink: portalLinkFor(stay) });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="receipt-${model.receiptNumber}.pdf"`);
-    doc.pipe(res);
-    doc.end();
-
-  } catch (err) {
-    console.error('[Folio] Receipt error:', err.message);
-    if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
   }
-});
+);
 
 // POST /api/folios/:id/payments/:paymentId/receipt/email — send the receipt to the
 // guest as a PDF attachment. The client asked for receipts to be emailable.
@@ -1992,7 +2376,9 @@ router.post('/folios/:id/payments/:paymentId/receipt/email', requireRole(...CASH
     if (!to) {
       // 400, not 500, and it names the reason: the desk needs to know the guest has
       // no address on file rather than watching a send silently do nothing.
-      return res.status(400).json({ error: 'No email address on file for this guest. Add one, or pass `to`.' });
+      return res
+        .status(400)
+        .json({ error: 'No email address on file for this guest. Add one, or pass `to`.' });
     }
 
     let model;
@@ -2065,19 +2451,25 @@ async function buildFolioPrintModel(folio) {
   // co-payers it shares the bill with. Only fetched when this folio actually
   // carries transfers: an ordinary folio prints a blank Remark exactly as it
   // always has, and pays no query for the privilege.
-  const counterparts = folio.stayId && transactions.some((t) => t.type === 'TRANSFER')
-    ? (
-        await prisma.folio.findMany({
-          where: { stayId: folio.stayId, id: { not: folio.id } },
-          select: { id: true, folioNumber: true, payerName: true },
-          orderBy: { openedAt: 'asc' },
-        })
-      ).map((f) => ({ folioId: f.id, folioNumber: f.folioNumber, payerName: f.payerName }))
-    : [];
+  const counterparts =
+    folio.stayId && transactions.some((t) => t.type === 'TRANSFER')
+      ? (
+          await prisma.folio.findMany({
+            where: { stayId: folio.stayId, id: { not: folio.id } },
+            select: { id: true, folioNumber: true, payerName: true },
+            orderBy: { openedAt: 'asc' },
+          })
+        ).map((f) => ({ folioId: f.id, folioNumber: f.folioNumber, payerName: f.payerName }))
+      : [];
 
   return folioPrintModel({
-    folio, transactions, summary,
-    guest, stay, reservation, hotel: await getHotel(),
+    folio,
+    transactions,
+    summary,
+    guest,
+    stay,
+    reservation,
+    hotel: await getHotel(),
     counterparts,
   });
 }
@@ -2100,7 +2492,8 @@ async function renderFolioPdf(res, model, { filename, qrUrl } = {}) {
   // The reference prints amounts as "25,350.00 P".
   const money = (cents) =>
     `${(Number(cents) / 100).toLocaleString('en-US', {
-      minimumFractionDigits: 2, maximumFractionDigits: 2,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     })} P`;
 
   const doc = new PDFDocument({ size: 'A4', margin: 36 });
@@ -2111,11 +2504,11 @@ async function renderFolioPdf(res, model, { filename, qrUrl } = {}) {
   );
   doc.pipe(res);
 
-  const L = 36;                       // left margin
-  const R = doc.page.width - 36;      // right margin
+  const L = 36; // left margin
+  const R = doc.page.width - 36; // right margin
   const W = R - L;
-  const SPLIT = L + W * 0.72;         // where the Particular column ends
-  const TOP = 36;                     // where a continuation page starts
+  const SPLIT = L + W * 0.72; // where the Particular column ends
+  const TOP = 36; // where a continuation page starts
   // The lowest y a block may occupy. Everything below is drawn at ABSOLUTE
   // coordinates while this route advances its own `y`, so pdfkit's automatic
   // pagination must never be allowed to fire: it starts a page and resets
@@ -2141,9 +2534,13 @@ async function renderFolioPdf(res, model, { filename, qrUrl } = {}) {
   doc.font('Helvetica').fontSize(8);
   for (const line of [
     model.hotel.address,
-    [model.hotel.phone && `Phone: ${model.hotel.phone}`,
-     model.hotel.fax && `Fax: ${model.hotel.fax}`,
-     model.hotel.email && `E-Mail: ${model.hotel.email}`].filter(Boolean).join(' ; '),
+    [
+      model.hotel.phone && `Phone: ${model.hotel.phone}`,
+      model.hotel.fax && `Fax: ${model.hotel.fax}`,
+      model.hotel.email && `E-Mail: ${model.hotel.email}`,
+    ]
+      .filter(Boolean)
+      .join(' ; '),
     model.hotel.url && `URL: ${model.hotel.url}`,
   ].filter(Boolean)) {
     doc.text(line, L, doc.y, { width: W, align: 'center' });
@@ -2152,201 +2549,235 @@ async function renderFolioPdf(res, model, { filename, qrUrl } = {}) {
   doc.font('Helvetica-Bold').fontSize(10).text('Invoice', L, doc.y, { width: W, align: 'center' });
   doc.moveDown(0.5);
 
-    // ── Boxed helpers ──
-    const cell = (x, y, w, h, text, opts = {}) => {
-      doc.rect(x, y, w, h).stroke();
-      if (text == null || text === '') return;
-      doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 8);
-      doc.text(String(text), x + 4, y + (opts.dy ?? 4), {
-        width: w - 8, align: opts.align || 'left', lineBreak: false,
+  // ── Boxed helpers ──
+  const cell = (x, y, w, h, text, opts = {}) => {
+    doc.rect(x, y, w, h).stroke();
+    if (text == null || text === '') return;
+    doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 8);
+    doc.text(String(text), x + 4, y + (opts.dy ?? 4), {
+      width: w - 8,
+      align: opts.align || 'left',
+      lineBreak: false,
+    });
+  };
+
+  let y = doc.y;
+
+  // ── Pagination helpers ────────────────────────────────────────────────
+  // `bodyTop` is the top of the CURRENT page's Particular/Total grid. That
+  // grid is bounded by two full-height column rules, so they have to be
+  // closed off at the foot of the page being left and reopened underneath
+  // the repeated column header on the next one — hence the `inBody` flag
+  // rather than a bare addPage().
+  let bodyTop = null;
+
+  const closeBodyRules = () => {
+    if (bodyTop === null || y <= bodyTop) return;
+    doc.rect(L, bodyTop, SPLIT - L, y - bodyTop).stroke();
+    doc.rect(SPLIT, bodyTop, R - SPLIT, y - bodyTop).stroke();
+  };
+
+  const columnHeader = () => {
+    cell(L, y, SPLIT - L, rowH + 2, 'Particular', { bold: true, size: 10, dy: 5 });
+    cell(SPLIT, y, R - SPLIT, rowH + 2, 'Total', { bold: true, size: 10, dy: 5, align: 'right' });
+    y += rowH + 2;
+  };
+
+  // Every continuation page names its folio and says it is a continuation:
+  // loose sheets of one guest's bill are otherwise indistinguishable from
+  // another guest's.
+  const newPage = ({ inBody = false } = {}) => {
+    if (inBody) closeBodyRules();
+    doc.addPage();
+    y = TOP;
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(9)
+      .text(`${model.hotel.name} — Folio No. ${model.meta.folioNumber} — continued`, L, y, {
+        width: W,
+        align: 'center',
+        lineBreak: false,
       });
-    };
-
-    let y = doc.y;
-
-    // ── Pagination helpers ────────────────────────────────────────────────
-    // `bodyTop` is the top of the CURRENT page's Particular/Total grid. That
-    // grid is bounded by two full-height column rules, so they have to be
-    // closed off at the foot of the page being left and reopened underneath
-    // the repeated column header on the next one — hence the `inBody` flag
-    // rather than a bare addPage().
-    let bodyTop = null;
-
-    const closeBodyRules = () => {
-      if (bodyTop === null || y <= bodyTop) return;
-      doc.rect(L, bodyTop, SPLIT - L, y - bodyTop).stroke();
-      doc.rect(SPLIT, bodyTop, R - SPLIT, y - bodyTop).stroke();
-    };
-
-    const columnHeader = () => {
-      cell(L, y, SPLIT - L, rowH + 2, 'Particular', { bold: true, size: 10, dy: 5 });
-      cell(SPLIT, y, R - SPLIT, rowH + 2, 'Total', { bold: true, size: 10, dy: 5, align: 'right' });
-      y += rowH + 2;
-    };
-
-    // Every continuation page names its folio and says it is a continuation:
-    // loose sheets of one guest's bill are otherwise indistinguishable from
-    // another guest's.
-    const newPage = ({ inBody = false } = {}) => {
-      if (inBody) closeBodyRules();
-      doc.addPage();
-      y = TOP;
-      doc.font('Helvetica-Bold').fontSize(9).text(
-        `${model.hotel.name} — Folio No. ${model.meta.folioNumber} — continued`,
-        L, y, { width: W, align: 'center', lineBreak: false }
-      );
-      y += 16;
-      bodyTop = null;
-      if (inBody) {
-        columnHeader();
-        bodyTop = y;
-      }
-    };
-
-    // Claim `h` points for the block about to be drawn, starting a new page if
-    // it will not fit. A block that must not be split passes its WHOLE height.
-    const reserve = (h, opts) => {
-      if (y + h > BOTTOM) newPage(opts);
-    };
-
-    // ── Guest / stay grid ──
-    cell(L, y, W * 0.55, rowH, 'Folio No.', { bold: true });
-    cell(L + W * 0.55, y, W * 0.45, rowH, `Date  :  ${model.meta.date}`, { bold: true });
-    doc.font('Helvetica').fontSize(8).text(`:  ${model.meta.folioNumber}`, L + 90, y + 4, { lineBreak: false });
-    y += rowH;
-
-    cell(L, y, W, rowH, 'Guest Name', { bold: true });
-    doc.font('Helvetica').fontSize(8).text(`:  ${model.meta.guestName}`, L + 90, y + 4, { lineBreak: false });
-    y += rowH;
-
-    const q = W / 4;
-    for (const [i, [label, value]] of [
-      ['Nationality', model.meta.nationality],
-      ['No. of Pax', model.meta.pax],
-      ['Adult Child', `${model.meta.adults} / ${model.meta.children}`],
-      ['G.R. Card No', model.meta.grCardNo],
-    ].entries()) {
-      cell(L + q * i, y, q, rowH, label, { bold: true, align: i === 0 ? 'left' : 'center' });
-      cell(L + q * i, y + rowH, q, rowH, value, { align: i === 0 ? 'left' : 'center' });
+    y += 16;
+    bodyTop = null;
+    if (inBody) {
+      columnHeader();
+      bodyTop = y;
     }
-    y += rowH * 2;
+  };
 
-    const t = W / 3;
-    cell(L, y, t, rowH, 'Date of Arrival', { bold: true });
-    cell(L + t, y, t, rowH, model.meta.arrival);
-    cell(L + t * 2, y, t, rowH, `Tariff   ${money(model.meta.tariffCents)}`, { bold: true });
-    y += rowH;
-    cell(L, y, t, rowH, 'Date of Departure', { bold: true });
-    cell(L + t, y, t, rowH, model.meta.departure);
-    cell(L + t * 2, y, t, rowH, '');
-    y += rowH;
-    cell(L, y, t, rowH, 'Time of Arrival', { bold: true });
-    cell(L + t, y, t, rowH, model.meta.arrivalTime);
-    cell(L + t * 2, y, t, rowH, '');
-    y += rowH + 4;
+  // Claim `h` points for the block about to be drawn, starting a new page if
+  // it will not fit. A block that must not be split passes its WHOLE height.
+  const reserve = (h, opts) => {
+    if (y + h > BOTTOM) newPage(opts);
+  };
 
-    // ── Particular / Total grid ──
-    // The column header only earns its place if a heading and a row can follow
-    // it on the same page.
-    reserve(rowH + 2 + lineH * 2);
-    columnHeader();
-    bodyTop = y;
+  // ── Guest / stay grid ──
+  cell(L, y, W * 0.55, rowH, 'Folio No.', { bold: true });
+  cell(L + W * 0.55, y, W * 0.45, rowH, `Date  :  ${model.meta.date}`, { bold: true });
+  doc
+    .font('Helvetica')
+    .fontSize(8)
+    .text(`:  ${model.meta.folioNumber}`, L + 90, y + 4, { lineBreak: false });
+  y += rowH;
 
-    for (const section of model.sections) {
-      // A section heading is never the last thing on a page: it is drawn only
-      // where its first row fits underneath it.
-      reserve(lineH * 2, { inBody: true });
-      doc.font('Helvetica-Bold').fontSize(8.5).text(section.title, L + 4, y + 2, { lineBreak: false });
-      y += lineH;
-      for (const row of section.rows) {
-        if (y + lineH > BOTTOM) {
-          newPage({ inBody: true });
-          // A section long enough to run over repeats its own heading, so no
-          // row is ever orphaned from the section it belongs to.
-          doc.font('Helvetica-Bold').fontSize(8.5)
-            .text(`${section.title} (continued)`, L + 4, y + 2, { lineBreak: false });
-          y += lineH;
-        }
-        doc.font('Helvetica').fontSize(8);
-        doc.text(row.label, L + 20, y + 2, { width: 200, lineBreak: false });
-        doc.text(money(row.amountCents), AMOUNT_COL, y + 2, { width: 110, align: 'right', lineBreak: false });
+  cell(L, y, W, rowH, 'Guest Name', { bold: true });
+  doc
+    .font('Helvetica')
+    .fontSize(8)
+    .text(`:  ${model.meta.guestName}`, L + 90, y + 4, { lineBreak: false });
+  y += rowH;
+
+  const q = W / 4;
+  for (const [i, [label, value]] of [
+    ['Nationality', model.meta.nationality],
+    ['No. of Pax', model.meta.pax],
+    ['Adult Child', `${model.meta.adults} / ${model.meta.children}`],
+    ['G.R. Card No', model.meta.grCardNo],
+  ].entries()) {
+    cell(L + q * i, y, q, rowH, label, { bold: true, align: i === 0 ? 'left' : 'center' });
+    cell(L + q * i, y + rowH, q, rowH, value, { align: i === 0 ? 'left' : 'center' });
+  }
+  y += rowH * 2;
+
+  const t = W / 3;
+  cell(L, y, t, rowH, 'Date of Arrival', { bold: true });
+  cell(L + t, y, t, rowH, model.meta.arrival);
+  cell(L + t * 2, y, t, rowH, `Tariff   ${money(model.meta.tariffCents)}`, { bold: true });
+  y += rowH;
+  cell(L, y, t, rowH, 'Date of Departure', { bold: true });
+  cell(L + t, y, t, rowH, model.meta.departure);
+  cell(L + t * 2, y, t, rowH, '');
+  y += rowH;
+  cell(L, y, t, rowH, 'Time of Arrival', { bold: true });
+  cell(L + t, y, t, rowH, model.meta.arrivalTime);
+  cell(L + t * 2, y, t, rowH, '');
+  y += rowH + 4;
+
+  // ── Particular / Total grid ──
+  // The column header only earns its place if a heading and a row can follow
+  // it on the same page.
+  reserve(rowH + 2 + lineH * 2);
+  columnHeader();
+  bodyTop = y;
+
+  for (const section of model.sections) {
+    // A section heading is never the last thing on a page: it is drawn only
+    // where its first row fits underneath it.
+    reserve(lineH * 2, { inBody: true });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8.5)
+      .text(section.title, L + 4, y + 2, { lineBreak: false });
+    y += lineH;
+    // The label column stops 8pt short of AMOUNT_COL rather than the old fixed
+    // 200 — a description/reference long enough to reach the amount used to
+    // run straight into it with lineBreak:false. Wrapping and measuring each
+    // row's real height first means a long row grows the row instead of
+    // overflowing it, and the page-break check below sees that real height.
+    const LABEL_X = L + 20;
+    const LABEL_W = AMOUNT_COL - LABEL_X - 8;
+    let lastRowHeight = lineH;
+    for (const row of section.rows) {
+      const label = row.label || '';
+      doc.font('Helvetica').fontSize(8);
+      const rowHeight = Math.max(lineH, doc.heightOfString(label, { width: LABEL_W }) + 3);
+      if (y + rowHeight > BOTTOM) {
+        newPage({ inBody: true });
+        // A section long enough to run over repeats its own heading, so no
+        // row is ever orphaned from the section it belongs to.
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(8.5)
+          .text(`${section.title} (continued)`, L + 4, y + 2, { lineBreak: false });
         y += lineH;
       }
-      // The section subtotal sits in the right-hand rail, as in the reference.
-      // It is drawn level with the section's LAST row, so it is on that row's
-      // page by construction and cannot be stranded by itself.
       doc.font('Helvetica').fontSize(8);
-      doc.text(money(section.subtotalCents), SPLIT + 4, y - lineH + 2, {
-        width: R - SPLIT - 8, align: 'right', lineBreak: false,
-      });
-      y += 3;
+      // The amount stays pinned to the row's top line, matching how a wrapped
+      // line item reads on a printed invoice — only the label grows downward.
+      doc.text(label, LABEL_X, y + 2, { width: LABEL_W });
+      doc.text(money(row.amountCents), AMOUNT_COL, y + 2, { width: 110, align: 'right', lineBreak: false });
+      y += rowHeight;
+      lastRowHeight = rowHeight;
     }
+    // The section subtotal sits in the right-hand rail, as in the reference.
+    // It is drawn level with the section's LAST row (whatever height that row
+    // actually grew to), so it is on that row's page by construction and
+    // cannot be stranded by itself.
+    doc.font('Helvetica').fontSize(8);
+    doc.text(money(section.subtotalCents), SPLIT + 4, y - lastRowHeight + 2, {
+      width: R - SPLIT - 8,
+      align: 'right',
+      lineBreak: false,
+    });
+    y += 3;
+  }
 
-    // Column rules for the final page's body block.
-    closeBodyRules();
-    bodyTop = null;
+  // Column rules for the final page's body block.
+  closeBodyRules();
+  bodyTop = null;
 
-    // ── Totals rail ──
-    // Reserved as ONE block: Total Charges / Total Payment / Balance split
-    // over a page boundary reads as two different bills.
-    reserve(rowH * 3);
-    for (const [label, value] of [
-      ['Total Charges', model.totals.totalChargesCents],
-      ['Total Payment', model.totals.totalPaymentCents],
-      ['Balance', model.totals.balanceCents],
-    ]) {
-      cell(SPLIT - 130, y, 130, rowH, label, { bold: true });
-      cell(SPLIT, y, R - SPLIT, rowH, money(value), { bold: true, align: 'right' });
-      y += rowH;
-    }
-    y += 4;
-
-    // ── Footer block ──
-    const noticeText =
-      'NOTICE TO GUESTS: This property is privately owned and the management reserves the right to refuse ' +
-      'service to anyone. Management will not be responsible for accidents or injury to guests or for loss ' +
-      'of money, jewelry or valuables of any kind. Management will not be responsible for any item left in ' +
-      'the room.';
-    const checkoutText = 'CHECKOUT TIME: 11:00 AM        SELF REGISTRATION ONLY';
-    const agreeText =
-      'I AGREE that my liability for this bill is not waived and agree to be held personally liable in the ' +
-      'event that the indicated person or company failed to pay for any part or full amount of these ' +
-      'charges. I agree that if an attorney is retained to collect these charges, I will pay all reasonable ' +
-      "attorney's fees and costs incurred. I agree that the sole purpose of renting this room is for my own " +
-      'residency only.';
-
-    // Measured, not guessed. Two reservations, not one: the five boxed lines
-    // (Remark / currency / Bill To / Address / amount in words) are the part
-    // that must not be split, and they are claimed as a block. The notice and
-    // terms paragraphs below them are static boilerplate — reserving them
-    // TOGETHER with the boxed lines would cost ~110pt of the first page for
-    // text nobody reads against a figure, and this document already fills
-    // nearly a page at zero transactions.
-    doc.font('Helvetica').fontSize(7);
-    const termsH =
-      doc.heightOfString(noticeText, { width: W }) +
-      doc.heightOfString(checkoutText, { width: W }) +
-      doc.heightOfString(agreeText, { width: W }) +
-      16;
-    reserve(rowH * 5 + 8);
-
-    cell(L, y, W, rowH, `Remark        :  ${model.footer.remark}`, { bold: true });
+  // ── Totals rail ──
+  // Reserved as ONE block: Total Charges / Total Payment / Balance split
+  // over a page boundary reads as two different bills.
+  reserve(rowH * 3);
+  for (const [label, value] of [
+    ['Total Charges', model.totals.totalChargesCents],
+    ['Total Payment', model.totals.totalPaymentCents],
+    ['Balance', model.totals.balanceCents],
+  ]) {
+    cell(SPLIT - 130, y, 130, rowH, label, { bold: true });
+    cell(SPLIT, y, R - SPLIT, rowH, money(value), { bold: true, align: 'right' });
     y += rowH;
-    cell(L, y, W, rowH, `This Folio is in   :  ${model.footer.currency}`, { bold: true });
-    y += rowH;
-    cell(L, y, W, rowH, `Bill To               :  ${model.footer.billTo}`, { bold: true });
-    y += rowH;
-    cell(L, y, W, rowH, `Address             :  ${model.footer.address}`, { bold: true });
-    y += rowH;
-    cell(L, y, W, rowH, `${model.footer.currency} ${model.footer.amountInWords.toUpperCase()}`);
-    y += rowH + 8;
+  }
+  y += 4;
 
-    reserve(termsH);
-    doc.font('Helvetica').fontSize(7).fillColor('#000');
-    doc.text(noticeText, L, y, { width: W, align: 'left' });
-    doc.moveDown(0.6);
-    doc.font('Helvetica-Bold').text(checkoutText, { width: W });
-    doc.font('Helvetica').text(agreeText, { width: W, align: 'justify' });
+  // ── Footer block ──
+  const noticeText =
+    'NOTICE TO GUESTS: This property is privately owned and the management reserves the right to refuse ' +
+    'service to anyone. Management will not be responsible for accidents or injury to guests or for loss ' +
+    'of money, jewelry or valuables of any kind. Management will not be responsible for any item left in ' +
+    'the room.';
+  const checkoutText = 'CHECKOUT TIME: 11:00 AM        SELF REGISTRATION ONLY';
+  const agreeText =
+    'I AGREE that my liability for this bill is not waived and agree to be held personally liable in the ' +
+    'event that the indicated person or company failed to pay for any part or full amount of these ' +
+    'charges. I agree that if an attorney is retained to collect these charges, I will pay all reasonable ' +
+    "attorney's fees and costs incurred. I agree that the sole purpose of renting this room is for my own " +
+    'residency only.';
+
+  // Measured, not guessed. Two reservations, not one: the five boxed lines
+  // (Remark / currency / Bill To / Address / amount in words) are the part
+  // that must not be split, and they are claimed as a block. The notice and
+  // terms paragraphs below them are static boilerplate — reserving them
+  // TOGETHER with the boxed lines would cost ~110pt of the first page for
+  // text nobody reads against a figure, and this document already fills
+  // nearly a page at zero transactions.
+  doc.font('Helvetica').fontSize(7);
+  const termsH =
+    doc.heightOfString(noticeText, { width: W }) +
+    doc.heightOfString(checkoutText, { width: W }) +
+    doc.heightOfString(agreeText, { width: W }) +
+    16;
+  reserve(rowH * 5 + 8);
+
+  cell(L, y, W, rowH, `Remark        :  ${model.footer.remark}`, { bold: true });
+  y += rowH;
+  cell(L, y, W, rowH, `This Folio is in   :  ${model.footer.currency}`, { bold: true });
+  y += rowH;
+  cell(L, y, W, rowH, `Bill To               :  ${model.footer.billTo}`, { bold: true });
+  y += rowH;
+  cell(L, y, W, rowH, `Address             :  ${model.footer.address}`, { bold: true });
+  y += rowH;
+  cell(L, y, W, rowH, `${model.footer.currency} ${model.footer.amountInWords.toUpperCase()}`);
+  y += rowH + 8;
+
+  reserve(termsH);
+  doc.font('Helvetica').fontSize(7).fillColor('#000');
+  doc.text(noticeText, L, y, { width: W, align: 'left' });
+  doc.moveDown(0.6);
+  doc.font('Helvetica-Bold').text(checkoutText, { width: W });
+  doc.font('Helvetica').text(agreeText, { width: W, align: 'justify' });
 
   doc.end();
 }
@@ -2376,9 +2807,118 @@ router.get('/folios/:id/print', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
   }
 });
 
+// GET/POST /api/public/payment-intents/:token[/confirm] — opened by whatever
+// scanned a QR code: a phone with no login, or a second browser window in a
+// classroom demo. The intent token IS the credential — 32 random bytes,
+// single use, short-lived (see lib/paymentIntent.js).
+//
+// Deliberately minimal in what GET returns. A stranger who guesses a token
+// learns the amount and the hotel name, never the guest, the room or the
+// folio contents.
+publicRouter.get('/payment-intents/:token', async (req, res) => {
+  try {
+    const intent = await prisma.paymentIntent.findUnique({ where: { token: req.params.token } });
+    if (!intent) return res.status(404).json({ error: 'This payment link is not valid.' });
+    res.json({
+      state: intentState(intent),
+      amountCents: intent.amountCents.toString(),
+      currency: 'PHP',
+      method: intent.method,
+      expiresAt: intent.expiresAt,
+    });
+  } catch (err) {
+    console.error('[Folio] Public intent read error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+publicRouter.post('/payment-intents/:token/confirm', async (req, res) => {
+  try {
+    const intent = await prisma.paymentIntent.findUnique({ where: { token: req.params.token } });
+    if (!intent) return res.status(404).json({ error: 'This payment link is not valid.' });
+
+    const state = intentState(intent);
+    if (state !== 'PENDING') {
+      // 409 with the actual state, so the page can say "already paid" or "expired"
+      // rather than a generic failure the student cannot act on.
+      return res.status(409).json({ error: `This payment link is ${state.toLowerCase()}.`, state });
+    }
+
+    // Interactive transaction (not the array form) so the ledger row below can
+    // carry the Payment's own id as ITS reference — every other
+    // payment-posting route in this service does the same (see POST
+    // /folios/:id/payments): postRefund() looks the Payment row back up via
+    // `payment.updateMany({ where: { id: original.reference } })`, so this
+    // reference MUST stay Payment.id, never the human-facing gatewayRef —
+    // this route used to set it to gatewayRef instead, which quietly broke
+    // that lookup for every QR-paid folio (a refund would post fine on the
+    // ledger but silently fail to flip the underlying Payment row REFUNDED).
+    // Flipping the intent to CONFIRMED in the SAME transaction as the payment
+    // is what makes a double scan safe: the second one finds it already
+    // confirmed and stops, instead of posting twice.
+    const payment = await prisma.$transaction(async (px) => {
+      await px.paymentIntent.update({
+        where: { id: intent.id, status: 'PENDING' },
+        data: { status: 'CONFIRMED', confirmedAt: new Date() },
+      });
+      const p = await px.payment.create({
+        data: {
+          folioId: intent.folioId,
+          method: intent.method,
+          amountCents: intent.amountCents,
+          status: 'CAPTURED',
+          gatewayRef: `SIM-${intent.id.slice(-12)}`,
+        },
+      });
+      await px.folioTransaction.create({
+        data: {
+          folioId: intent.folioId,
+          type: 'PAYMENT',
+          description: `Payment via ${intent.method} (simulated)`,
+          amountCents: intent.amountCents,
+          paymentMethod: intent.method,
+          sourceSystem: 'qr-simulation',
+          reference: p.id,
+        },
+      });
+      return p;
+    });
+
+    // What makes this worth demonstrating: the front-desk screen updates itself.
+    redis.publish(
+      // The established folio channel, not a new 'payment:received': every page
+      // that declares the folio domain is already subscribed to this one, and the
+      // SSE gateway only forwards whitelisted channels.
+      'folio:payment_received',
+      JSON.stringify({
+        folioId: intent.folioId,
+        paymentId: payment.id,
+        amountCents: intent.amountCents.toString(),
+      })
+    );
+
+    // The reference rides back to whichever phone scanned the code, so the
+    // guest has something to point to ("SIM-xxxxxxxxxxxx") if the charge is
+    // ever disputed — not just a checkmark that vanishes when the tab closes.
+    res.json({
+      state: 'CONFIRMED',
+      amountCents: intent.amountCents.toString(),
+      reference: payment.gatewayRef,
+    });
+  } catch (err) {
+    // A lost race on the status guard lands here: the row was PENDING when read and
+    // CONFIRMED by the time it was updated. That is a double scan, not an outage.
+    if (err.code === 'P2025') {
+      return res.status(409).json({ error: 'This payment has already been made.', state: 'CONFIRMED' });
+    }
+    console.error('[Folio] Public confirm error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/public/folios/:token/pdf — what the QR code on the printed folio
 // resolves to. Unauthenticated: the token is the credential, exactly like a
-// PaymentIntent link (see index.js, which mounts this before verifyToken).
+// PaymentIntent link above (see index.js, which mounts this before verifyToken).
 // Deliberately does NOT mint a token for a folio that doesn't have one — only
 // a folio that has actually been printed at least once is reachable this way,
 // so a guessed id can never be turned into a valid link.

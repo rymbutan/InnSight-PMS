@@ -106,6 +106,8 @@ quietly.
 | `scripts/gen-env.sh` | Generate `.env` with strong secrets. `--force` to regenerate. |
 | `scripts/db-seed.sh` | Run every service's seed once, as throwaway containers. |
 | `scripts/seed-demo.sh` | Create demo rooms/guests/reservations through the API. |
+| `scripts/seed-multilane.mjs` | Seed the Multi-Lane Coordination Guide's 3-lane training scenario (rooms, rate plans, guests, reservations, stays, work orders). Run `seed-demo.sh` first. Safe to re-run. |
+| `scripts/seed-hotel-map-filler.mjs` | Add cosmetic filler rooms (no guests/reservations) so every Multi-Lane floor has 16 rooms — fills out the Map & Housekeeping page instead of leaving each floor's 2-3 real scenario rooms adrift in a mostly-empty corridor. Run after `seed-multilane.mjs`. Safe to re-run. |
 | `scripts/check-shared.sh` | Fail if a vendored `_shared` copy has drifted. |
 | `scripts/check-room-layouts.mjs` | Validate the 3D rooms — reachability **and** geometry. `--sizes` prints rendered fixture sizes. |
 | `scripts/measure-models.mjs` | Measure every `.glb`: bounding box, triangles, textures. |

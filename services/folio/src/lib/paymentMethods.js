@@ -13,6 +13,8 @@
 //
 // PURE — no Prisma, no I/O, so it is unit-testable without a database and
 // importable from a route file without pulling in Prisma at module load.
+const crypto = require('node:crypto');
+
 const PAYMENT_METHODS = {
   CASH: { label: 'Cash', category: 'CASH' },
   CARD: { label: 'Card', category: 'CARD' },
@@ -50,10 +52,38 @@ function isEWallet(method) {
   return categoryOf(method) === 'E_WALLET';
 }
 
+// A believable-looking gateway/bank reference for a MANUALLY posted payment
+// that didn't come with its own — the QR flow already mints one of these
+// (lib/paymentIntent.js's SIM-<hex>) the moment an intent is confirmed, but
+// Post Payment / Take Payment left Payment.gatewayRef blank unless staff
+// happened to type one in. Same shape, extended to the methods that actually
+// have something real-world to imitate:
+//   CARD          -> an authorization code a terminal would print
+//   BANK_TRANSFER -> a bank's own transaction/reference number
+//   everything else (CASH, a manual E_WALLET entry, an unknown method)
+//     -> null: there is no gateway or bank behind a cash payment, and a
+//        manual e-wallet entry is staff typing in what the guest's own app
+//        already showed them, not something this system can invent.
+//
+// A route call site decides whether to USE this — it never overrides a
+// gatewayRef staff actually entered, so this only ever fills a gap.
+function simulateGatewayRef(method) {
+  const hex = () => crypto.randomBytes(6).toString('hex').toUpperCase();
+  switch (String(method || '').toUpperCase()) {
+    case 'CARD':
+      return `AUTH-${hex()}`;
+    case 'BANK_TRANSFER':
+      return `BANKREF-${hex()}`;
+    default:
+      return null;
+  }
+}
+
 module.exports = {
   PAYMENT_METHODS,
   PAYMENT_METHOD_CODES,
   E_WALLET_METHODS,
   categoryOf,
   isEWallet,
+  simulateGatewayRef,
 };

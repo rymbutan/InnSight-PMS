@@ -10,6 +10,10 @@ const CHARGE_CODES = [
   { code: 'PK', name: 'Parking', category: 'SERVICE', glAccount: '4210', taxable: true },
   { code: 'DM', name: 'Damage', category: 'MISC', glAccount: '4900', taxable: false },
   { code: 'AO', name: 'Add-on / Special Request', category: 'SERVICE', glAccount: '4220', taxable: true },
+  // A surcharge on top of what a guest already agreed to pay, for a method
+  // that costs the property something to process — never taxed again on top
+  // of itself. See policies.js's paymentProcessingFeeCents.
+  { code: 'PF', name: 'Payment Processing Fee', category: 'FEE', glAccount: '4910', taxable: false },
   // FACILITY is its own category so the night audit can report walk-in facility
   // income apart from a resident guest's extras — a non-guest paying for the pool
   // is not the same line of business as a minibar charge. classifyTransactions and

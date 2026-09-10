@@ -80,9 +80,13 @@ DAY3=$(date -v+3d +%Y-%m-%d 2>/dev/null || date -d '+3 days' +%Y-%m-%d)
 DAY5=$(date -v+5d +%Y-%m-%d 2>/dev/null || date -d '+5 days' +%Y-%m-%d)
 
 mkres() {
+  # paymentType is mandatory: POST /reservations refuses to create a booking
+  # without depositCents > 0 and a valid paymentType (the Mandatory
+  # Downpayment Constraint) — this used to omit it, so this script 400'd on
+  # every call the moment that constraint shipped.
   local guestName="$1" rt="$2" ci="$3" co="$4"
   curl -s -X POST "$GATEWAY/api/reservations" "${H_JSON[@]}" \
-    -d "{\"guestName\":\"$guestName\",\"roomTypeCode\":\"$rt\",\"checkIn\":\"$ci\",\"checkOut\":\"$co\",\"adults\":2,\"totalEstimateCents\":300000,\"depositCents\":100000}" \
+    -d "{\"guestName\":\"$guestName\",\"roomTypeCode\":\"$rt\",\"checkIn\":\"$ci\",\"checkOut\":\"$co\",\"adults\":2,\"totalEstimateCents\":300000,\"depositCents\":100000,\"paymentType\":\"CASH\"}" \
     | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('id',''))"
 }
 

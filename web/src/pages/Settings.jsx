@@ -35,6 +35,30 @@ function SettingCard({ icon, title, subtitle, children, onSubmit, busy, action, 
   );
 }
 
+// One collapsible bar per settings category — closed by default, so a page
+// that used to be a long scroll of every card at once now opens on four
+// clean rows and lets staff expand only the section they came for.
+function AccordionSection({ icon, title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={`set-accordion${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="set-accordion-header"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="set-accordion-icon">
+          <Icon name={icon} size={16} strokeWidth={1.9} />
+        </span>
+        <span className="set-accordion-title">{title}</span>
+        <Icon name="chevron-down" size={16} className="set-accordion-caret" />
+      </button>
+      {open && <div className="set-accordion-body">{children}</div>}
+    </div>
+  );
+}
+
 function Field({ label, children }) {
   return (
     <div className="set-field">
@@ -56,7 +80,11 @@ export default function Settings() {
   const [busy, setBusy] = useState('');
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
   const [taxRates, setTaxRates] = useState({
-    vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0, country: 'PH',
+    vat: 12,
+    serviceCharge: 10,
+    localTax: 0,
+    realPropertyTax: 0,
+    country: 'PH',
   });
   // The country whose rates the form is currently showing/editing — starts as
   // the property's own (whatever the tax-rates fetch below answers with), but
@@ -64,6 +92,10 @@ export default function Settings() {
   // switching the property to it. Kept separate from `taxRates.country` so
   // typing in the box doesn't refetch on every keystroke.
   const [taxCountryInput, setTaxCountryInput] = useState('');
+  // Surcharge on CARD/BANK_TRANSFER payments — see policies.js's
+  // paymentProcessingFeeCents and the Folios page's Payment tab, which shows
+  // this same figure as a live preview before a payment is posted.
+  const [paymentFeePercent, setPaymentFeePercent] = useState(0);
   const [hotel, setHotel] = useState({
     name: '',
     address: '',
@@ -100,7 +132,14 @@ export default function Settings() {
         setTaxCountryInput(r.data.country);
       })
       .catch(() => {});
-    api.get('/api/settings/hotel').then((r) => setHotel(r.data)).catch(() => {});
+    api
+      .get('/api/settings/hotel')
+      .then((r) => setHotel(r.data))
+      .catch(() => {});
+    api
+      .get('/api/settings/payment-fee-percent')
+      .then((r) => setPaymentFeePercent(r.data.feePercent))
+      .catch(() => {});
   }, []);
 
   // Load a different jurisdiction's rates into the form WITHOUT changing which
@@ -270,8 +309,24 @@ export default function Settings() {
         data.country === hotel.country
           ? 'Tax rates saved. They apply to charges posted from now on.'
           : `Tax rates saved for ${data.country}. The property is currently set to ${hotel.country}, ` +
-            `so these will not apply to a real charge until Hotel Details' Country is changed to match.`
+              `so these will not apply to a real charge until Hotel Details' Country is changed to match.`
       );
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function savePaymentFeePercent(e) {
+    e.preventDefault();
+    setBusy('paymentFee');
+    try {
+      const { data } = await api.put('/api/settings/payment-fee-percent', {
+        feePercent: Number(paymentFeePercent),
+      });
+      setPaymentFeePercent(data.feePercent);
+      toast.success('Payment processing fee saved. It applies to card/bank transfer payments from now on.');
     } catch (err) {
       toast.error(errMsg(err));
     } finally {
@@ -351,8 +406,7 @@ export default function Settings() {
       </div>
 
       {/* ── Account information ── */}
-      <div className="set-section-label">Account Information</div>
-
+      <AccordionSection icon="user" title="Account Information">
       <div className="set-grid">
         <SettingCard
           icon="user"
@@ -393,9 +447,7 @@ export default function Settings() {
               required
             />
           </Field>
-          <div className="set-note">
-            Changing your username signs you out of every device.
-          </div>
+          <div className="set-note">Changing your username signs you out of every device.</div>
         </SettingCard>
 
         <SettingCard
@@ -479,105 +531,17 @@ export default function Settings() {
             />
           </Field>
         </div>
-        <div className="set-note">
-          Must include uppercase, lowercase, a number, and a special character.
-        </div>
+        <div className="set-note">Must include uppercase, lowercase, a number, and a special character.</div>
       </SettingCard>
-
-      {/* ── Appearance ── */}
-      <div className="set-section-label">System Appearance</div>
-
-      <div className="set-card is-wide">
-        <div className="set-card-head">
-          <span className="set-card-icon">
-            <Icon name="sun" size={16} strokeWidth={1.9} />
-          </span>
-          <div className="set-card-heading">
-            <div className="set-card-title">Theme</div>
-            <div className="set-card-sub">
-              Currently {theme === 'dark' ? 'dark' : 'light'}. Saved on this device only.
-            </div>
-          </div>
-        </div>
-        <div className="set-card-foot">
-          <button type="button" className="set-btn" onClick={toggleTheme}>
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} strokeWidth={1.9} />
-            Switch to {theme === 'dark' ? 'light' : 'dark'}
-          </button>
-        </div>
-      </div>
-
-      {canTheme ? (
-        <form className="set-card is-wide" onSubmit={applyColors}>
-          <div className="set-card-head">
-            <span className="set-card-icon">
-              <Icon name="palette" size={16} strokeWidth={1.9} />
-            </span>
-            <div className="set-card-heading">
-              <div className="set-card-title">System Color Changer</div>
-              <div className="set-card-sub">
-                Customize the accent colors used throughout the system
-              </div>
-            </div>
-          </div>
-          <div className="set-card-body">
-            <div className="set-row-3">
-              <Field label="Primary Accent">
-                <input
-                  type="color"
-                  className="set-color"
-                  value={accent.primary}
-                  onChange={(e) => setAccent({ ...accent, primary: e.target.value })}
-                />
-              </Field>
-              <Field label="Secondary Accent">
-                <input
-                  type="color"
-                  className="set-color"
-                  value={accent.secondary}
-                  onChange={(e) => setAccent({ ...accent, secondary: e.target.value })}
-                />
-              </Field>
-              <Field label="Hover / Dark Accent">
-                <input
-                  type="color"
-                  className="set-color"
-                  value={accent.hover}
-                  onChange={(e) => setAccent({ ...accent, hover: e.target.value })}
-                />
-              </Field>
-            </div>
-            <div className="set-note">
-              Applies to every user on every device. Buttons and highlights place white
-              text on the primary and hover colours, so choose shades dark enough to
-              read against.
-            </div>
-          </div>
-          <div className="set-card-foot">
-            <button
-              type="button"
-              className="set-btn is-quiet"
-              onClick={resetColors}
-              disabled={busy === 'accent'}
-            >
-              Reset to default
-            </button>
-            <button type="submit" className="btn-primary" disabled={busy === 'accent'}>
-              {busy === 'accent' ? 'Applying…' : 'Apply Colors'}
-            </button>
-          </div>
-        </form>
-      ) : null}
+      </AccordionSection>
 
       {/* ── Billing ──
           Both endpoints below (PUT /api/settings/tax-rates, PUT
-          /api/settings/hotel) are admin/manager-only, so the whole section —
-          heading included — is gated on `canBilling`, the same predicate the
-          System Color Changer above uses for `canTheme`. */}
+          /api/settings/hotel) are admin/manager-only, so both new sections —
+          headers included — are gated on `canBilling`, the same predicate the
+          System Color Changer below uses for `canTheme`. */}
       {canBilling ? (
-        <>
-          <div className="set-section-label">Billing</div>
-
+        <AccordionSection icon="credit-card" title="Billing">
           <form className="set-card is-wide" onSubmit={saveTaxRates}>
             <div className="set-card-head">
               <span className="set-card-icon">
@@ -586,9 +550,9 @@ export default function Settings() {
               <div className="set-card-heading">
                 <div className="set-card-title">Tax Rates</div>
                 <div className="set-card-sub">
-                  Applied to charges as they are posted, for whichever country is the property's
-                  jurisdiction (Hotel Details below) — never a guest's own nationality. Existing
-                  charges keep the rates they were posted with.
+                  Applied to charges as they are posted, for whichever country is the property's jurisdiction
+                  (Hotel Details) — never a guest's own nationality. Existing charges keep the rates they were
+                  posted with.
                 </div>
               </div>
             </div>
@@ -642,8 +606,8 @@ export default function Settings() {
                 ))}
               </div>
               <p className="muted" style={{ fontSize: 12 }}>
-                Local Tax and Real Property Tax ship at 0% — they vary by locality, so set them
-                to this property&rsquo;s actual rates before billing guests.
+                Local Tax and Real Property Tax ship at 0% — they vary by locality, so set them to this
+                property&rsquo;s actual rates before billing guests.
               </p>
             </div>
             <div className="set-card-foot">
@@ -653,6 +617,36 @@ export default function Settings() {
             </div>
           </form>
 
+          <SettingCard
+            icon="credit-card"
+            title="Payment Processing Fee"
+            subtitle="A surcharge posted to the Ledger whenever a guest pays by card or bank transfer — never cash or a manual e-wallet entry."
+            onSubmit={savePaymentFeePercent}
+            busy={busy === 'paymentFee'}
+            action="Save Fee"
+          >
+            <Field label="Fee (%)">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                style={{ maxWidth: 140 }}
+                value={paymentFeePercent}
+                onChange={(e) => setPaymentFeePercent(e.target.value)}
+              />
+            </Field>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Ships at 0% — no fee is charged until this is set. Changing it only affects payments posted from
+              now on; anything already on a folio keeps the fee it was charged with.
+            </p>
+          </SettingCard>
+        </AccordionSection>
+      ) : null}
+
+      {/* ── Hotel Details ── */}
+      {canBilling ? (
+        <AccordionSection icon="building-2" title="Hotel Details">
           <form className="set-card is-wide" onSubmit={saveHotel}>
             <div className="set-card-head">
               <span className="set-card-icon">
@@ -706,14 +700,14 @@ export default function Settings() {
                 </Field>
                 <Field label="">
                   <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
-                    Applies to new and edited bookings. Existing bookings keep the
-                    window they were taken with.
+                    Applies to new and edited bookings. Existing bookings keep the window they were taken
+                    with.
                   </p>
                 </Field>
               </div>
 
-              {/* Decides which country's Tax Rates (above) actually apply to a
-                  real charge — a guest's own nationality plays no part. */}
+              {/* Decides which country's Tax Rates (Billing) actually apply to
+                  a real charge — a guest's own nationality plays no part. */}
               <div className="set-row-3" style={{ marginTop: 12 }}>
                 <Field label="Country (ISO 2-letter, decides tax jurisdiction)">
                   <input
@@ -732,8 +726,90 @@ export default function Settings() {
               </button>
             </div>
           </form>
-        </>
+        </AccordionSection>
       ) : null}
+
+      {/* ── Appearance ── */}
+      <AccordionSection icon="palette" title="System Appearance">
+      <div className="set-card is-wide">
+        <div className="set-card-head">
+          <span className="set-card-icon">
+            <Icon name="sun" size={16} strokeWidth={1.9} />
+          </span>
+          <div className="set-card-heading">
+            <div className="set-card-title">Theme</div>
+            <div className="set-card-sub">
+              Currently {theme === 'dark' ? 'dark' : 'light'}. Saved on this device only.
+            </div>
+          </div>
+        </div>
+        <div className="set-card-foot">
+          <button type="button" className="set-btn" onClick={toggleTheme}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} strokeWidth={1.9} />
+            Switch to {theme === 'dark' ? 'light' : 'dark'}
+          </button>
+        </div>
+      </div>
+
+      {canTheme ? (
+        <form className="set-card is-wide" onSubmit={applyColors}>
+          <div className="set-card-head">
+            <span className="set-card-icon">
+              <Icon name="palette" size={16} strokeWidth={1.9} />
+            </span>
+            <div className="set-card-heading">
+              <div className="set-card-title">System Color Changer</div>
+              <div className="set-card-sub">Customize the accent colors used throughout the system</div>
+            </div>
+          </div>
+          <div className="set-card-body">
+            <div className="set-row-3">
+              <Field label="Primary Accent">
+                <input
+                  type="color"
+                  className="set-color"
+                  value={accent.primary}
+                  onChange={(e) => setAccent({ ...accent, primary: e.target.value })}
+                />
+              </Field>
+              <Field label="Secondary Accent">
+                <input
+                  type="color"
+                  className="set-color"
+                  value={accent.secondary}
+                  onChange={(e) => setAccent({ ...accent, secondary: e.target.value })}
+                />
+              </Field>
+              <Field label="Hover / Dark Accent">
+                <input
+                  type="color"
+                  className="set-color"
+                  value={accent.hover}
+                  onChange={(e) => setAccent({ ...accent, hover: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="set-note">
+              Applies to every user on every device. Buttons and highlights place white text on the primary
+              and hover colours, so choose shades dark enough to read against.
+            </div>
+          </div>
+          <div className="set-card-foot">
+            <button
+              type="button"
+              className="set-btn is-quiet"
+              onClick={resetColors}
+              disabled={busy === 'accent'}
+            >
+              Reset to default
+            </button>
+            <button type="submit" className="btn-primary" disabled={busy === 'accent'}>
+              {busy === 'accent' ? 'Applying…' : 'Apply Colors'}
+            </button>
+          </div>
+        </form>
+      ) : null}
+      </AccordionSection>
     </div>
   );
 }
