@@ -176,6 +176,11 @@ const LIVE_CHANNELS = [
   // other client, with nothing reporting the mismatch.
   'facility:changed',
   'facility:booked',
+  // Front desk ringing housekeeping about a room. A live-only pair: a call is a
+  // summons to somebody on shift NOW, so it is deliberately not persisted —
+  // see POST /api/housekeeping-calls.
+  'housekeeping:call_placed',
+  'housekeeping:call_answered',
 ];
 
 // ── Who may receive which channel ───────────────────────────────────────────
@@ -209,6 +214,10 @@ const CHANNEL_AUDIENCE = {
   maintenance: ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE'],
   audit: ['ADMIN', 'MANAGER', 'AUDITOR'],
   facilities: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
+  // BOTH sides of the call. Housekeeping has to hear it ring, and the desk that
+  // placed it has to see it answered — a caller who gets no answer-back rings
+  // again, which is the one failure mode a summons must not have.
+  housekeeping: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'],
 };
 
 const CHANNEL_DOMAIN = {
@@ -242,6 +251,8 @@ const CHANNEL_DOMAIN = {
   'audit:day_closed': 'audit',
   'facility:changed': 'facilities',
   'facility:booked': 'facilities',
+  'housekeeping:call_placed': 'housekeeping',
+  'housekeeping:call_answered': 'housekeeping',
 };
 
 // An unmapped channel is CLOSED, not open. Adding a channel to LIVE_CHANNELS and
@@ -320,10 +331,37 @@ liveSub.on('error', (e) => console.error('[Inventory] SSE redis error:', e.messa
 liveSub.subscribe(...LIVE_CHANNELS).catch((e) => {
   console.error('[Inventory] SSE subscribe failed:', e.message);
 });
+// A directed event names the one user it is for. Only the housekeeping call
+// carries this, and it is parsed for that channel alone — every other event
+// stays a pure Set lookup on the fanout path, which runs for every connected
+// tab on every business event in the property.
+//
+// The DESK that placed the call is always kept on the recipient list even when
+// the call is directed elsewhere: that is how its own handset learns the call
+// was answered. Filtering that out here would silence the answer-back.
+function directedTargetOf(channel, message) {
+  if (channel !== 'housekeeping:call_placed') return null;
+  try {
+    const d = JSON.parse(message);
+    return d.targetUserId ? { targetUserId: d.targetUserId, callerId: d.callerId || null } : null;
+  } catch {
+    // A frame we cannot parse is broadcast rather than dropped: failing to
+    // deliver a summons is worse than delivering it too widely.
+    return null;
+  }
+}
+
 liveSub.on('message', (channel, message) => {
   // Serialise the frame once, not once per client.
   const frame = `event: ${channel}\ndata: ${message}\n\n`;
+  const directed = directedTargetOf(channel, message);
   for (const client of sseClients) {
+    // A directed call reaches its target and the caller, nobody else. Enforced
+    // HERE, on the server, and not by the browser choosing whether to ring:
+    // every housekeeper's stream is otherwise entitled to this channel.
+    if (directed && client.userId !== directed.targetUserId && client.userId !== directed.callerId) {
+      continue;
+    }
     // `client.channels` is the intersection of what the stream offers and what
     // the connecting role is allowed (see mayReceive), so this single check is
     // both the routing rule — /api/rooms/events only takes room status, so a
@@ -427,7 +465,10 @@ function sseStream(channels) {
     const roles = Array.isArray(principal.roles) ? principal.roles : [];
     const allowed = new Set([...wanted].filter((c) => mayReceive(roles, c)));
 
-    const client = { res, channels: allowed };
+    // `userId` is what lets a directed event reach one person — see
+    // directedTargetOf on the fanout path. It comes from the redeemed ticket,
+    // never from a query parameter.
+    const client = { res, channels: allowed, userId: principal.sub || null };
     sseClients.add(client);
 
     // Listen on BOTH req and res, and on 'error' as well as 'close'. The old code

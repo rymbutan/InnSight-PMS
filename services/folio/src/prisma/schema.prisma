@@ -30,6 +30,16 @@ model Folio {
   closedAt     DateTime?
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
+  // Night-audit sign-off. The desk cannot check a guest out until an auditor has
+  // confirmed the balance and the payments on every folio of the stay.
+  //
+  // A TIMESTAMP rather than a boolean, because the approval has to be compared
+  // against the folio's own activity: anything posted AFTER this instant means
+  // the auditor signed off on a different bill, and the approval is stale. That
+  // check lives in auditApprovalOf() so nothing has to remember to clear a flag
+  // on every charge, payment, void and refund path.
+  auditApprovedAt DateTime?
+  auditApprovedBy String?
   transactions FolioTransaction[]
   payments     Payment[]
 
@@ -37,6 +47,8 @@ model Folio {
   @@index([status, openedAt])
   @@index([stayId])
   @@index([guestId])
+  // The check-out guard asks this per stay on every departure.
+  @@index([stayId, auditApprovedAt])
 }
 
 model FolioTransaction {

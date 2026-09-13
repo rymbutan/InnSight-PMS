@@ -6,6 +6,7 @@ import Icon from '../components/Icon';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth';
 import { isAdminRow, sortUsers } from '../lib/userSort';
+import { roleLabel } from '../lib/roles';
 
 export default function Users() {
   const confirm = useConfirm();
@@ -24,6 +25,34 @@ export default function Users() {
   // User Directory Display Hierarchy: Admin accounts pin permanently at the
   // top, then everyone else in strict A–Z order by name. See lib/userSort.js.
   const sortedUsers = useMemo(() => sortUsers(users), [users]);
+  // Free-text filter over the directory. Client-side on purpose: GET /api/users
+  // already returns the whole list in one response — this is staff, tens of rows,
+  // not the guest table — so a round trip per keystroke would add latency and a
+  // race between out-of-order responses without narrowing anything the browser
+  // does not already hold.
+  const [userQuery, setUserQuery] = useState('');
+  // Filtering the SORTED list rather than sorting the filtered one keeps the
+  // admin-pinned hierarchy from lib/userSort.js intact while typing: a matching
+  // admin stays pinned at the top instead of dropping into A-Z with everyone else.
+  const visibleUsers = useMemo(() => {
+    const q = userQuery.trim().toLowerCase();
+    if (!q) return sortedUsers;
+    return sortedUsers.filter((u) => {
+      // Both the role CODE and its human label, so "housekeeping" finds
+      // HOUSEKEEPING_MAINTENANCE and "front desk" finds FRONT_DESK. Matching the
+      // raw code alone would mean the words printed on the badges are not the
+      // words that work when you type them.
+      const roleText = (u.roles || [])
+        .map((r) => {
+          const code = r.roleCode || r;
+          return `${code} ${roleLabel(code)}`;
+        })
+        .join(' ');
+      return [u.username, u.displayName, u.email, roleText]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(q));
+    });
+  }, [sortedUsers, userQuery]);
   const [roles, setRoles] = useState([]);
   const [form, setForm] = useState({ username: '', password: '', displayName: '', email: '', roles: [] });
   const [msg, setMsg] = useState('');
@@ -104,6 +133,30 @@ export default function Users() {
       setResetBusy(false);
     }
   }
+  async function removeUser(u) {
+    const name = u.displayName || u.username;
+    // Types-to-confirm would be theatre for a dev tool, but a plain "are you
+    // sure" is too weak for something irreversible — so the dialog says exactly
+    // what survives and what does not, and names the reversible alternative.
+    const ok = await confirm({
+      title: `Delete ${name}?`,
+      message: `Permanently delete the account “${u.username}”?`,
+      detail:
+        'This cannot be undone. They are signed out everywhere immediately and the username becomes available again. ' +
+        'Work they recorded — folios, reservations, training results — is kept, but will no longer show their name. ' +
+        'To remove access without deleting the record, use Disable instead.',
+      confirmLabel: 'Delete account',
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/users/${u.id}`);
+      setMsg(`Deleted ${u.username}.`);
+      load();
+    } catch (e) {
+      setMsg(e.response?.data?.error || e.message);
+    }
+  }
+
   async function toggle(u) {
     const disabling = u.status === 'ACTIVE';
     // Only the destructive direction asks. Enabling an account restores access
@@ -349,11 +402,48 @@ export default function Users() {
 
       <div className="panel">
         <h3>Users</h3>
+        {/* A plain filter, not a submitted search: the rows below ARE the
+            results, so they narrow as you type and there is nothing to submit
+            and nothing to float over the table. Escape clears, which is the one
+            keystroke people try before reaching for the button. */}
+        <div className="user-search-bar">
+          <input
+            className="user-search-input"
+            type="search"
+            value={userQuery}
+            placeholder="Search by username, name, email or role"
+            onChange={(e) => setUserQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setUserQuery('');
+            }}
+            autoComplete="off"
+            aria-label="Search users by username, name, email or role"
+          />
+          {userQuery && (
+            <button type="button" className="secondary" onClick={() => setUserQuery('')}>
+              Clear
+            </button>
+          )}
+          {/* Only while filtering. A permanent count is noise on the common
+              case, but once rows are hidden the table no longer shows how many
+              accounts exist, so the count has to say both numbers. */}
+          {userQuery.trim() && (
+            <span className="muted user-search-count">
+              {visibleUsers.length} of {sortedUsers.length}
+            </span>
+          )}
+        </div>
         <table>
           <thead>
             <tr>
               <th>Username</th>
               <th>Name</th>
+              {/* The search box already matches on email, so it had to be
+                  visible: filtering a column nobody can read makes a row appear
+                  for a reason the table does not show. It is also how you tell
+                  two similar accounts apart, and what the Forgot password link
+                  is sent to. */}
+              <th>Email</th>
               <th className="t-c">Status</th>
               <th>Roles</th>
               <th>Last login</th>
@@ -361,10 +451,25 @@ export default function Users() {
             </tr>
           </thead>
           <tbody>
-            {sortedUsers.map((u) => (
+            {/* An explicit empty row rather than a bare table: a filter that
+                matches nothing otherwise renders a header with nothing under
+                it, which reads as the list failing to load. */}
+            {visibleUsers.length === 0 && (
+              <tr>
+                <td colSpan={7} className="t-c muted" style={{ padding: '18px 0' }}>
+                  No users match “{userQuery.trim()}”.
+                </td>
+              </tr>
+            )}
+            {visibleUsers.map((u) => (
               <tr key={u.id}>
                 <td>{u.username}</td>
                 <td>{u.displayName}</td>
+                {/* An em dash, not an empty cell: email is optional on a user
+                    record, and a blank reads as "failed to load" rather than
+                    "none set" — which matters now that it is what a password
+                    reset link would be sent to. */}
+                <td>{u.email || <span className="muted">—</span>}</td>
                 <td className="t-c">
                   <span className={`badge ${u.status === 'ACTIVE' ? 'confirmed' : 'cancelled'}`}>
                     {u.status}
@@ -407,24 +512,46 @@ export default function Users() {
                       <button className="small secondary" onClick={() => openReset(u)}>
                         Reset Password
                       </button>{' '}
-                      {/* Your own row never gets a WORKING Disable/Enable — the
-                          server refuses to disable the signed-in account either
-                          way (the self-lockout guard on PATCH/disable) — but the
-                          button still renders, invisibly, so it keeps its column
-                          width. Omitting it outright let "Reset Password" drift
-                          to a different position on this one row than every
-                          other row, since td.t-actions centres its content and a
-                          one-button group centres differently from a two-button
-                          one. */}
+                      {/* Your own row carries the SAME buttons as every other,
+                          disabled rather than hidden. The server refuses both
+                          actions on the signed-in account (the self-lockout
+                          guard on disable, and the self-delete guard on DELETE),
+                          so neither can work here — but an invisible button and
+                          an omitted one made this row render three different
+                          ways, and the reason was never stated anywhere the
+                          reader could see it. Disabled-with-a-title says it. */}
                       <button
                         className="small danger"
-                        style={u.id === me?.id ? { visibility: 'hidden', pointerEvents: 'none' } : undefined}
-                        tabIndex={u.id === me?.id ? -1 : undefined}
-                        aria-hidden={u.id === me?.id || undefined}
+                        disabled={u.id === me?.id}
+                        title={
+                          u.id === me?.id
+                            ? 'You cannot disable your own account — ask another admin.'
+                            : undefined
+                        }
                         onClick={() => u.id !== me?.id && toggle(u)}
                       >
                         {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                      </button>
+                      </button>{' '}
+                      {/* ADMIN only: deleting is the one action here a manager
+                          cannot do and nothing can undo — Disable is the
+                          reversible tool and stays available to both. Rendered
+                          on every row an admin can see, including their own, so
+                          the column does not change shape row to row. Mirrors
+                          DELETE /api/users/:id. */}
+                      {isAdmin && (
+                        <button
+                          className="small danger"
+                          disabled={u.id === me?.id}
+                          title={
+                            u.id === me?.id
+                              ? 'You cannot delete your own account — ask another admin.'
+                              : undefined
+                          }
+                          onClick={() => u.id !== me?.id && removeUser(u)}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </>
                   ) : (
                     <span className="muted">—</span>

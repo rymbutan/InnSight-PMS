@@ -36,6 +36,7 @@ export default function Dashboard() {
   const confirm = useConfirm();
   const { hasRole } = useAuth();
   const canDelete = hasRole('ADMIN', 'MANAGER');
+  const canBook = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   const [resTab, setResTab] = useState('Arrivals');
   const [resWhen, setResWhen] = useState('Today');
   const [actTab, setActTab] = useState('Sales');
@@ -325,10 +326,17 @@ export default function Dashboard() {
           <button className="icon" title="Refresh" onClick={load}>
             <Icon name="refresh-cw" size={16} />
           </button>
-          <button className="btn-cta" onClick={() => navigate('/reservations/new')}>
-            <Icon name="plus" size={14} style={{ marginRight: 6 }} />
-            Create new reservation
-          </button>
+          {/* Booking is a desk job. The dashboard is the one screen every role
+              lands on, so this button was offering Auditor and Housekeeping a
+              route into a page they are not authorised for — a CTA that can only
+              end in "not authorised" reads as the app being broken. Matches the
+              guard on /reservations/new and on POST /api/reservations. */}
+          {canBook && (
+            <button className="btn-cta" onClick={() => navigate('/reservations/new')}>
+              <Icon name="plus" size={14} style={{ marginRight: 6 }} />
+              Create new reservation
+            </button>
+          )}
         </div>
       </div>
 

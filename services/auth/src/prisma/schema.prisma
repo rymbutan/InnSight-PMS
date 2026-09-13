@@ -87,6 +87,25 @@ model RoomAsset {
   updatedAt  DateTime @updatedAt
 }
 
+// A pending "Forgot password?" request. One row per issued link.
+//
+// `tokenHash` holds a SHA-256 of the token, never the token — the plaintext
+// lives only in the email and the user's address bar, so this table cannot be
+// read back into a working reset link.
+model PasswordReset {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  // Set the moment a token is spent. Rows are kept rather than deleted so a
+  // second click on the same link can be told apart from a link that never
+  // existed, which is the difference between "already used" and "invalid".
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
 model AccessRequest {
   id          String              @id @default(uuid())
   email       String              @unique

@@ -192,6 +192,36 @@ export default function Housekeeping() {
   // (ADMIN/MANAGER) can preview it.
   const canPlay = hasRole('HOUSEKEEPING_MAINTENANCE', 'ADMIN', 'MANAGER');
   const isSupervisor = hasRole('ADMIN', 'MANAGER'); // can assign rooms to housekeepers
+  // Who may ring housekeeping. Mirrors CALLERS on POST /api/housekeeping-calls.
+  const canCall = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
+  const [callReason, setCallReason] = useState('CLEANING');
+  const [callNote, setCallNote] = useState('');
+  const [calling, setCalling] = useState(false);
+
+  async function callHousekeeping(room) {
+    setCalling(true);
+    try {
+      const { data } = await api.post('/api/housekeeping-calls', {
+        roomId: room.id,
+        reason: callReason,
+        note: callNote || undefined,
+      });
+      // Register it with the shell so the answer-back toast fires on THIS
+      // terminal only — every desk receives the channel, and a clerk should not
+      // be told a colleague's call was picked up.
+      window.__innsightTrackCall?.(data.callId, data.targetName);
+      toast.success(
+        data.targetName
+          ? `Ringing ${data.targetName} about room ${room.number}…`
+          : `Ringing housekeeping about room ${room.number}…`
+      );
+      setCallNote('');
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setCalling(false);
+    }
+  }
   const [hkUsers, setHkUsers] = useState([]);
 
   // ── Which inspection scenario each room hands out ─────────────────────────
@@ -274,13 +304,13 @@ export default function Housekeeping() {
       const r = await api.get('/api/rooms');
       setRooms(r.data);
       loadScenarioPins();
-      if (isSupervisor && hkUsers.length === 0) {
-        const u = await api.get('/api/users').catch(() => ({ data: [] }));
-        setHkUsers(
-          (u.data || []).filter((x) =>
-            (x.roles || []).some((rr) => (rr.roleCode || rr) === 'HOUSEKEEPING_MAINTENANCE')
-          )
-        );
+      // The roster, for the Assign-to dropdown. Everyone who can assign or call
+      // needs it now — not just supervisors — so it comes from the narrow
+      // /api/users/housekeepers route rather than the full user list, which the
+      // front desk is not entitled to read.
+      if ((isSupervisor || canCall) && hkUsers.length === 0) {
+        const u = await api.get('/api/users/housekeepers').catch(() => ({ data: [] }));
+        setHkUsers(u.data || []);
       }
     } catch (e) {
       toast.error(errMsg(e));
@@ -517,7 +547,63 @@ export default function Housekeeping() {
                 <dt>Assigned</dt>
                 <dd>{selected.assignedToName || <span className="muted">unassigned</span>}</dd>
               </dl>
-              {isSupervisor && (
+
+              {/* The desk's end of the internal line. Front Desk holds hk.read
+                  but NOT hk.update, so it cannot mark this room dirty itself —
+                  which is exactly why the control is a call and not a status
+                  change. The desk asks; housekeeping decides and updates. */}
+              {canCall && (
+                <div className="hk-call">
+                  <label style={{ margin: '0 0 4px' }}>Call housekeeping</label>
+                  <div className="hk-call-row">
+                    <select value={callReason} onChange={(e) => setCallReason(e.target.value)}>
+                      <option value="CLEANING">Room needs cleaning</option>
+                      <option value="SPILL">Spill / urgent clean</option>
+                      <option value="LINENS">Fresh linens</option>
+                      <option value="TURNDOWN">Turndown service</option>
+                      <option value="INSPECTION">Ready for inspection</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-primary hk-call-btn"
+                      disabled={calling}
+                      onClick={() => callHousekeeping(selected)}
+                    >
+                      <Icon name="phone" size={14} />
+                      {calling ? 'Ringing…' : 'Call'}
+                    </button>
+                  </div>
+                  <input
+                    className="hk-call-note"
+                    value={callNote}
+                    maxLength={200}
+                    placeholder="Optional message (e.g. guest arriving at 1pm)"
+                    onChange={(e) => setCallNote(e.target.value)}
+                  />
+                  {/* Says who will actually hear it BEFORE the button is
+                      pressed. The target comes from the room's assignment, so
+                      without this the same button quietly means two different
+                      things depending on a field further up the panel. */}
+                  <p className="hk-call-who">
+                    {selected.assignedToName ? (
+                      <>
+                        Rings <strong>{selected.assignedToName}</strong> only.
+                      </>
+                    ) : (
+                      <>
+                        Unassigned — rings <strong>every housekeeper on shift</strong>. Assign the room above
+                        to ring one person.
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+              {/* Front desk can assign too now: the workflow is assign, THEN
+                  ring, and a clerk who cannot name the housekeeper has nobody to
+                  call. Naming who works the room is not the same power as
+                  changing the room's status, which remains hk.update. */}
+              {(isSupervisor || canCall) && (
                 <div style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
                   <label style={{ margin: 0 }}>Assign to</label>
                   <select
