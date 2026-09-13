@@ -3,6 +3,8 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import RequestAccess from './pages/RequestAccess';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Reservations from './pages/Reservations';
 import Arrivals from './pages/Arrivals';
@@ -37,6 +39,10 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       {/* Public: asks for an account, never creates one. */}
       <Route path="/request-access" element={<RequestAccess />} />
+      {/* Public by necessity — somebody locked out cannot authenticate to ask for
+          a way back in. Neither page reveals whether an address exists. */}
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/book" element={<PublicBooking />} />
       <Route path="/portal/:confirmationNumber" element={<GuestPortal />} />
       {/* Public: opened by scanning a QR code at the front desk. The token in the
@@ -77,7 +83,10 @@ export default function App() {
         <Route
           path="/calendar"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
+            // Not housekeeping: the calendar is a booking view (availability and
+            // arrivals by date), and that role neither books nor needs the
+            // forward book. Their day is the room map.
+            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <Calendar />
             </ProtectedRoute>
           }
@@ -109,7 +118,11 @@ export default function App() {
         <Route
           path="/rooms"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
+            // Property configuration — room records, rate plans and promo codes.
+            // Management only: Front Desk looks rooms up through the map and the
+            // booking screens, Housekeeping through the map, so neither needs the
+            // editor that changes what a room IS.
+            <ProtectedRoute roles={['ADMIN', 'MANAGER']}>
               <Rooms />
             </ProtectedRoute>
           }

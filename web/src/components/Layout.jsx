@@ -7,6 +7,7 @@ import Icon from './Icon';
 import KeyboardShortcuts from './KeyboardShortcuts';
 import Greeting from './Greeting';
 import NotificationBell from './NotificationBell';
+import IncomingCall from './IncomingCall';
 import { applyAccent } from '../lib/accent';
 import { primaryRole } from '../lib/roles';
 import RoleBadge from './RoleBadge';
@@ -66,13 +67,13 @@ const NAV_SECTIONS = [
       {
         to: '/rooms',
         label: 'Hotel Room Information Editor',
-        // Everyone but Admin sees the plain-language name — the full name
-        // names what the page technically is (an editor of room records),
-        // which matters to whoever configures the property, not to a Front
-        // Desk or Housekeeping user just looking up a room.
+        // Only Manager sees the plain-language name now; Admin gets the full one.
+        // The page configures what a room IS — records, rate plans, promo codes —
+        // so Front Desk and Housekeeping no longer reach it at all. Both work
+        // from the map instead. Mirrors the guard on /rooms in App.jsx.
         nonAdminLabel: 'Hotel Rooms',
         icon: 'bed',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'],
+        roles: ['ADMIN', 'MANAGER'],
       },
       {
         to: '/amenities',
@@ -129,6 +130,10 @@ const COLLAPSE_KEY = 'innsight_sidebar_collapsed';
 
 export default function Layout() {
   const { user, logout, hasRole } = useAuth();
+  // The desk roles. Drives both the top-bar "create" menu and the calendar
+  // shortcut, which are the two top-bar controls whose every destination is
+  // guarded to exactly these three.
+  const canCreate = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   const { theme, toggle: toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -489,16 +494,23 @@ export default function Layout() {
           <div className="cb-actions">
             <Greeting name={user?.displayName} />
 
+            {/* Every item in this menu — reservation, walk-in, guest, facility
+                booking — is a desk action guarded to these three roles. For an
+                Auditor or Housekeeping user the whole menu was four buttons that
+                could only end in "not authorised", so the button itself goes
+                rather than opening a dead list. */}
             <div className="cb-icon-wrap" ref={createMenuRef}>
-              <button
-                type="button"
-                className="cb-icon-btn cb-icon-create"
-                title="Create new"
-                onClick={() => setCreateMenuOpen((o) => !o)}
-              >
-                <Icon name="plus" size={18} strokeWidth={2.5} />
-              </button>
-              {createMenuOpen && (
+              {canCreate && (
+                <button
+                  type="button"
+                  className="cb-icon-btn cb-icon-create"
+                  title="Create new"
+                  onClick={() => setCreateMenuOpen((o) => !o)}
+                >
+                  <Icon name="plus" size={18} strokeWidth={2.5} />
+                </button>
+              )}
+              {canCreate && createMenuOpen && (
                 <div className="cb-popmenu">
                   <button
                     type="button"
@@ -555,14 +567,20 @@ export default function Layout() {
             >
               <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
             </button>
-            <button
-              type="button"
-              className="cb-icon-btn"
-              title="Calendar"
-              onClick={() => navigate('/calendar')}
-            >
-              <Icon name="calendar" size={18} />
-            </button>
+            {/* Gated to the roles that can actually open /calendar. This button
+                is the only route to that page, so leaving it unguarded handed
+                Housekeeping a shortcut straight into a "not authorised" screen —
+                the guard has to be here, not only on the route. */}
+            {hasRole('ADMIN', 'MANAGER', 'FRONT_DESK') && (
+              <button
+                type="button"
+                className="cb-icon-btn"
+                title="Calendar"
+                onClick={() => navigate('/calendar')}
+              >
+                <Icon name="calendar" size={18} />
+              </button>
+            )}
             <NotificationBell userId={user?.id} />
 
             {/* The role, spelled out, in place of an avatar initial — a circle
@@ -650,6 +668,10 @@ export default function Layout() {
         </main>
       </div>
       <KeyboardShortcuts />
+      {/* In the SHELL, not on a page: a call has to interrupt wherever the
+          housekeeper happens to be, which is the difference between a call and
+          a notification. */}
+      <IncomingCall />
     </div>
   );
 }

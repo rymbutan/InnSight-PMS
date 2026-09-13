@@ -3,6 +3,7 @@ const PDFDocument = require('pdfkit');
 const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/auth');
 const { classifyTransactions } = require('../lib/folioSummary');
+const { auditApprovalOf } = require('../lib/auditApproval');
 const { folioListRow } = require('../lib/folioList');
 const { folioPrintModel } = require('../lib/folioPrintModel');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
@@ -581,9 +582,88 @@ router.get('/folios/outstanding', requireRole(...ROLE_GROUPS.DESK_AUDIT), async 
       .filter((f) => f.balanceCents !== 0n)
       .map((f) => ({ ...f, balanceCents: f.balanceCents.toString() }));
 
-    res.json({ stayId, unsettled });
+    // Folios still awaiting night-audit sign-off, reported alongside the unpaid
+    // ones so the check-out guard makes both decisions from a single call. A
+    // zero balance is not the same as a CHECKED balance: the second question is
+    // whether an auditor has confirmed the charges and payments are right.
+    const unapproved = folios
+      .map((f) => ({ f, a: auditApprovalOf(f, f.transactions) }))
+      .filter(({ a }) => !a.approved)
+      .map(({ f, a }) => ({
+        id: f.id,
+        folioNumber: f.folioNumber,
+        // Distinguishes "never checked" from "checked, then the bill moved".
+        stale: a.stale,
+      }));
+
+    res.json({ stayId, unsettled, unapproved });
   } catch (err) {
     console.error('[Folio] Outstanding error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Night-audit sign-off ────────────────────────────────────────────────────
+// POST /api/folios/:id/audit-approve — the auditor confirms this folio's charges
+// and payments are correct, which is what releases it for check-out.
+//
+// AUDITOR and ADMIN only — deliberately NOT Manager or Front Desk. The whole
+// value of the control is that the person who takes the money is not the person
+// who certifies it: letting the desk approve its own folio would make the gate
+// a formality. Admin is kept as the break-glass path for a property with no
+// auditor on shift, and every approval records WHO gave it.
+const AUDIT_SIGNOFF = ['AUDITOR', 'ADMIN'];
+router.post('/folios/:id/audit-approve', requireRole(...AUDIT_SIGNOFF), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({
+      where: { id: req.params.id },
+      include: { transactions: true },
+    });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+    if (folio.status !== 'OPEN') {
+      return res.status(409).json({ error: `Only an open folio can be approved (current: ${folio.status}).` });
+    }
+    const updated = await prisma.folio.update({
+      where: { id: folio.id },
+      data: { auditApprovedAt: new Date(), auditApprovedBy: req.user?.sub || null },
+    });
+    // Approving is what unblocks a guest waiting at the desk, so it is worth a
+    // live event rather than leaving the desk to re-poll the folio.
+    redis.publish(
+      'folio:audit',
+      JSON.stringify({
+        event: 'folio.audit_approved',
+        folioId: folio.id,
+        folioNumber: folio.folioNumber,
+        stayId: folio.stayId,
+      })
+    );
+    res.json({
+      id: updated.id,
+      folioNumber: updated.folioNumber,
+      auditApprovedAt: updated.auditApprovedAt,
+      auditApprovedBy: updated.auditApprovedBy,
+    });
+  } catch (err) {
+    console.error('[Folio] Audit approve error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/audit-revoke — withdraw a sign-off given in error.
+// Same roles: whoever may certify a bill must be able to un-certify it, or a
+// mistaken approval can only be undone in the database.
+router.post('/folios/:id/audit-revoke', requireRole(...AUDIT_SIGNOFF), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+    const updated = await prisma.folio.update({
+      where: { id: folio.id },
+      data: { auditApprovedAt: null, auditApprovedBy: null },
+    });
+    res.json({ id: updated.id, folioNumber: updated.folioNumber, auditApprovedAt: null });
+  } catch (err) {
+    console.error('[Folio] Audit revoke error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -729,7 +809,17 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
     // real, named guest attached via its stay). The reservation's guestName
     // is a required, always-present string, so this is reliable wherever a
     // folio has a stayId at all.
-    res.json({ ...folio, adults: reservation?.adults ?? null, guestName: reservation?.guestName ?? null });
+    // The DERIVED approval, not just the raw column: the page has to be able to
+    // show "approved, then the bill changed" as its own state, and that is a
+    // comparison against the transactions rather than anything stored.
+    const audit = auditApprovalOf(folio, folio.transactions);
+    res.json({
+      ...folio,
+      adults: reservation?.adults ?? null,
+      guestName: reservation?.guestName ?? null,
+      auditApproved: audit.approved,
+      auditApprovalStale: audit.stale,
+    });
   } catch (err) {
     console.error('[Folio] Get folio error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });

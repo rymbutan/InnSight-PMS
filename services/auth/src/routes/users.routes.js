@@ -117,6 +117,37 @@ router.post('/users', verifyToken, requireRole(...STAFF_ROLES), async (req, res)
   }
 });
 
+// GET /api/users/housekeepers — the on-shift roster, and nothing else.
+//
+// Exists so the FRONT DESK can assign a room to a housekeeper and then ring that
+// person. The desk does not hold `user.read` and must not: the alternative to
+// this route was widening GET /api/users, which would hand the desk every
+// account's email, status, roles and last-login to populate one dropdown.
+//
+// Narrow by construction rather than by discipline — it selects two columns for
+// one role, so there is no filter here that a later edit could accidentally
+// relax into a general user list.
+//
+// MUST be declared before /users/:id, or the param route swallows
+// "housekeepers" as an id and answers 404.
+const ROSTER_ROLES = ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'];
+router.get('/users/housekeepers', verifyToken, requireRole(...ROSTER_ROLES), async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        status: 'ACTIVE', // a disabled account cannot answer a call
+        roles: { some: { roleCode: 'HOUSEKEEPING_MAINTENANCE' } },
+      },
+      select: { id: true, displayName: true, username: true },
+      orderBy: { displayName: 'asc' },
+    });
+    res.json(users);
+  } catch (err) {
+    console.error('[Auth] Housekeeper roster error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/users/:id
 router.get('/users/:id', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
@@ -222,6 +253,80 @@ router.post('/users/:id/disable', verifyToken, requireRole(...STAFF_ROLES), asyn
     res.json(sanitize(user));
   } catch (err) {
     console.error('[Auth] Disable user error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// DELETE /api/users/:id — remove an account permanently.
+//
+// ADMIN ONLY, deliberately narrower than every other route in this file
+// (STAFF_ROLES = ADMIN + MANAGER). Disabling is reversible and is the right tool
+// for someone who has left; deleting is not, so it is not a manager's to do.
+//
+// WHAT SURVIVES, AND WHY THAT IS THE POINT.
+// Only UserRole is a real foreign key, and it is removed here in the same
+// transaction. Everything else that names a user — TrainingResult.userId,
+// AccessRequest.reviewedBy, and across services Reservation.createdBy,
+// FolioTransaction.postedBy, Folio.auditApprovedBy — stores the id as a plain
+// string in its own database. Those records are history: a folio that says who
+// approved it must keep saying so after the account is gone, or deleting a user
+// becomes a way to erase an audit trail. They keep the id; only the ability to
+// resolve it back to a name is lost, and TrainingResult already denormalises
+// userName for exactly that reason.
+//
+// Room.assignedTo is the one exception, because it is not history — it is a live
+// statement about who is working a room right now, and a dangling assignment
+// would let the desk ring a person who no longer exists. Cleared by inventory,
+// which owns that column, off the event published below.
+router.delete('/users/:id', verifyToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { roles: true },
+    });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+
+    // Deleting yourself signs you out of an account that no longer exists, with
+    // no way back in. Checked before the admin count, so the message names the
+    // actual problem rather than talking about admin coverage.
+    if (target.id === req.user?.sub) {
+      return res
+        .status(400)
+        .json({ error: 'You cannot delete your own account. Ask another admin to do it.' });
+    }
+
+    // The same last-admin guard the disable route carries, for the same reason:
+    // removing the only usable administrator locks everyone out of user
+    // management permanently, and deletion cannot be undone by re-enabling.
+    if (target.roles.some((r) => r.roleCode === 'ADMIN')) {
+      const otherActiveAdmins = await prisma.user.count({
+        where: { id: { not: target.id }, status: 'ACTIVE', roles: { some: { roleCode: 'ADMIN' } } },
+      });
+      if (otherActiveAdmins === 0) {
+        return res.status(400).json({
+          error:
+            'This is the only active account with the ADMIN role. Deleting it would lock everyone out of user management. Create another admin first.',
+        });
+      }
+    }
+
+    // One transaction: a half-deleted user whose roles are gone but whose row
+    // remains is an account that can sign in and do nothing, which is worse than
+    // either outcome on its own.
+    await prisma.$transaction([
+      prisma.userRole.deleteMany({ where: { userId: target.id } }),
+      prisma.user.delete({ where: { id: target.id } }),
+    ]);
+
+    // A deleted user's tokens are still cryptographically valid until they
+    // expire, and verifyToken checks the signature, not whether the row still
+    // exists — so without this they would keep working for the token's full TTL.
+    await revocation.revokeAllForUser(target.id);
+    redis.publish('auth:user_deleted', JSON.stringify({ userId: target.id, username: target.username }));
+
+    res.json({ id: target.id, username: target.username, deleted: true });
+  } catch (err) {
+    console.error('[Auth] Delete user error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

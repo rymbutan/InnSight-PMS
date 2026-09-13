@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -58,33 +58,22 @@ function Prim({ item }) {
 
 // Invisible hitboxes over the inspectable objects. They must not look like
 // targets until hovered, or the room would advertise its own answers.
-function Anchors({ anchors, resolved, hover, onPick, dragRef }) {
+function Anchors({ anchors, resolved, hover, groupRef }) {
   return (
-    <>
+    <group ref={groupRef}>
       {anchors.map((a) => {
         const done = resolved[a.id];
         const active = hover === a.id;
         const [w, h, d] = a.size || [1, 1, 1];
         return (
           <group key={a.id} position={[a.pos[0], (a.y ?? 0) + h / 2, a.pos[1]]}>
-            <mesh
-              onClick={(e) => {
-                e.stopPropagation();
-                // r3f v8 fires onClick on any press-release pair, so panning the
-                // camera across an object counts as clicking it unless the drag
-                // is filtered out here. This exact bug once turned "look around
-                // the room" into three false clicks (MINIGAMES_REBUILD.md).
-                if (dragRef?.current?.moved) return;
-                if (done) return;
-                onPick(a.id);
-              }}
-              onPointerOver={() => {
-                if (!done) document.body.style.cursor = 'pointer';
-              }}
-              onPointerOut={() => {
-                document.body.style.cursor = 'auto';
-              }}
-            >
+            {/* No onClick and no cursor swapping any more. Under pointer lock
+                there is no OS cursor to raycast from — r3f would keep firing off
+                the last position it saw — so what you are aiming at is decided by
+                <CrosshairAim> below, and the click that acts on it is handled
+                once, at the document level, rather than per mesh. `userData` is
+                how the raycast hit gets back to an anchor id. */}
+            <mesh userData={{ anchorId: a.id, done: !!done }}>
               <boxGeometry args={[w, h, d]} />
               <meshBasicMaterial
                 color={done ? '#22c55e' : '#38bdf8'}
@@ -97,9 +86,43 @@ function Anchors({ anchors, resolved, hover, onPick, dragRef }) {
           </group>
         );
       })}
-    </>
+    </group>
   );
 }
+
+// What the crosshair is on. Raycasts from the exact centre of the frame every
+// frame — NDC (0, 0) is the crosshair's own position, so the two can never drift
+// apart — and reports the nearest unresolved anchor.
+//
+// Only fires the callback when the answer CHANGES: this runs at 60fps, and a
+// setState per frame would re-render the whole shift sixty times a second.
+function CrosshairAim({ groupRef, onAim, paused }) {
+  const { camera } = useThree();
+  const ray = useRef(new THREE.Raycaster());
+  const last = useRef(null);
+  useFrame(() => {
+    let id = null;
+    if (!paused && groupRef.current) {
+      ray.current.setFromCamera(CENTRE, camera);
+      const hits = ray.current.intersectObjects(groupRef.current.children, true);
+      for (const h of hits) {
+        const ud = h.object.userData;
+        if (!ud?.anchorId) continue;
+        // An already-flagged item is not a target. `continue`, not `break`, so a
+        // resolved anchor cannot mask an unresolved one standing behind it.
+        if (ud.done) continue;
+        id = ud.anchorId;
+        break;
+      }
+    }
+    if (id !== last.current) {
+      last.current = id;
+      onAim(id);
+    }
+  });
+  return null;
+}
+const CENTRE = new THREE.Vector2(0, 0);
 
 export default function InspectionShift({
   room,
@@ -229,11 +252,42 @@ export default function InspectionShift({
   const [phase, setPhase] = useState('inspect');
   const [locked, setLocked] = useState(false);
 
-  const dragRef = useRef({ moved: false });
   const interactRef = useRef(null);
   const viewRef = useRef(null);
+  // The <group> holding every anchor hitbox, so the crosshair raycast has a
+  // single subtree to test instead of the whole room.
+  const anchorsGroup = useRef(null);
 
   const paused = phase !== 'inspect' || !!openAnchor || clipboard;
+
+  // Act on whatever the crosshair is on. Click and E do the same thing, which is
+  // the first-person convention — and E still works while the pointer is not
+  // locked, so the shift is finishable by keyboard alone.
+  //
+  // The click is read at the document level rather than on a mesh because under
+  // pointer lock there is no cursor for r3f to hit-test with. It is also gated on
+  // `locked`: the very first click is what ENTERS look mode (see Player), and
+  // that one must not also flag whatever happened to be under the crosshair.
+  useEffect(() => {
+    if (paused) return undefined;
+    const act = () => {
+      if (hover && !resolved[hover]) setOpenAnchor(hover);
+    };
+    const onDown = (e) => {
+      if (e.button !== 0) return;
+      if (document.pointerLockElement) act();
+    };
+    const onKey = (e) => {
+      if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+      if (e.key === 'e' || e.key === 'E') act();
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [paused, hover, resolved]);
 
   useEffect(() => {
     if (paused) return undefined;
@@ -345,20 +399,13 @@ export default function InspectionShift({
             {[...prims, ...stockProps].map((p, i) => (
               <Prim key={`p${i}`} item={p} />
             ))}
-            <Anchors
-              anchors={anchors}
-              resolved={resolved}
-              hover={hover}
-              onPick={setOpenAnchor}
-              dragRef={dragRef}
-            />
+            <Anchors anchors={anchors} resolved={resolved} hover={hover} groupRef={anchorsGroup} />
+            <CrosshairAim groupRef={anchorsGroup} onAim={setHover} paused={paused} />
             <Player
               paused={paused}
-              onHover={setHover}
               interactRef={interactRef}
               viewRef={viewRef}
               layout={playerLayout}
-              dragRef={dragRef}
               onLockedChange={setLocked}
             />
           </Canvas>
@@ -366,13 +413,20 @@ export default function InspectionShift({
 
           {nearby && !resolved[nearby.id] && !openAnchor && (
             <div className="fr-prompt">
-              <strong>{nearby.label}</strong> — click to inspect
+              <strong>{nearby.label}</strong> — click or press E to inspect
             </div>
           )}
 
+          {/* Until the pointer is locked, nothing about the mouse works, so say
+              so plainly in the middle of the view rather than letting someone
+              waggle a dead mouse at the room. */}
+          {!locked && !openAnchor && phase === 'inspect' && !clipboard && (
+            <div className="fr-prompt fr-prompt-enter">Click to look around</div>
+          )}
+
           <div className="fr-hint">
-            WASD / arrows to move · drag to look · click an item to inspect it ·{' '}
-            {locked ? 'Esc to release' : 'L for mouse-look'}
+            WASD / arrows to move · mouse to look · aim the crosshair and click or press E ·{' '}
+            {locked ? 'Esc to release the pointer' : 'click the room to start'}
           </div>
         </div>
 

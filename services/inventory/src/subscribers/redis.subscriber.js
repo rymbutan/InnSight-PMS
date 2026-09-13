@@ -42,6 +42,7 @@ function startSubscriber() {
     'stay:room_changed',
     'maintenance:room_out_of_service',
     'maintenance:room_restored',
+    'auth:user_deleted',
     (err) => {
       if (err) {
         console.error('[Inventory] Redis subscribe error:', err);
@@ -138,6 +139,23 @@ function startSubscriber() {
         await prisma.room.updateMany({ where: { id: data.roomId }, data: { status: 'DIRTY' } });
         broadcastStatus(data.roomId, 'DIRTY');
       }
+      // A deleted account must not stay named on a room. Unlike the ids on
+      // folios and reservations, this one is not history — it says who is
+      // working that room NOW, and the desk rings whoever it names. Left stale,
+      // it sends a call to a user that no longer exists, which reaches nobody
+      // and is only discovered when it rings out 30 seconds later.
+      if (channel === 'auth:user_deleted' && data.userId) {
+        const cleared = await prisma.room.updateMany({
+          where: { assignedTo: data.userId },
+          data: { assignedTo: null, assignedToName: null },
+        });
+        if (cleared.count) {
+          console.log(
+            `[Inventory] User ${data.userId} deleted — cleared ${cleared.count} room assignment(s).`
+          );
+        }
+      }
+
       // Note: room cleaning propagates via the direct PATCH /api/rooms/:id/status
       // route (which publishes room:status_changed), so there is no separate
       // housekeeping:room_cleaned channel to consume here.

@@ -56,6 +56,8 @@ export const LIVE_CHANNELS = [
   'audit:day_closed',
   'facility:changed',
   'facility:booked',
+  'housekeeping:call_placed',
+  'housekeeping:call_answered',
 ];
 
 // Named groups, so a page declares the DOMAIN it renders rather than pasting
@@ -96,6 +98,8 @@ export const CHANNEL_GROUPS = {
   ],
   audit: ['audit:day_opened', 'audit:day_closed'],
   facilities: ['facility:changed', 'facility:booked'],
+  // The simulated internal phone line between the desk and housekeeping.
+  housekeeping: ['housekeeping:call_placed', 'housekeeping:call_answered'],
 };
 
 // channels('reservations', 'stays') → the de-duplicated union of those groups.

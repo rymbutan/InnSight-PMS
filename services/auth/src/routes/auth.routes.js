@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const Redis = require('ioredis');
 const { verifyToken, JWT_SECRET, revocation, ALG, ISS_HUMAN, AUD } = require('../middleware/auth');
 const { verifyGoogleIdToken, verifyGoogleAccessToken } = require('../lib/googleIdToken');
+const { send } = require('../lib/notifier');
+const { publicUrl } = require('../lib/publicUrl');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
@@ -531,6 +533,133 @@ router.get('/avatar/:userId', verifyToken, async (req, res) => {
     res.end(bytes);
   } catch (err) {
     console.error('[Auth] Avatar fetch error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Forgot password ─────────────────────────────────────────────────────────
+// Self-service reset, for the link on the sign-in page.
+//
+// THE TOKEN IS NEVER STORED. A random 32 bytes goes in the email; only its
+// SHA-256 lands in PasswordReset. So this table cannot be read back into a
+// working link, and the plaintext exists only in the message and the user's
+// address bar.
+const RESET_TTL_MIN = 30;
+const RESET_THROTTLE_MIN = 2; // one email per user per this window
+const hashResetToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+
+// POST /api/auth/forgot-password  { email }
+//
+// ALWAYS answers 202 with the same body, whether or not the address belongs to
+// an account. Anything else turns this into an account-existence oracle that
+// anybody on the internet can query — and the sign-in page deliberately does not
+// leak that either ("Invalid credentials", never "no such user").
+router.post('/forgot-password', async (req, res) => {
+  const generic = {
+    message: 'If that email matches an account, a reset link is on its way.',
+  };
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'email is required.' });
+
+    const user = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
+    // A disabled account is not a route back in: someone whose access was
+    // revoked must not be able to mail themselves a new password.
+    if (!user || user.status !== 'ACTIVE') return res.status(202).json(generic);
+
+    // Throttle per ACCOUNT, not per address, so repeatedly submitting the form
+    // cannot be used to flood a real person's inbox. Silent — telling the
+    // sender they are being throttled would confirm the account exists.
+    const since = new Date(Date.now() - RESET_THROTTLE_MIN * 60_000);
+    const recent = await prisma.passwordReset.count({
+      where: { userId: user.id, createdAt: { gte: since } },
+    });
+    if (recent > 0) return res.status(202).json(generic);
+
+    const token = crypto.randomBytes(32).toString('hex');
+    // Outstanding links die when a new one is issued: two live links means a
+    // stale email in an inbox stays dangerous long after it was superseded.
+    await prisma.passwordReset.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    await prisma.passwordReset.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashResetToken(token),
+        expiresAt: new Date(Date.now() + RESET_TTL_MIN * 60_000),
+      },
+    });
+
+    const link = publicUrl(`reset-password?token=${token}`);
+    try {
+      await send({
+        to: user.email,
+        subject: 'Reset your InnSight password',
+        body:
+          `Hello ${user.displayName || user.username},\n\n` +
+          `Someone asked to reset the password for your InnSight account (${user.username}).\n\n` +
+          `Open this link to choose a new one. It expires in ${RESET_TTL_MIN} minutes and works once:\n\n` +
+          `${link}\n\n` +
+          `If this was not you, ignore this email — your password has not changed.\n`,
+      });
+    } catch (mailErr) {
+      // The row is already written, so the link is valid even if the mail hop
+      // failed. Logged, not surfaced: the response must not vary.
+      console.error('[Auth] Reset email send failed:', mailErr.message);
+    }
+    return res.status(202).json(generic);
+  } catch (err) {
+    console.error('[Auth] Forgot password error:', err.message);
+    // Even a server fault answers the same way, so a probe cannot read failure
+    // modes as signal about which addresses exist.
+    return res.status(202).json(generic);
+  }
+});
+
+// POST /api/auth/reset-password  { token, newPassword }
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'token is required.' });
+    if (!newPassword || String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'newPassword must be at least 8 characters.' });
+    }
+
+    const row = await prisma.passwordReset.findUnique({ where: { tokenHash: hashResetToken(token) } });
+    // One message for missing, spent and expired alike. Distinguishing them
+    // tells someone holding a stolen link which of those it is.
+    const invalid = { error: 'This reset link is invalid or has expired. Request a new one.' };
+    if (!row || row.usedAt || row.expiresAt < new Date()) return res.status(400).json(invalid);
+
+    const user = await prisma.user.findUnique({ where: { id: row.userId } });
+    if (!user || user.status !== 'ACTIVE') return res.status(400).json(invalid);
+
+    const passwordHash = await bcrypt.hash(String(newPassword), 10);
+    // Spend the token in the SAME transaction that changes the password, so a
+    // failure cannot leave a used password with a still-live link.
+    await prisma.$transaction([
+      prisma.passwordReset.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          // They chose this one themselves, so there is nothing to force a
+          // change of — unlike an admin-issued reset, which is a temporary
+          // credential someone else knows.
+          mustChangePwd: false,
+          failedAttempts: 0,
+        },
+      }),
+    ]);
+
+    // The old credential is gone; every session opened with it goes too. This is
+    // also the lockout cure: whoever reset it is back in without an admin.
+    await revocation.revokeAllForUser(user.id);
+    redis.publish('auth:password_reset', JSON.stringify({ userId: user.id }));
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Auth] Reset password error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

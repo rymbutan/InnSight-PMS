@@ -10,6 +10,7 @@ import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
 import SplitBillDialog from '../components/SplitBillDialog';
 import Modal from '../components/Modal';
+import { useAuth } from '../auth';
 import { paymentMethodGroups, isEWallet } from '../lib/paymentMethods';
 
 // Mirrors ReservationDetail.jsx's CreditCardsTab — never a full card number,
@@ -58,6 +59,13 @@ export default function Folios() {
   const [searchParams] = useSearchParams();
   const toast = useToast();
   const confirm = useConfirm();
+  // Sign-off is the auditor's, with Admin as the break-glass path for a shift
+  // with no auditor on. Deliberately excludes Manager and Front Desk: the
+  // control is only worth anything if the people taking the money are not the
+  // people certifying it. Mirrors AUDIT_SIGNOFF on the API.
+  const { hasRole } = useAuth();
+  const canSignOff = hasRole('AUDITOR', 'ADMIN');
+  const [auditBusy, setAuditBusy] = useState(false);
   const [folioId, setFolioId] = useState(searchParams.get('id') || '');
   const [folio, setFolio] = useState(null);
   const [statement, setStatement] = useState(null);
@@ -559,6 +567,42 @@ export default function Folios() {
     }
   }
 
+  // ── Night-audit sign-off ──────────────────────────────────────────────────
+  async function approveAudit() {
+    setAuditBusy(true);
+    try {
+      await api.post(`/api/folios/${folioId}/audit-approve`);
+      toast.success('Folio approved — the guest can now be checked out.');
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
+  async function revokeAudit() {
+    // Asks, because withdrawing is what strands a guest at the desk. Approving
+    // does not ask: it only ever unblocks.
+    const ok = await confirm({
+      title: 'Withdraw approval',
+      message: 'Withdraw the audit approval on this folio?',
+      detail: 'The guest will not be able to check out until it is approved again.',
+      confirmLabel: 'Withdraw approval',
+    });
+    if (!ok) return;
+    setAuditBusy(true);
+    try {
+      await api.post(`/api/folios/${folioId}/audit-revoke`);
+      toast.success('Approval withdrawn.');
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
   async function closeFolio() {
     const ok = await confirm({
       title: 'Close folio',
@@ -807,6 +851,19 @@ export default function Folios() {
                     </button>
                   </>
                 )}
+                {/* Night-audit sign-off. Only the auditor (and Admin as
+                    break-glass) sees these: the desk cannot certify its own
+                    takings, which is the entire point of the gate. */}
+                {folio.status === 'OPEN' && canSignOff && !folio.auditApproved && (
+                  <button className="btn-cta" onClick={approveAudit} disabled={auditBusy}>
+                    {auditBusy ? 'Approving…' : 'Approve for checkout'}
+                  </button>
+                )}
+                {folio.status === 'OPEN' && canSignOff && folio.auditApproved && (
+                  <button className="secondary" onClick={revokeAudit} disabled={auditBusy}>
+                    Withdraw approval
+                  </button>
+                )}
                 {folio.status === 'OPEN' && (
                   <button className="danger" onClick={closeFolio}>
                     Close folio
@@ -814,6 +871,25 @@ export default function Folios() {
                 )}
               </div>
             </div>
+            {/* Readable by EVERY role, not just the auditor. The desk is the one
+                who gets refused at check-out, so the desk is who most needs to
+                see why — and "approved, then the bill changed" has to be its own
+                message or a clerk re-reads an approval badge that no longer
+                means anything. */}
+            {folio.status === 'OPEN' && (
+              <p className={`folio-audit-line ${folio.auditApproved ? 'is-ok' : 'is-pending'}`}>
+                {folio.auditApproved ? (
+                  <>Audit approved — this folio is cleared for check-out.</>
+                ) : folio.auditApprovalStale ? (
+                  <>
+                    Approved earlier, but the bill has changed since. The auditor must re-check it
+                    before this guest can check out.
+                  </>
+                ) : (
+                  <>Awaiting auditor approval. The guest cannot check out until an auditor signs this off.</>
+                )}
+              </p>
+            )}
             {folio.stayId && siblings.length > 0 && (
               <p className="muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
                 This stay has {siblings.length + 1} open folios:{' '}
