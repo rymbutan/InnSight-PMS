@@ -77,36 +77,59 @@ function RoomShape({ slot, selected, flashing, onSelect, onHover }) {
   );
 }
 
-// Shown in place of the inspection when the signed-in user has not been
+// Shown in place of the turnover when the signed-in user has not been
 // assigned the operational role it belongs to.
 function GameLockNotice() {
   return (
     <p className="hk-game-lock">
       <Icon name="ban" size={14} strokeWidth={1.9} />
       <span>
-        Room inspection is assigned work. Ask your instructor to give you the
+        Room turnover is assigned work. Ask your instructor to give you the
         <strong> Housekeeping &amp; Maintenance</strong> role to run it.
       </span>
     </p>
   );
 }
 
+// Shown to a housekeeper on a room they have already cleaned. Signing a room
+// off as guest-ready is the supervisor's check ON that cleaning — the attendant
+// who turned the room over cannot certify their own work, which is the entire
+// reason Vacant Clean and Inspected are two states and not one. The inventory
+// service enforces the same split (INSPECTION_SIGNOFF_ROLES in
+// services/inventory/src/routes/inventory.routes.js), so this notice explains a
+// button that would be refused rather than merely hiding it.
+function SignOffLockNotice() {
+  return (
+    <p className="hk-game-lock">
+      <Icon name="ban" size={14} strokeWidth={1.9} />
+      <span>
+        This room is cleaned and waiting on a <strong>supervisor</strong> to inspect it. Housekeeping
+        does not sign off its own turnover.
+      </span>
+    </p>
+  );
+}
+
 // ── Context actions per status (the "detail panel" of the learning guide) ───
-// `canPlay` gates the inspection to users assigned the housekeeping role
-// (instructors — ADMIN/MANAGER — may also preview it).
-function panelActions(room, act, launchGame, canPlay) {
+// Two different gates, because these are two different jobs done by two
+// different people:
+//   `canClean`   — run the turnover on a dirty room (housekeeping's own work;
+//                  instructors, ADMIN/MANAGER, may also preview it).
+//   `canSignOff` — inspect a room that is already clean and pass it as
+//                  guest-ready. Supervisors only.
+function panelActions(room, act, launchGame, canClean, canSignOff) {
   switch (room.status) {
     case 'DIRTY':
       return (
         <>
           <p className="muted">
-            The room is only marked clean once it is inspected against the booking and every fault is
+            The room is only marked clean once it is worked against the booking and every fault is
             correctly fixed — there is no manual shortcut.
           </p>
-          {canPlay ? (
+          {canClean ? (
             <button className="btn-primary hk-action" onClick={() => launchGame('INSPECTION', room)}>
               <Icon name="search" size={14} strokeWidth={2} />
-              Inspect Room Against Booking
+              Turn Room Over Against Booking
             </button>
           ) : (
             <GameLockNotice />
@@ -122,13 +145,13 @@ function panelActions(room, act, launchGame, canPlay) {
     case 'CLEAN':
       return (
         <>
-          {canPlay ? (
+          {canSignOff ? (
             <button className="btn-primary hk-action" onClick={() => launchGame('INSPECTION', room)}>
               <Icon name="search" size={14} strokeWidth={2} />
-              Inspect Room Against Booking
+              Inspect &amp; Sign Off Room
             </button>
           ) : (
-            <GameLockNotice />
+            <SignOffLockNotice />
           )}
           <button className="secondary" onClick={() => act('DIRTY', 'Room degraded to Vacant Dirty.')}>
             Report Inadequate Cleaning
@@ -188,10 +211,46 @@ export default function Housekeeping() {
   const toast = useToast();
   const confirm = useConfirm();
   const { hasRole } = useAuth();
-  // The inspection is training assigned to the housekeeping role; instructors
+  // The turnover is training assigned to the housekeeping role; instructors
   // (ADMIN/MANAGER) can preview it.
-  const canPlay = hasRole('HOUSEKEEPING_MAINTENANCE', 'ADMIN', 'MANAGER');
+  const canClean = hasRole('HOUSEKEEPING_MAINTENANCE', 'ADMIN', 'MANAGER');
   const isSupervisor = hasRole('ADMIN', 'MANAGER'); // can assign rooms to housekeepers
+  // Signing a clean room off as guest-ready is the supervisor's check on
+  // housekeeping's work, so housekeeping cannot do it to its own rooms — see
+  // SignOffLockNotice, and the matching 403 in the inventory service. Held
+  // separately from `canClean` precisely so an account with only the
+  // housekeeping role gets one and not the other.
+  const canSignOff = isSupervisor;
+  // Who may ring housekeeping. Mirrors CALLERS on POST /api/housekeeping-calls.
+  const canCall = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
+  const [callReason, setCallReason] = useState('CLEANING');
+  const [callNote, setCallNote] = useState('');
+  const [calling, setCalling] = useState(false);
+
+  async function callHousekeeping(room) {
+    setCalling(true);
+    try {
+      const { data } = await api.post('/api/housekeeping-calls', {
+        roomId: room.id,
+        reason: callReason,
+        note: callNote || undefined,
+      });
+      // Register it with the shell so the answer-back toast fires on THIS
+      // terminal only — every desk receives the channel, and a clerk should not
+      // be told a colleague's call was picked up.
+      window.__innsightTrackCall?.(data.callId, data.targetName);
+      toast.success(
+        data.targetName
+          ? `Ringing ${data.targetName} about room ${room.number}…`
+          : `Ringing housekeeping about room ${room.number}…`
+      );
+      setCallNote('');
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setCalling(false);
+    }
+  }
   const [hkUsers, setHkUsers] = useState([]);
 
   // ── Which inspection scenario each room hands out ─────────────────────────
@@ -274,13 +333,13 @@ export default function Housekeeping() {
       const r = await api.get('/api/rooms');
       setRooms(r.data);
       loadScenarioPins();
-      if (isSupervisor && hkUsers.length === 0) {
-        const u = await api.get('/api/users').catch(() => ({ data: [] }));
-        setHkUsers(
-          (u.data || []).filter((x) =>
-            (x.roles || []).some((rr) => (rr.roleCode || rr) === 'HOUSEKEEPING_MAINTENANCE')
-          )
-        );
+      // The roster, for the Assign-to dropdown. Everyone who can assign or call
+      // needs it now — not just supervisors — so it comes from the narrow
+      // /api/users/housekeepers route rather than the full user list, which the
+      // front desk is not entitled to read.
+      if ((isSupervisor || canCall) && hkUsers.length === 0) {
+        const u = await api.get('/api/users/housekeepers').catch(() => ({ data: [] }));
+        setHkUsers(u.data || []);
       }
     } catch (e) {
       toast.error(errMsg(e));
@@ -517,7 +576,63 @@ export default function Housekeeping() {
                 <dt>Assigned</dt>
                 <dd>{selected.assignedToName || <span className="muted">unassigned</span>}</dd>
               </dl>
-              {isSupervisor && (
+
+              {/* The desk's end of the internal line. Front Desk holds hk.read
+                  but NOT hk.update, so it cannot mark this room dirty itself —
+                  which is exactly why the control is a call and not a status
+                  change. The desk asks; housekeeping decides and updates. */}
+              {canCall && (
+                <div className="hk-call">
+                  <label style={{ margin: '0 0 4px' }}>Call housekeeping</label>
+                  <div className="hk-call-row">
+                    <select value={callReason} onChange={(e) => setCallReason(e.target.value)}>
+                      <option value="CLEANING">Room needs cleaning</option>
+                      <option value="SPILL">Spill / urgent clean</option>
+                      <option value="LINENS">Fresh linens</option>
+                      <option value="TURNDOWN">Turndown service</option>
+                      <option value="INSPECTION">Ready for inspection</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-primary hk-call-btn"
+                      disabled={calling}
+                      onClick={() => callHousekeeping(selected)}
+                    >
+                      <Icon name="phone" size={14} />
+                      {calling ? 'Ringing…' : 'Call'}
+                    </button>
+                  </div>
+                  <input
+                    className="hk-call-note"
+                    value={callNote}
+                    maxLength={200}
+                    placeholder="Optional message (e.g. guest arriving at 1pm)"
+                    onChange={(e) => setCallNote(e.target.value)}
+                  />
+                  {/* Says who will actually hear it BEFORE the button is
+                      pressed. The target comes from the room's assignment, so
+                      without this the same button quietly means two different
+                      things depending on a field further up the panel. */}
+                  <p className="hk-call-who">
+                    {selected.assignedToName ? (
+                      <>
+                        Rings <strong>{selected.assignedToName}</strong> only.
+                      </>
+                    ) : (
+                      <>
+                        Unassigned — rings <strong>every housekeeper on shift</strong>. Assign the room above
+                        to ring one person.
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+              {/* Front desk can assign too now: the workflow is assign, THEN
+                  ring, and a clerk who cannot name the housekeeper has nobody to
+                  call. Naming who works the room is not the same power as
+                  changing the room's status, which remains hk.update. */}
+              {(isSupervisor || canCall) && (
                 <div style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
                   <label style={{ margin: 0 }}>Assign to</label>
                   <select
@@ -570,7 +685,8 @@ export default function Housekeeping() {
                   selected,
                   (status, msg) => act(selected.id, status, msg),
                   (type, room) => launchInspection(type, room),
-                  canPlay
+                  canClean,
+                  canSignOff
                 )}
               </div>
             </div>
@@ -605,9 +721,17 @@ export default function Housekeeping() {
                 );
             };
 
-            // The room was turned over by someone else; the student inspects it
-            // against the real booking and signs it off. Passing the inspection is
-            // what advances the room to Inspected in the live PMS.
+            // The student works the room against its real booking. What a pass
+            // is WORTH depends on who ran it: housekeeping's own turnover ends
+            // at Vacant Clean and waits on a supervisor, and only a supervisor's
+            // run signs the room off as guest-ready. Letting every pass land on
+            // Inspected made the sign-off step decorative — an attendant
+            // certified their own work, and the inventory service now refuses
+            // that outright.
+            const passStatus = canSignOff ? 'CLEAN_INSPECTED' : 'CLEAN';
+            const passMessage = canSignOff
+              ? `Room ${room.number} inspected — now guest-ready.`
+              : `Room ${room.number} cleaned — waiting on a supervisor's inspection.`;
             return (
               <InspectionShift
                 room={room}
@@ -627,7 +751,7 @@ export default function Housekeeping() {
                   // credit sends the room back for another turnover rather
                   // than through on a best-effort pass.
                   if (passesInspection(items)) {
-                    act(room.id, 'CLEAN_INSPECTED', `Room ${room.number} inspected — now guest-ready.`);
+                    act(room.id, passStatus, passMessage);
                   } else {
                     act(
                       room.id,

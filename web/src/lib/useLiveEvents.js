@@ -46,6 +46,8 @@ export const LIVE_CHANNELS = [
   'folio:refund_posted',
   'folio:early_departure_adjusted',
   'folio:transferred',
+  'folio:dispute_filed',
+  'folio:dispute_resolved',
   'guest:profile_created',
   'guest:profile_updated',
   'guest:flagged',
@@ -56,6 +58,8 @@ export const LIVE_CHANNELS = [
   'audit:day_closed',
   'facility:changed',
   'facility:booked',
+  'housekeeping:call_placed',
+  'housekeeping:call_answered',
 ];
 
 // Named groups, so a page declares the DOMAIN it renders rather than pasting
@@ -86,7 +90,12 @@ export const CHANNEL_GROUPS = {
     'folio:deposit_received',
     'folio:refund_posted',
     'folio:early_departure_adjusted',
-  'folio:transferred',
+    'folio:transferred',
+    // An e-wallet refund/chargeback claim is folio money like any other: the
+    // page that shows the queue has to repaint when a colleague files or
+    // resolves one, or two cashiers work from two different pictures of it.
+    'folio:dispute_filed',
+    'folio:dispute_resolved',
   ],
   guests: ['guest:profile_created', 'guest:profile_updated', 'guest:flagged'],
   maintenance: [
@@ -96,6 +105,8 @@ export const CHANNEL_GROUPS = {
   ],
   audit: ['audit:day_opened', 'audit:day_closed'],
   facilities: ['facility:changed', 'facility:booked'],
+  // The simulated internal phone line between the desk and housekeeping.
+  housekeeping: ['housekeeping:call_placed', 'housekeeping:call_answered'],
 };
 
 // channels('reservations', 'stays') → the de-duplicated union of those groups.

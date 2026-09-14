@@ -5,7 +5,7 @@ const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
 const { cancellationFeeCents, paymentProcessingFeeCents } = require('../lib/policies');
 const { missingDepositField } = require('../lib/missingDepositField');
 const { computeAddOns } = require('../lib/addOns');
-const { makeInventoryClient, NoInventoryError } = require('../lib/inventoryClient');
+const { makeInventoryClient, NoInventoryError, INVENTORY_URL } = require('../lib/inventoryClient');
 const { nightsBetween: nightsBetweenDates, utcDayKey } = require('../lib/date');
 const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
 const {
@@ -64,6 +64,30 @@ async function serviceTimes() {
 // (CARD/BANK_TRANSFER), same rule as Folio's own POST /folios/:id/payments.
 // Never trust a client-sent fee — this is the only place depositFeeCents is
 // computed, whether the booking is created here or completed later via PATCH.
+// Validate a promo code against inventory and return {code, percentOff}, or
+// `false` for a code that definitively is not valid, or `null` when the lookup
+// itself could not be completed.
+//
+// Those three outcomes are deliberately distinct. A staff booking must NOT
+// silently fall back to full price on a code the agent has already quoted to the
+// guest — that is a wrong number on a folio, discovered at checkout. So a
+// definitively-bad code is rejected and the agent retypes it. A lookup that
+// fails for infrastructure reasons is different: refusing the whole booking
+// because one service is briefly unreachable is worse than booking at rack rate,
+// which is exactly the trade-off the public path already makes.
+async function validatePromo(code) {
+  try {
+    const r = await fetch(`${INVENTORY_URL}/api/public/promo/${encodeURIComponent(code)}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return null;
+    const p = await r.json();
+    return p && p.valid ? { code: p.code, percentOff: p.percentOff } : false;
+  } catch {
+    return null;
+  }
+}
+
 async function depositFeeCentsFor(paymentType, depositCents) {
   if (paymentType !== 'CARD' && paymentType !== 'BANK_TRANSFER') return 0n;
   const feePercent = await folio.getPaymentFeePercent().catch(() => 0);
@@ -223,6 +247,7 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
       totalEstimateCents,
       depositCents,
       specialRequests,
+      promoCode,
       expectedArrivalTime,
       paymentType,
       ratePlan,
@@ -336,6 +361,37 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
     // amount/method, not on which room ends up assigned.
     const depositFeeCents = await depositFeeCentsFor(paymentType, depositCents);
 
+    // ── Promo code ───────────────────────────────────────────────────────────
+    // The discount is computed HERE and never taken from the request. The client
+    // sends a code, not a price: a percentage applied in the browser is a
+    // discount anyone with devtools can set to 100, and this endpoint already
+    // trusts `totalEstimateCents` from the client, so the one thing it must not
+    // also accept is the client's own arithmetic about it.
+    //
+    // Until now this path had no discount engine at all — the code was written
+    // into Special Requests as a note and the guest was charged full price,
+    // which is why a promo "worked" on the public site and did nothing at the
+    // desk.
+    let effectiveTotalCents = Number(totalEstimateCents || 0);
+    let appliedPromo = null;
+    if (promoCode) {
+      const promo = await validatePromo(promoCode);
+      if (promo === false) {
+        return res.status(400).json({ error: `Promo code ${String(promoCode).toUpperCase()} is not valid.` });
+      }
+      if (promo) {
+        effectiveTotalCents = Math.round(effectiveTotalCents * (1 - promo.percentOff / 100));
+        appliedPromo = `${promo.code} (-${promo.percentOff}%)`;
+      }
+    }
+    // Keep whatever the guest actually asked for: appending rather than
+    // replacing, because overwriting Special Requests with the promo note is a
+    // bug this codebase has already had once on the public path.
+    const specialRequestsWithPromo =
+      [specialRequests, appliedPromo ? `Promo applied: ${appliedPromo}` : null]
+        .filter(Boolean)
+        .join(' · ') || null;
+
     let reservation;
     try {
       const roomsTried = [];
@@ -367,9 +423,9 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
               adults: adults || 1,
               children: children || 0,
               source: source || 'DIRECT',
-              totalEstimateCents: BigInt(totalEstimateCents || 0),
+              totalEstimateCents: BigInt(effectiveTotalCents),
               depositCents: BigInt(depositCents || 0),
-              specialRequests,
+              specialRequests: specialRequestsWithPromo,
               addOns: enrichedAddOns,
               expectedArrivalTime,
               paymentType,

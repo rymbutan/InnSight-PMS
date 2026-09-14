@@ -449,9 +449,13 @@ export default function NewReservation() {
           gatewayRef: depositDetail.bankRef.trim(),
           transferredAt: new Date(depositDetail.transferredAt || nowForDateTimeLocal()).toISOString(),
         }),
-        // No discount engine yet — record the promo code on the reservation so
-        // staff can see and apply it, rather than silently dropping it.
-        ...(promoCode ? { specialRequests: `Promo code: ${promoCode}` } : {}),
+        // Send the CODE, never a computed discount. The server validates it,
+        // applies the percentage to the total and writes the note on the
+        // reservation — see POST /api/reservations. It used to be recorded as a
+        // Special Requests note and nothing more, so the guest was quoted a
+        // discount and charged full price. It also used to OVERWRITE whatever
+        // the guest had typed into Special Requests; the server now appends.
+        ...(promoCode ? { promoCode: promoCode.trim().toUpperCase() } : {}),
         ...(addOns.length
           ? { addOns: addOns.map((a) => ({ description: a.description, costCents: a.costCents })) }
           : {}),

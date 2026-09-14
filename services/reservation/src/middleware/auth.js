@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { createRevocation } = require('../lib/tokenRevocation');
+const { createNavScope } = require('../lib/navScope');
 
 // Values that have shipped in this repo as defaults or fallbacks. A length check
 // alone never caught them: the compose default was 41 characters, so it sailed
@@ -170,6 +171,16 @@ const ROLE_GROUPS = {
 // no-op and a disabled account kept working for the token's full 12h TTL.
 const revocation = createRevocation({ label: 'auth' });
 
+// Sidebar Visibility (Settings → Edit System Layout). An admin can hide whole
+// sections of the product from a role; this is what makes that a real boundary
+// instead of a hidden link. It hangs off verifyToken rather than being mounted
+// as its own middleware because the nine services mount their routers
+// differently — some wrap the entire /api tree, the auth service guards route by
+// route — and this is the one chokepoint every authenticated request already
+// passes through. See lib/navScope.js for the subtract-only rule and why a
+// prefix stays open while any visible section still needs it.
+const navScope = createNavScope({ label: 'auth' });
+
 async function verifyToken(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -186,6 +197,9 @@ async function verifyToken(req, res, next) {
     return res.status(401).json({ error: 'Session has been revoked. Please sign in again.' });
   }
   req.user = claims;
+  // Answers the response itself when the caller's role has lost this section, so
+  // there is nothing for the route behind it to decide.
+  if (await navScope.denyIfOutOfScope(req, res)) return;
   next();
 }
 
@@ -219,6 +233,7 @@ module.exports = {
   JWT_SECRET,
   ROLE_GROUPS,
   revocation,
+  navScope,
   signServiceToken,
   SERVICE_JWT_SECRET,
   ISS_HUMAN,

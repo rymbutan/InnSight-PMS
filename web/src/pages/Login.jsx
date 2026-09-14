@@ -171,6 +171,9 @@ export default function Login() {
             )}
 
             <p className="login-alt">
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
+            <p className="login-alt">
               Don&rsquo;t have an account? <Link to="/request-access">Sign Up</Link>
             </p>
 

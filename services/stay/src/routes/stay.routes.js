@@ -425,13 +425,29 @@ router.post('/check-out/:stayId', requireRole(...STAFF), async (req, res) => {
     // walk: this fails closed and asks the desk to retry, which is the safe
     // direction for money.
     try {
-      const { unsettled } = await folioCall.call(
+      const { unsettled, unapproved } = await folioCall.call(
         `${FOLIO_URL}/api/folios/outstanding?stayId=${encodeURIComponent(existing.id)}`
       );
       if (unsettled && unsettled.length) {
         return res.status(409).json({
           error: `Cannot check out: ${unsettled.length} folio(s) still carry a balance.`,
           folios: unsettled.map((f) => f.folioNumber),
+        });
+      }
+      // Night-audit sign-off. A zero balance says the money arrived; it does not
+      // say anyone checked that the charges and payments are RIGHT. The auditor
+      // certifies that, and until they have, the room is not released.
+      //
+      // Checked after the balance so the desk is told the more actionable thing
+      // first: an unpaid folio is theirs to settle, an unapproved one is not.
+      if (unapproved && unapproved.length) {
+        const stale = unapproved.some((f) => f.stale);
+        return res.status(409).json({
+          error: stale
+            ? `Cannot check out: ${unapproved.length} folio(s) changed after being approved and need the auditor to re-check them.`
+            : `Cannot check out: ${unapproved.length} folio(s) are awaiting auditor approval.`,
+          folios: unapproved.map((f) => f.folioNumber),
+          awaitingAudit: true,
         });
       }
     } catch (err) {

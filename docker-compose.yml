@@ -286,6 +286,14 @@ services:
       # sign-in. It is never logged. The previous code hardcoded `admin12345` and
       # printed it to stdout on every container start.
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      # Forgot-password mail. Mailhog catches everything in this stack, so a
+      # reset link is read at :8025 rather than actually delivered. PUBLIC_BASE_URL
+      # is what the link in that email points at — it must be an address the
+      # RECIPIENT can open, which is why it is configured rather than guessed.
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       # University sign-in. An OAuth *client* id is not a secret — it is handed to
       # every browser that loads the sign-in page. Leave it empty and Google
       # sign-in stays off: the endpoint returns 503 and the button never renders.

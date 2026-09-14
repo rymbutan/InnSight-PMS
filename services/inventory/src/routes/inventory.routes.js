@@ -615,6 +615,18 @@ router.post('/rooms', requireRole(...ROOM_ADMIN), async (req, res) => {
   }
 });
 
+// Signing a room off as inspected is a SUPERVISOR act, not part of cleaning
+// it. The room attendant who turned the room over cannot also be the person
+// who certifies their own work — that is the whole point of the CLEAN →
+// CLEAN_INSPECTED step, and STATUS_META.CLEAN in web/src/sim/statusMeta.js has
+// always described CLEAN as "awaiting supervisor inspection". Nothing enforced
+// it: HOUSEKEEPING_MAINTENANCE is in ROOM_STATUS_ROLES, so a housekeeper could
+// set any status including CLEAN_INSPECTED, and the inspection screen let them.
+// An account that holds a supervisor role as well as the housekeeping one is
+// still a supervisor — this checks for the absence of authority, not for the
+// presence of the housekeeping role.
+const INSPECTION_SIGNOFF_ROLES = ['ADMIN', 'MANAGER', 'FRONT_DESK'];
+
 // PATCH /api/rooms/:id/status  (housekeeping status transitions)
 router.patch('/rooms/:id/status', requireRole(...ROOM_STATUS_ROLES), async (req, res) => {
   try {
@@ -622,6 +634,15 @@ router.patch('/rooms/:id/status', requireRole(...ROOM_STATUS_ROLES), async (req,
     const allowed = ['CLEAN', 'CLEAN_INSPECTED', 'DIRTY', 'OCCUPIED', 'OUT_OF_ORDER', 'OUT_OF_SERVICE'];
     if (!allowed.includes(status)) {
       return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}.` });
+    }
+    if (status === 'CLEAN_INSPECTED') {
+      const roles = req.user?.roles || [];
+      if (!roles.some((r) => INSPECTION_SIGNOFF_ROLES.includes(r))) {
+        return res.status(403).json({
+          error:
+            'Housekeeping marks a room Vacant Clean; a supervisor inspects it and signs it off as guest-ready.',
+        });
+      }
     }
     const room = await prisma.room
       .update({
@@ -925,7 +946,11 @@ router.post('/facility-bookings', requireRole(...BOOKING), async (req, res) => {
 });
 
 // ── Housekeeping room assignment ───────────────────────────────────────────
-const HOUSEKEEPING_MGMT = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE'];
+// Front desk included: the desk is who learns a room needs attention first, and
+// the workflow is assign-then-ring — a clerk who cannot put a name on the room
+// has nobody to call. This grants naming the housekeeper for a room, NOT
+// changing the room's status, which stays hk.update and stays out of desk hands.
+const HOUSEKEEPING_MGMT = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE', 'FRONT_DESK'];
 // PATCH /api/rooms/:id/assign — assign a room to a housekeeper (or clear with null)
 router.patch('/rooms/:id/assign', requireRole(...HOUSEKEEPING_MGMT), async (req, res) => {
   try {
@@ -967,8 +992,11 @@ router.get('/promo-codes', requireRole(...ROLE_GROUPS.MGMT), async (req, res) =>
   }
 });
 
-// POST /api/promo-codes  (ADMIN)
-router.post('/promo-codes', requireRole(...ROOM_ADMIN), async (req, res) => {
+// POST /api/promo-codes  (ADMIN, MANAGER)
+// Promotions are a commercial decision, not a system one: a manager running a
+// shoulder-season rate should not need an administrator to type it in. MGMT
+// rather than ROOM_ADMIN, which stays reserved for changing what a room IS.
+router.post('/promo-codes', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
   try {
     const { code, description, percentOff, validFrom, validTo } = req.body;
     if (!code || !Number.isInteger(percentOff) || percentOff < 1 || percentOff > 100) {
@@ -991,8 +1019,10 @@ router.post('/promo-codes', requireRole(...ROOM_ADMIN), async (req, res) => {
   }
 });
 
-// PATCH /api/promo-codes/:code  (ADMIN) — edit / activate / deactivate
-router.patch('/promo-codes/:code', requireRole(...ROOM_ADMIN), async (req, res) => {
+// PATCH /api/promo-codes/:code  (ADMIN, MANAGER) — edit / activate / deactivate
+// Same reasoning as POST: whoever may create a promotion must be able to switch
+// it off again, or a manager can open a discount they cannot close.
+router.patch('/promo-codes/:code', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
   try {
     const b = req.body;
     const data = {};
@@ -1049,6 +1079,170 @@ router.patch('/facility-bookings/:id', requireRole(...BOOKING), async (req, res)
     res.json(b);
   } catch (err) {
     console.error('[Inventory] Update facility booking error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Front desk → housekeeping call ──────────────────────────────────────────
+// A simulated internal phone call: the desk rings housekeeping about a room, the
+// handset rings on the housekeeper's screen, and they pick up or decline.
+//
+// DELIBERATELY NOT PERSISTED. A call is a summons to whoever is on shift right
+// now — it is the ringing that carries the meaning, and a ring nobody heard is
+// not a task that should resurface tomorrow. Storing it would quietly turn this
+// into a work queue with no way to clear it, and the app already has a real one
+// of those in the maintenance service. If a cleaning request needs to OUTLIVE
+// the shift, that is a CleaningRequest record, not a call.
+//
+// Front desk cannot set a room dirty themselves (they hold hk.read, not
+// hk.update), which is exactly why this is a request and not a status change:
+// the desk asks, housekeeping decides.
+const CALLERS = ['ADMIN', 'MANAGER', 'FRONT_DESK'];
+const ANSWERERS = ['ADMIN', 'MANAGER', 'HOUSEKEEPING_MAINTENANCE'];
+// Both ends of a call may read the log: the desk that placed it and the
+// housekeeper whose handset it rang. De-duplicated because CALLERS and ANSWERERS
+// overlap on ADMIN and MANAGER.
+const CALL_LOG_READERS = [...new Set([...CALLERS, ...ANSWERERS])];
+const CALL_REASONS = new Set(['CLEANING', 'TURNDOWN', 'LINENS', 'SPILL', 'INSPECTION', 'OTHER']);
+
+// POST /api/housekeeping-calls  { roomId, reason, note }
+router.post('/housekeeping-calls', requireRole(...CALLERS), async (req, res) => {
+  try {
+    const { roomId, reason = 'CLEANING', note } = req.body || {};
+    if (!roomId) return res.status(400).json({ error: 'roomId is required.' });
+    if (!CALL_REASONS.has(reason)) {
+      return res.status(400).json({ error: `reason must be one of ${[...CALL_REASONS].join(', ')}.` });
+    }
+    // Resolved server-side so the ring shows a real room number rather than
+    // whatever the caller's browser happened to send.
+    const room = await prisma.room.findUnique({ where: { id: String(roomId) } });
+    if (!room) return res.status(404).json({ error: 'Room not found.' });
+
+    // Who the handset rings. Taken from the ROOM's assignment, not from the
+    // request: the desk assigns the room and then calls it, so the room record
+    // is the single statement of whose job it is. A caller cannot ring a person
+    // who is not on that room without reassigning it first — which is a change
+    // everyone can see, rather than a private choice inside one phone call.
+    //
+    // Unassigned rooms still ring the whole team. Refusing to place the call
+    // would be worse: the moment somebody most needs housekeeping is not the
+    // moment to be told to fill in a dropdown first.
+    const targetUserId = room.assignedTo || null;
+    // Written down BEFORE it is published, and the row's own id is the callId.
+    // The call used to exist only as a Redis message, so the moment it had been
+    // delivered there was no trace of it: a housekeeper coming on shift could
+    // not see what had been asked for while they were away, and nothing could
+    // distinguish a call that was answered from one that rang out. The ring is
+    // still the pub/sub message — this is the record of it.
+    const row = await prisma.housekeepingCall.create({
+      data: {
+        roomId: room.id,
+        roomNumber: room.number,
+        reason,
+        // Trimmed and capped: this lands in a modal on someone else's screen.
+        note: typeof note === 'string' && note.trim() ? note.trim().slice(0, 200) : null,
+        callerId: req.user?.sub || null,
+        callerName: req.user?.displayName || req.user?.username || 'Front desk',
+        targetUserId,
+        targetName: room.assignedToName || null,
+      },
+    });
+    const call = {
+      event: 'housekeeping.call_placed',
+      callId: row.id,
+      roomId: room.id,
+      roomNumber: room.number,
+      roomStatus: room.status,
+      targetUserId,
+      targetName: room.assignedToName || null,
+      reason,
+      note: row.note,
+      callerId: row.callerId,
+      callerName: row.callerName,
+      placedAt: row.placedAt.toISOString(),
+    };
+    redis.publish('housekeeping:call_placed', JSON.stringify(call));
+    res.status(201).json(call);
+  } catch (err) {
+    console.error('[Inventory] Housekeeping call error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/housekeeping-calls/:callId/answer  { accepted }
+// Answering publishes back so the DESK's handset stops ringing out and the clerk
+// is told who picked up. No lookup of the original call: it was never stored, and
+// the answer carries everything the caller needs to hear.
+router.post('/housekeeping-calls/:callId/answer', requireRole(...ANSWERERS), async (req, res) => {
+  try {
+    const { accepted = true, roomNumber = null, callerId = null } = req.body || {};
+    // updateMany, not update: a callId minted before this log existed — or one
+    // from a message that outlived its row — has nothing to update, and an
+    // answer must still reach the desk that is sitting there listening to it
+    // ring. Recording the answer is the bonus, not the point.
+    const answeredAt = new Date();
+    const recorded = await prisma.housekeepingCall.updateMany({
+      where: { id: String(req.params.callId), answeredAt: null },
+      data: {
+        answeredAt,
+        answeredById: req.user?.sub || null,
+        answeredByName: req.user?.displayName || req.user?.username || 'Housekeeping',
+        accepted: !!accepted,
+      },
+    });
+    const answer = {
+      event: 'housekeeping.call_answered',
+      callId: String(req.params.callId),
+      accepted: !!accepted,
+      // Lets the dashboard tell "I just logged this" from "someone else got
+      // there first" without a second request.
+      recorded: recorded.count > 0,
+      roomNumber,
+      // Echoed so the desk that placed the call can tell its own call from a
+      // colleague's — every desk terminal receives this channel.
+      callerId,
+      answeredById: req.user?.sub || null,
+      answeredByName: req.user?.displayName || req.user?.username || 'Housekeeping',
+      answeredAt: new Date().toISOString(),
+    };
+    redis.publish('housekeeping:call_answered', JSON.stringify(answer));
+    res.json(answer);
+  } catch (err) {
+    console.error('[Inventory] Housekeeping answer error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/housekeeping-calls?limit=&mine=1&waiting=1 — the call log.
+//
+// Both ends of the call can read it: housekeeping needs to know what was asked
+// for (including while they were off shift), and the desk needs to see whether
+// what they rang about was ever picked up. Deliberately not ALL_STAFF — a
+// guest-facing role has no business in the internal phone log.
+router.get('/housekeeping-calls', requireRole(...CALL_LOG_READERS), async (req, res) => {
+  try {
+    const { mine, waiting } = req.query;
+    // Capped rather than paged: this is a live worklist read newest-first, not
+    // an archive. 200 is more shift than anyone scrolls, and an uncapped query
+    // on an append-only table only ever gets slower.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const where = {};
+    // `mine` means the calls that rang MY handset — plus the unassigned ones,
+    // which ring the whole team and are therefore also mine to answer. Leaving
+    // those out would hide exactly the calls nobody has been made responsible
+    // for, which are the ones most likely to go unanswered.
+    if (mine === '1' && req.user?.sub) {
+      where.OR = [{ targetUserId: req.user.sub }, { targetUserId: null }];
+    }
+    if (waiting === '1') where.answeredAt = null;
+    const calls = await prisma.housekeepingCall.findMany({
+      where,
+      orderBy: { placedAt: 'desc' },
+      take: limit,
+    });
+    res.json(calls);
+  } catch (err) {
+    console.error('[Inventory] List housekeeping calls error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
