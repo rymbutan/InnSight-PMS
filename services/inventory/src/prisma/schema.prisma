@@ -155,3 +155,35 @@ model FacilitySlotLock {
   @@index([facilityId, startAt, endAt])
   @@index([bookingId])
 }
+
+// A call the front desk placed to housekeeping, and whether anyone picked it up.
+//
+// The call used to be pure Redis pub/sub with nothing written down, so a
+// housekeeper coming on shift had no idea what had been asked for while they
+// were away and nobody could tell an answered call from one that rang out. The
+// ring itself is still published the same way — this is the record of it, not
+// the mechanism.
+//
+// `accepted` stays NULL until someone answers, which is exactly the state the
+// housekeeping dashboard surfaces first: calls still waiting to be picked up.
+model HousekeepingCall {
+  id             String    @id @default(uuid())
+  roomId         String
+  roomNumber     String
+  reason         String
+  note           String?
+  callerId       String?
+  callerName     String?
+  // Whose handset it rang, copied from the room's assignment at the moment of
+  // the call. Null means it rang the whole team.
+  targetUserId   String?
+  targetName     String?
+  placedAt       DateTime  @default(now())
+  answeredAt     DateTime?
+  answeredById   String?
+  answeredByName String?
+  accepted       Boolean?
+
+  @@index([placedAt])
+  @@index([targetUserId, placedAt])
+}

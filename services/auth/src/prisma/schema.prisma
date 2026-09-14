@@ -255,6 +255,20 @@ model ScenarioAssignment {
   @@index([scenarioId])
 }
 
+// Generic key/value configuration owned by the auth service. Currently one key,
+// `nav.hidden` — the Sidebar Visibility map (Settings → Edit System Layout),
+// stored as JSON text of { ROLE: [sectionKey, …] }.
+//
+// It lives here rather than in the reservation service's AppSetting because it
+// is authorisation configuration: every service reads it (through Redis, see
+// lib/navScope.js) to decide whether a request belongs to a section the caller
+// still has, and the service that owns roles should own what narrows them.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model RolePermission {
   roleCode       String
   permissionCode String

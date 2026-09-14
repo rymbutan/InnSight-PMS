@@ -11,6 +11,7 @@ import StatusPill from '../components/StatusPill';
 import { SparkLine, BarChart } from '../components/Chart';
 import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf } from '../lib/outlookHeat';
 import Icon from '../components/Icon';
+import HousekeepingDashboard from './HousekeepingDashboard';
 
 const RES_TABS = ['Arrivals', 'Departures', 'Stayovers', 'In-House Guests', 'Pending Payment'];
 // "Overbookings" used to sit here and could only ever have been empty: the
@@ -31,6 +32,24 @@ function addDaysLocal(d, n) {
 }
 
 export default function Dashboard() {
+  const { hasRole } = useAuth();
+  // A pure housekeeping/maintenance account gets its own dashboard. Everything
+  // below this line is front-office: arrivals, departures, occupancy, the
+  // booking outlook, revenue history. A room attendant can act on none of it,
+  // and the reservations/audit/revenue calls behind it 403 for that role and
+  // get swallowed — so what they were actually shown was a page of empty tiles
+  // built from requests that had already failed.
+  //
+  // An account that ALSO holds ADMIN or MANAGER keeps the full view: they
+  // supervise housekeeping rather than work it, and the operational picture is
+  // the one they came for. The housekeeping view stays one click away on the map.
+  if (hasRole('HOUSEKEEPING_MAINTENANCE') && !hasRole('ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR')) {
+    return <HousekeepingDashboard />;
+  }
+  return <FrontOfficeDashboard />;
+}
+
+function FrontOfficeDashboard() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
@@ -63,7 +82,12 @@ export default function Dashboard() {
         api.get('/api/arrivals'),
         api.get('/api/in-house'),
         api.get('/api/departures'),
-        api.get('/api/reports/room-status'),
+        // Fail-soft like its four neighbours below. This was the one call in
+        // the batch without a catch, so any hiccup from the reports service
+        // rejected the whole Promise.all and replaced the dashboard with a red
+        // toast, while a failure of arrivals or reservations merely emptied a
+        // panel. An empty room-status donut is the right way to lose this.
+        api.get('/api/reports/room-status').catch(() => ({ data: { byStatus: {}, total: 0 } })),
         api.get('/api/audit/days').catch(() => ({ data: [] })),
         api.get('/api/reservations').catch(() => ({ data: [] })),
         api.get('/api/room-types').catch(() => ({ data: [] })),

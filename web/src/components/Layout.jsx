@@ -11,125 +11,31 @@ import IncomingCall from './IncomingCall';
 import { applyAccent } from '../lib/accent';
 import { primaryRole } from '../lib/roles';
 import RoleBadge from './RoleBadge';
+import CATALOGUE from '../lib/navSections.json';
 
 // The sidebar is the whole navigation surface now — there is no separate
 // hamburger list any more, so anything reachable has to be in here or behind a
 // topbar control.
 //
-// `roles` on each entry MUST mirror the ProtectedRoute guard on the matching
-// route in App.jsx. They are two copies of one fact, and when they disagree the
-// symptom is a visible link that dead-ends in "not authorised" — so if you
-// change a route's roles, change it here too.
+// The entries themselves are no longer written here. They live in
+// lib/navSections.json — THE catalogue, shared byte-for-byte with every service
+// (services/_shared/navSections.json) so that the sidebar, the route guards in
+// App.jsx and the server-side section guard cannot disagree about what a section
+// is or which APIs it covers. `roles` on an entry still has to mirror the
+// ProtectedRoute guard on the matching route; they are two copies of one fact,
+// and the symptom when they disagree is a visible link that dead-ends.
 //
-// Calendar and Walk-in are deliberately NOT listed: /calendar keeps working as a
-// route (the topbar calendar button and the dashboard link both go there) and
-// walk-in stays in the "create new" menu, where the act of starting one belongs.
-const NAV_SECTIONS = [
-  {
-    label: 'Main',
-    items: [{ to: '/', label: 'Dashboard', icon: 'layout-dashboard', end: true }],
-  },
-  {
-    label: 'Frontdesk',
-    items: [
-      { to: '/guests', label: 'Guests', icon: 'users', roles: ['ADMIN', 'MANAGER', 'FRONT_DESK'] },
-      {
-        to: '/folios',
-        label: 'Folios',
-        icon: 'file-text',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR'],
-      },
-      {
-        to: '/reservations',
-        label: 'Booking & Reservations',
-        // NOT 'calendar' — that is the top bar's own button, and the two sat
-        // close enough that the rail entry looked like a second copy of it.
-        icon: 'book-marked',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
-      },
-      {
-        to: '/arrivals',
-        label: 'Arrivals & Departures',
-        icon: 'arrow-left-right',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
-      },
-    ],
-  },
-  {
-    label: 'Housekeeping',
-    items: [
-      {
-        to: '/housekeeping',
-        label: 'Map & Housekeeping',
-        icon: 'map',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'],
-      },
-      {
-        to: '/rooms',
-        label: 'Hotel Room Information Editor',
-        // Only Manager sees the plain-language name now; Admin gets the full one.
-        // The page configures what a room IS — records, rate plans, promo codes —
-        // so Front Desk and Housekeeping no longer reach it at all. Both work
-        // from the map instead. Mirrors the guard on /rooms in App.jsx.
-        nonAdminLabel: 'Hotel Rooms',
-        icon: 'bed',
-        roles: ['ADMIN', 'MANAGER'],
-      },
-      {
-        to: '/amenities',
-        label: 'Amenities & Facilities',
-        icon: 'sparkles',
-        roles: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
-      },
-    ],
-  },
-  {
-    label: 'Accounting',
-    items: [
-      // ONE rail entry for both pages. It links to Reports; switching to Revenue
-      // happens in the page header (see ReportSwitcher), not here — a rail that
-      // expands to two items costs a click and a chevron to reach a destination
-      // that is one tab away once you have arrived.
-      {
-        to: '/reports',
-        label: 'Reports & Revenue',
-        icon: 'bar-chart',
-        matchPaths: ['/revenue'],
-        roles: ['ADMIN', 'MANAGER', 'AUDITOR'],
-      },
-      { to: '/audit', label: 'Night Audit', icon: 'sunrise', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
-    ],
-  },
-  {
-    label: 'Design & Layout',
-    items: [
-      // ONE rail entry for both editors. Scenarios is no longer listed: the two
-      // are tabs of a single page now (Rooms authors the room as it should be,
-      // Scenarios authors it as it should not), and /inspection-scenarios still
-      // resolves for anything already bookmarked.
-      {
-        to: '/room-layouts',
-        label: 'Room & Scenario Editor',
-        icon: 'box',
-        matchPaths: ['/inspection-scenarios'],
-        roles: ['ADMIN'],
-      },
-    ],
-  },
-  {
-    label: 'Settings',
-    items: [
-      { to: '/users', label: 'User & Roles', icon: 'shield', roles: ['ADMIN', 'MANAGER'] },
-      { to: '/health', label: 'Service Health', icon: 'activity', roles: ['ADMIN'] },
-      { to: '/settings', label: 'Settings', icon: 'settings' },
-    ],
-  },
-];
+// Calendar and Walk-in are deliberately NOT top-level entries: /calendar keeps
+// working as a route (the topbar calendar button and the dashboard link both go
+// there) and walk-in stays in the "create new" menu, where starting one belongs.
+// Both are listed as `matchPaths` of the entry they belong under, so the rail
+// highlights correctly while you are on them.
+const NAV_SECTIONS = CATALOGUE.sections;
 
 const COLLAPSE_KEY = 'innsight_sidebar_collapsed';
 
 export default function Layout() {
-  const { user, logout, hasRole } = useAuth();
+  const { user, logout, hasRole, hasSection, refreshSections } = useAuth();
   // The desk roles. Drives both the top-bar "create" menu and the calendar
   // shortcut, which are the two top-bar controls whose every destination is
   // guarded to exactly these three.
@@ -182,8 +88,16 @@ export default function Layout() {
 
   // Close the account menu on navigation — every item in it navigates, and a
   // menu still hanging open over the page you just moved to reads as a bug.
+  //
+  // Also the moment the sidebar re-reads which sections it may show. An admin
+  // saving a new layout should reach staff who are already signed in, and the
+  // alternatives are worse: polling costs a request a minute forever, and baking
+  // the list into the token would mean nothing changes until everyone signs out.
+  // One small request per navigation, which is when the rail is being looked at
+  // anyway. It is fail-soft — see hasSection in auth.jsx.
   useEffect(() => {
     setAcctMenuOpen(false);
+    refreshSections();
   }, [location.pathname]);
 
   // ── Account menu keyboard handling ──────────────────────────────────────
@@ -274,11 +188,18 @@ export default function Layout() {
     }, 250);
   }
 
-  // Drop entries this role cannot reach, then drop any group left with nothing
-  // in it — otherwise a housekeeper sees an "Accounting" heading over blank space.
+  // Drop entries this role cannot reach, then the ones an admin has hidden from
+  // it in Settings → Edit System Layout, then any group left with nothing in it —
+  // otherwise a housekeeper sees an "Accounting" heading over blank space.
+  //
+  // Two filters, not one: the role check is the permanent boundary and the
+  // section check is the configurable one, and only the second can be turned off
+  // by somebody clicking a checkbox. `core` entries skip the second entirely.
   const sections = NAV_SECTIONS.map((s) => ({
     ...s,
-    items: s.items.filter((n) => !n.roles || hasRole(...n.roles)),
+    items: s.items.filter(
+      (n) => (!n.roles || hasRole(...n.roles)) && (n.core || hasSection(n.key))
+    ),
   })).filter((s) => s.items.length > 0);
 
   const initial = (user?.displayName || '?').slice(0, 1).toUpperCase();

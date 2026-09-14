@@ -6,7 +6,7 @@ import Icon from '../components/Icon';
 import Avatar from '../components/Avatar';
 import { useToast, errMsg } from '../components/Toast';
 import { DEFAULT_ACCENT, applyAccent } from '../lib/accent';
-import { primaryRole } from '../lib/roles';
+import { primaryRole, roleLabel } from '../lib/roles';
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -109,6 +109,10 @@ export default function Settings() {
   });
 
   const canTheme = hasRole('ADMIN');
+  // Editing which sections a role can reach is ADMIN-only — MANAGER is one of
+  // the roles it configures, so a manager with access could restore anything an
+  // admin had taken from them.
+  const canLayout = hasRole('ADMIN');
   // Both Billing endpoints (PUT /api/settings/tax-rates, PUT /api/settings/hotel)
   // are admin/manager-only server-side. Gate the cards the same way the System
   // Color Changer above gates on `canTheme`, so a FRONT_DESK user is not shown
@@ -810,6 +814,151 @@ export default function Settings() {
         </form>
       ) : null}
       </AccordionSection>
+
+      {/* ── Edit System Layout ──
+          Which sections of the product each role can reach. ADMIN only, and
+          narrower than Billing on purpose: MANAGER is one of the roles this
+          configures, so a manager who could edit it could hand themselves back
+          anything an admin had taken away. */}
+      {canLayout ? (
+        <AccordionSection icon="layout-dashboard" title="Edit System Layout">
+          <SidebarVisibility />
+        </AccordionSection>
+      ) : null}
     </div>
+  );
+}
+
+// ── Sidebar Visibility ───────────────────────────────────────────────────────
+// A checkbox per (role, section). Unticking one hides that section's sidebar
+// entry for that role, redirects the route if the URL is typed, and closes the
+// APIs the section owns once no remaining section needs them — see
+// services/_shared/navScope.js for why that last one is a union and not a
+// per-page map.
+//
+// The grid is rendered from what the server returns, not from a list held here:
+// a section added to navSections.json shows up in this editor with no change to
+// this file, and cannot be ticked into a state the server would reject.
+function SidebarVisibility() {
+  const toast = useToast();
+  const { refreshSections } = useAuth();
+  const [cfg, setCfg] = useState(null); // { sections, roles, hidden }
+  const [hidden, setHidden] = useState({}); // working copy: { ROLE: [key…] }
+  const [saving, setSaving] = useState(false);
+  // Which role's grid is on screen. One role at a time rather than every role
+  // at once: five roles times fourteen sections is seventy checkboxes, and a
+  // wall that size is one nobody reads before clicking.
+  const [role, setRole] = useState(null);
+
+  useEffect(() => {
+    api
+      .get('/api/settings/nav-visibility')
+      .then(({ data }) => {
+        setCfg(data);
+        setHidden(data.hidden || {});
+        setRole(data.roles?.[0] || null);
+      })
+      .catch((e) => toast.error(errMsg(e)));
+  }, []);
+
+  // Stored as what is HIDDEN, shown as what is VISIBLE. The checkbox reads the
+  // way the sentence does — ticked means "this role sees it" — while the stored
+  // shape stays additive-free: a section added to the catalogue later is visible
+  // to everyone by default rather than hidden until someone notices.
+  function toggle(key) {
+    setHidden((h) => {
+      const list = h[role] || [];
+      return { ...h, [role]: list.includes(key) ? list.filter((k) => k !== key) : [...list, key] };
+    });
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const { data } = await api.put('/api/settings/nav-visibility', { hidden });
+      setHidden(data.hidden || {});
+      toast.success('Layout saved.');
+      // Your own sidebar may have just changed, if you hold one of the roles
+      // that was edited.
+      refreshSections();
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!cfg) return <p className="muted" style={{ padding: 16 }}>Loading layout…</p>;
+
+  const hiddenForRole = hidden[role] || [];
+
+  return (
+    <form className="set-card is-wide" onSubmit={save}>
+      <div className="set-card-head">
+        <span className="set-card-icon">
+          <Icon name="layout-dashboard" size={16} strokeWidth={1.9} />
+        </span>
+        <div className="set-card-heading">
+          <div className="set-card-title">Sidebar Visibility</div>
+          <div className="set-card-sub">
+            Show or hide sections per role. Core items (Dashboard, Settings) always stay visible, and
+            Admin is not configurable — it is the only role that can undo a change made here.
+          </div>
+        </div>
+      </div>
+
+      <div className="set-card-body">
+        <div className="set-field">
+          <label className="set-label">Role</label>
+          <select value={role || ''} onChange={(e) => setRole(e.target.value)}>
+            {cfg.roles.map((r) => (
+              <option key={r} value={r}>
+                {roleLabel(r)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {cfg.sections.map((group) => {
+          // A group whose every item is out of this role's reach anyway is not
+          // shown at all — offering a checkbox that changes nothing because the
+          // role could never see the page is worse than offering nothing.
+          const items = group.items.filter((i) => !i.roles || i.roles.includes(role));
+          if (!items.length) return null;
+          return (
+            <div key={group.label} style={{ marginTop: 14 }}>
+              <div className="set-label" style={{ marginBottom: 6 }}>
+                {group.label}
+              </div>
+              <div className="nav-vis-grid">
+                {items.map((item) => (
+                  <label
+                    key={item.key}
+                    className="nav-vis-item"
+                    title={item.core ? 'Always visible — cannot be hidden.' : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={item.core}
+                      checked={item.core || !hiddenForRole.includes(item.key)}
+                      onChange={() => toggle(item.key)}
+                    />
+                    <span>{item.label}</span>
+                    {item.core && <span className="muted nav-vis-core">always on</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="set-card-foot">
+        <button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? 'Saving…' : 'Save Layout'}
+        </button>
+      </div>
+    </form>
   );
 }

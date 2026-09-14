@@ -100,6 +100,9 @@ export default function Folios() {
   const [disputeFor, setDisputeFor] = useState(null); // the Payment being disputed
   const [disputeForm, setDisputeForm] = useState({ type: 'REFUND_REQUEST', reason: '', amount: '' });
   const [disputeBusy, setDisputeBusy] = useState(false);
+  // The case being decided, and the note explaining the decision.
+  const [resolving, setResolving] = useState(null); // { dispute, decision }
+  const [resolveNote, setResolveNote] = useState('');
   const [resolvingId, setResolvingId] = useState(null);
   // Which of the three "take an action" forms the sidebar shows. They used to
   // be three stacked full-width panels; one at a time in a tab is the same
@@ -159,8 +162,12 @@ export default function Folios() {
   }
 
   function openDispute(p) {
-    setDisputeFor(p);
-    setDisputeForm({ type: 'REFUND_REQUEST', reason: '', amount: (Number(p.amountCents) / 100).toFixed(2) });
+    // Prefill what is still refundable, not the original amount: on a payment
+    // that was already partly refunded at the desk the original is more than
+    // the service will let this case claim.
+    const refundable = refundableCentsFor(p);
+    setDisputeFor({ ...p, refundableCents: refundable });
+    setDisputeForm({ type: 'REFUND_REQUEST', reason: '', amount: (refundable / 100).toFixed(2) });
   }
 
   async function submitDispute(e) {
@@ -183,25 +190,53 @@ export default function Folios() {
     }
   }
 
-  async function resolveDispute(disputeId, decision) {
-    if (decision === 'APPROVED') {
-      const ok = await confirm({
-        title: 'Approve dispute',
-        message: 'Approve this claim and refund the guest?',
-        detail: 'This posts a real refund against the original payment, same as the Refund action.',
-        confirmLabel: 'Approve & refund',
-      });
-      if (!ok) return;
-    }
-    setResolvingId(disputeId);
+  // What each decision is called, and what it does, in the one place the
+  // dialog, the toast and the button label all read from — they used to
+  // disagree ("Escalate" on the button, "disputed" in the toast).
+  const DISPUTE_DECISIONS = {
+    APPROVED: {
+      verb: 'Approve',
+      title: 'Approve claim & refund',
+      detail:
+        'This posts a real refund against the original payment, same as the Refund action. The case is then closed for good.',
+      done: 'Claim approved — refund posted.',
+    },
+    REJECTED: {
+      verb: 'Reject',
+      title: 'Reject claim',
+      detail: 'No money moves. The case is closed for good and cannot be reopened.',
+      done: 'Claim rejected.',
+    },
+    DISPUTED: {
+      verb: 'Escalate',
+      title: 'Escalate to the wallet provider',
+      detail:
+        'No money moves yet. The case stays open until the provider comes back, then it is approved or rejected here.',
+      done: 'Claim escalated to the wallet provider.',
+    },
+  };
+
+  // The note is the only record of WHY a claim went the way it did, so it is
+  // captured at the decision rather than being an argument nothing ever sent.
+  function openResolve(dispute, decision) {
+    setResolving({ dispute, decision });
+    setResolveNote('');
+  }
+
+  async function submitResolve(e) {
+    e?.preventDefault();
+    if (!resolving) return;
+    const { dispute, decision } = resolving;
+    setResolvingId(dispute.id);
     try {
-      await api.post(`/api/payment-disputes/${disputeId}/resolve`, { decision });
-      toast.success(
-        decision === 'APPROVED'
-          ? 'Dispute approved — refund posted.'
-          : `Dispute marked ${decision.toLowerCase()}.`
-      );
-      loadDisputes(folioId);
+      await api.post(`/api/payment-disputes/${dispute.id}/resolve`, {
+        decision,
+        resolutionNote: resolveNote.trim() || undefined,
+      });
+      toast.success(DISPUTE_DECISIONS[decision].done);
+      setResolving(null);
+      // One reload, not two: `load` re-fetches the statement AND the dispute
+      // queue, and an approval has just changed both.
       load(folioId);
     } catch (err) {
       toast.error(errMsg(err));
@@ -634,6 +669,22 @@ export default function Folios() {
   function paymentForTransaction(t) {
     if (t.type !== 'PAYMENT' || !t.reference) return null;
     return (folio.payments || []).find((p) => p.id === t.reference) || null;
+  }
+
+  // How much of a payment has NOT gone back to the guest yet — the payment's
+  // own ledger line less every refund posted against it. The folio service
+  // caps both /refund and a dispute at exactly this (lib/refund.js), so
+  // mirroring it here is what stops the Dispute form from offering an amount
+  // the server will only turn down, and what drops the button once a payment
+  // has been given back in full.
+  function refundableCentsFor(p) {
+    const txs = folio.transactions || [];
+    const paid = txs.find((t) => t.type === 'PAYMENT' && t.reference === p.id);
+    if (!paid) return 0;
+    const refunded = txs
+      .filter((t) => t.type === 'REFUND' && t.refundOfId === paid.id)
+      .reduce((sum, t) => sum + Number(t.amountCents), 0);
+    return Math.max(0, Number(paid.amountCents) - refunded);
   }
 
   // The one-line summary a collapsed <details> shows under a payment line —
@@ -1097,11 +1148,22 @@ export default function Folios() {
                                 <button className="secondary small" onClick={() => emailReceipt(p.id)}>
                                   Email
                                 </button>
-                                {isEWallet(p.method) && p.status !== 'REFUNDED' && (
-                                  <button className="secondary small" onClick={() => openDispute(p)}>
-                                    Dispute
-                                  </button>
-                                )}
+                                {/* A wallet payment can be claimed against while
+                                    any of it is still in the hotel's hands and
+                                    no case is already open on it — the service
+                                    refuses both, so offering the button would
+                                    only produce a 409. */}
+                                {isEWallet(p.method) &&
+                                  refundableCentsFor(p) > 0 &&
+                                  !disputes.some(
+                                    (d) =>
+                                      d.paymentId === p.id &&
+                                      (d.status === 'PENDING' || d.status === 'DISPUTED')
+                                  ) && (
+                                    <button className="secondary small" onClick={() => openDispute(p)}>
+                                      Dispute
+                                    </button>
+                                  )}
                               </span>
                             )}
                           </td>
@@ -1134,24 +1196,43 @@ export default function Folios() {
                           <td>{d.method}</td>
                           <td>{d.type === 'CHARGEBACK' ? 'Chargeback' : 'Refund request'}</td>
                           <td style={{ textAlign: 'right' }}>{formatPeso(d.amountCents)}</td>
-                          <td className="muted">{d.reason || '—'}</td>
+                          <td className="muted">
+                            <div>{d.reason || '—'}</div>
+                            {/* Who did what, on the row itself. Every one of
+                                these is recorded by the service and none of it
+                                was ever shown, so a second cashier could not
+                                tell an escalated case from an abandoned one. */}
+                            {d.filedBy && <div style={{ fontSize: 12 }}>Filed by {d.filedBy}</div>}
+                            {d.resolutionNote && (
+                              <div style={{ fontSize: 12 }}>Note: {d.resolutionNote}</div>
+                            )}
+                            {d.resolvedBy && (
+                              <div style={{ fontSize: 12 }}>
+                                {d.status === 'APPROVED' ? 'Approved' : 'Rejected'} by {d.resolvedBy}
+                              </div>
+                            )}
+                          </td>
                           <td>
                             <span className={`badge ${d.status.toLowerCase()}`}>{d.status}</span>
                           </td>
                           <td style={{ textAlign: 'right' }}>
+                            {/* Only the transitions the service will actually
+                                accept — DISPUTE_TRANSITIONS in
+                                services/folio/src/routes/folio.routes.js. An
+                                escalated case cannot be escalated again. */}
                             {(d.status === 'PENDING' || d.status === 'DISPUTED') && (
                               <span style={{ display: 'inline-flex', gap: 6 }}>
                                 <button
                                   className="secondary small"
                                   disabled={resolvingId === d.id}
-                                  onClick={() => resolveDispute(d.id, 'APPROVED')}
+                                  onClick={() => openResolve(d, 'APPROVED')}
                                 >
                                   Approve
                                 </button>
                                 <button
                                   className="secondary small"
                                   disabled={resolvingId === d.id}
-                                  onClick={() => resolveDispute(d.id, 'REJECTED')}
+                                  onClick={() => openResolve(d, 'REJECTED')}
                                 >
                                   Reject
                                 </button>
@@ -1159,7 +1240,7 @@ export default function Folios() {
                                   <button
                                     className="secondary small"
                                     disabled={resolvingId === d.id}
-                                    onClick={() => resolveDispute(d.id, 'DISPUTED')}
+                                    onClick={() => openResolve(d, 'DISPUTED')}
                                   >
                                     Escalate
                                   </button>
@@ -1578,10 +1659,19 @@ export default function Folios() {
               type="number"
               step="0.01"
               min="0.01"
-              max={(Number(disputeFor.amountCents) / 100).toFixed(2)}
+              max={(disputeFor.refundableCents / 100).toFixed(2)}
               value={disputeForm.amount}
               onChange={(e) => setDisputeForm({ ...disputeForm, amount: e.target.value })}
             />
+            {/* Only worth saying when the two differ — on an untouched payment
+                the ceiling IS the amount and repeating it is noise. */}
+            {disputeFor.refundableCents !== Number(disputeFor.amountCents) && (
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {formatPeso(disputeFor.refundableCents)} of the original{' '}
+                {formatPeso(disputeFor.amountCents)} is still refundable — the rest has already gone
+                back to the guest.
+              </p>
+            )}
             <label style={{ marginTop: 10 }}>Reason</label>
             <textarea
               rows={3}
@@ -1592,6 +1682,53 @@ export default function Folios() {
             <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
               Filing does not move any money. Approving the case later posts the actual refund.
             </p>
+          </form>
+        )}
+      </Modal>
+
+      {/* Deciding a claim. This is a modal rather than the plain confirm dialog
+          because a decision needs a note with it — the service has always
+          stored one, and nothing ever had a way to type it. */}
+      <Modal
+        open={!!resolving}
+        onClose={() => setResolving(null)}
+        title={resolving ? DISPUTE_DECISIONS[resolving.decision].title : ''}
+        footer={
+          <>
+            <button className="secondary" onClick={() => setResolving(null)}>
+              Cancel
+            </button>
+            <button onClick={submitResolve} disabled={!!resolvingId}>
+              {resolvingId
+                ? 'Working…'
+                : resolving
+                  ? DISPUTE_DECISIONS[resolving.decision].verb
+                  : 'Confirm'}
+            </button>
+          </>
+        }
+      >
+        {resolving && (
+          <form onSubmit={submitResolve}>
+            <p>
+              {resolving.decision === 'APPROVED' ? 'Approve' : 'Decide'} the{' '}
+              {resolving.dispute.type === 'CHARGEBACK' ? 'chargeback' : 'refund request'} for{' '}
+              {formatPeso(resolving.dispute.amountCents)} on this {resolving.dispute.method} payment?
+            </p>
+            <p className="muted" style={{ fontSize: 12 }}>
+              {DISPUTE_DECISIONS[resolving.decision].detail}
+            </p>
+            <label style={{ marginTop: 10 }}>Note (optional)</label>
+            <textarea
+              rows={3}
+              value={resolveNote}
+              onChange={(e) => setResolveNote(e.target.value)}
+              placeholder={
+                resolving.decision === 'DISPUTED'
+                  ? "The reference the provider gave you, and what you sent them."
+                  : 'Why this claim was decided this way.'
+              }
+            />
           </form>
         )}
       </Modal>
