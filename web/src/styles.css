@@ -5703,10 +5703,11 @@ html[data-theme='dark'] .hk-tooltip {
   width: 100% !important;
   height: 100% !important;
   touch-action: none;
-  cursor: grab;
-}
-.fr-stage canvas:active {
-  cursor: grabbing;
+  /* Hover-look: the pointer turns the camera on its own, so there is nothing
+     to grab. It stays an arrow, and <Anchors> swaps it to a pointer over a
+     clickable item — a grab cursor would promise a drag that is no longer how
+     looking works. */
+  cursor: default;
 }
 .fr-crosshair {
   position: absolute;
@@ -8396,4 +8397,322 @@ tr.is-linked > td {
 .split-note svg {
   flex: none;
   margin-top: 2px;
+}
+
+/* ── User directory filter ───────────────────────────────────────────────── */
+/* Mirrors the guest search bar's layout, kept as its own rule rather than
+   reusing .guest-search-bar: the two sit on unrelated pages, and sharing a
+   class means a later tweak aimed at guests silently moves this one too. */
+.user-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+/* `flex-basis: 0` with `width: auto` to beat the global `input { width: 100% }`.
+   From an `auto` basis the browser treats that 100% as the preferred width, so
+   the box claims the whole row and pushes the Clear button onto a second line. */
+.user-search-input {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+/* Type-to-clear "x" in WebKit sits on top of the Clear button and does the same
+   job in a smaller target; the explicit button is the one that stays. */
+.user-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+.user-search-count {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* The "click to enter mouse-look" nudge. Sits lower than .fr-prompt and in a
+   neutral slate rather than the accent blue, so when both are on screen the
+   accent one still reads as the actionable target and this as instruction. */
+.fr-prompt-enter {
+  transform: translate(-50%, 58px);
+  background: rgba(15, 23, 42, 0.82);
+  font-weight: 600;
+}
+
+/* ── Night-audit sign-off line on a folio ────────────────────────────────── */
+/* Stated in words, not a bare badge: the desk reads this to find out why a
+   check-out was refused, and "pending" has to carry the consequence with it. */
+.folio-audit-line {
+  margin: 10px 0 0;
+  padding: 7px 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.folio-audit-line.is-ok {
+  color: #14532d;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+.folio-audit-line.is-pending {
+  color: #7c2d12;
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.35);
+}
+/* The tinted grounds are already dark-mode safe, but the near-black text on them
+   is not — it disappears into the panel. Lift both to the light end instead. */
+html[data-theme='dark'] .folio-audit-line.is-ok {
+  color: #86efac;
+}
+html[data-theme='dark'] .folio-audit-line.is-pending {
+  color: #fdba74;
+}
+
+/* ── Simulated desk → housekeeping call ──────────────────────────────────── */
+/* The desk's dialler, in the room detail panel. */
+.hk-call {
+  margin: 6px 0 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.hk-call-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.hk-call-row select {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.hk-call-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.hk-call-note {
+  margin-top: 6px;
+}
+
+/* The handset. Fixed and above everything, because a call that a page can
+   scroll out of view is a notification wearing a ringtone. */
+.call-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(3px);
+  animation: call-fade 160ms ease-out;
+}
+@keyframes call-fade {
+  from {
+    opacity: 0;
+  }
+}
+.call-card {
+  width: min(340px, calc(100vw - 32px));
+  padding: 26px 22px 20px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+  text-align: center;
+}
+.call-pulse {
+  width: 66px;
+  height: 66px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #16a34a;
+  animation: call-ring 1.4s ease-in-out infinite;
+}
+/* Box-shadow rather than transform: scaling the handset made the glyph inside
+   it blur on every pulse. */
+@keyframes call-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(22, 163, 74, 0);
+  }
+}
+.call-from {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.call-name {
+  font-size: 19px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.call-room {
+  font-size: 28px;
+  font-weight: 800;
+  margin-top: 8px;
+  letter-spacing: -0.01em;
+}
+.call-reason {
+  margin-top: 2px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.call-note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 13px;
+  font-style: italic;
+}
+.call-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.call-btn {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 0;
+  border: 0;
+  border-radius: 11px;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  cursor: pointer;
+}
+.call-accept {
+  background: #16a34a;
+}
+.call-decline {
+  background: #dc2626;
+}
+.call-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* Motion-sensitive users get the call without the pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  .call-pulse,
+  .call-backdrop {
+    animation: none;
+  }
+}
+/* Who the call will ring, stated before the button is pressed. */
+.hk-call-who {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* A disabled danger button must not still read as armed. `button.danger` sets
+   its red background later in this file than the shared `button:disabled` rule
+   and at equal specificity, so it wins — which left "Disable"/"Delete" on your
+   own row looking fully live while being inert. Stated explicitly here, after
+   both, so the disabled state is what the eye gets. */
+button.danger:disabled,
+button.danger:disabled:hover {
+  background: var(--muted-2);
+  color: var(--on-accent);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* ── Sidebar Visibility grid (Settings → Edit System Layout) ─────────────── */
+/* Two columns on anything wider than a phone, matching the density of the rest
+   of the settings cards; one column below that, because a checkbox label that
+   wraps mid-word is worse than a taller list. */
+.nav-vis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 24px;
+}
+.nav-vis-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The global `label` rule uppercases and letter-spaces for dense table
+     headers. These are sentence-case option names, so opt out. */
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+  cursor: pointer;
+}
+.nav-vis-item input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.nav-vis-item input[type='checkbox']:disabled {
+  cursor: default;
+}
+.nav-vis-item:has(input:disabled) {
+  cursor: default;
+  opacity: 0.75;
+}
+.nav-vis-core {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Housekeeping & Maintenance dashboard ───────────────────────────────── */
+/* Two panels side by side on a desk monitor, stacked on anything narrower.
+   "My rooms" and the call log are both short lists that read better beside
+   each other than one under the other. */
+.hkd-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+/* One cell per room status, in the same colours as the map. Buttons rather
+   than divs because every one of them navigates to that map — the number is
+   only useful if you can get to the rooms behind it. */
+.hkd-status-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.hkd-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.hkd-status-cell:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+}
+.hkd-status-n {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.hkd-status-label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.9;
 }

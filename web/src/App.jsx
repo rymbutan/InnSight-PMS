@@ -3,6 +3,8 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import RequestAccess from './pages/RequestAccess';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Reservations from './pages/Reservations';
 import Arrivals from './pages/Arrivals';
@@ -37,6 +39,10 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       {/* Public: asks for an account, never creates one. */}
       <Route path="/request-access" element={<RequestAccess />} />
+      {/* Public by necessity — somebody locked out cannot authenticate to ask for
+          a way back in. Neither page reveals whether an address exists. */}
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/book" element={<PublicBooking />} />
       <Route path="/portal/:confirmationNumber" element={<GuestPortal />} />
       {/* Public: opened by scanning a QR code at the front desk. The token in the
@@ -53,7 +59,7 @@ export default function App() {
         <Route
           path="/reservations"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="reservations" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <Reservations />
             </ProtectedRoute>
           }
@@ -61,7 +67,7 @@ export default function App() {
         <Route
           path="/reservations/new"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="reservations" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <NewReservation />
             </ProtectedRoute>
           }
@@ -69,7 +75,7 @@ export default function App() {
         <Route
           path="/reservations/:id"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR']}>
+            <ProtectedRoute section="reservations" roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR']}>
               <ReservationDetail />
             </ProtectedRoute>
           }
@@ -77,7 +83,10 @@ export default function App() {
         <Route
           path="/calendar"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
+            // Not housekeeping: the calendar is a booking view (availability and
+            // arrivals by date), and that role neither books nor needs the
+            // forward book. Their day is the room map.
+            <ProtectedRoute section="reservations" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <Calendar />
             </ProtectedRoute>
           }
@@ -85,7 +94,7 @@ export default function App() {
         <Route
           path="/arrivals"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="arrivals" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <Arrivals />
             </ProtectedRoute>
           }
@@ -93,7 +102,7 @@ export default function App() {
         <Route
           path="/walk-in"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="arrivals" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <WalkIn />
             </ProtectedRoute>
           }
@@ -101,7 +110,7 @@ export default function App() {
         <Route
           path="/guests"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="guests" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <Guests />
             </ProtectedRoute>
           }
@@ -109,7 +118,11 @@ export default function App() {
         <Route
           path="/rooms"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
+            // Property configuration — room records, rate plans and promo codes.
+            // Management only: Front Desk looks rooms up through the map and the
+            // booking screens, Housekeeping through the map, so neither needs the
+            // editor that changes what a room IS.
+            <ProtectedRoute section="rooms" roles={['ADMIN', 'MANAGER']}>
               <Rooms />
             </ProtectedRoute>
           }
@@ -117,7 +130,7 @@ export default function App() {
         <Route
           path="/amenities"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="amenities" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
               <Amenities />
             </ProtectedRoute>
           }
@@ -125,7 +138,7 @@ export default function App() {
         <Route
           path="/housekeeping"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
+            <ProtectedRoute section="housekeeping" roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
               <Housekeeping />
             </ProtectedRoute>
           }
@@ -133,7 +146,7 @@ export default function App() {
         <Route
           path="/folios"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR']}>
+            <ProtectedRoute section="folios" roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR']}>
               <Folios />
             </ProtectedRoute>
           }
@@ -141,7 +154,7 @@ export default function App() {
         <Route
           path="/folios/:id"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR']}>
+            <ProtectedRoute section="folios" roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR']}>
               <Folios />
             </ProtectedRoute>
           }
@@ -149,7 +162,7 @@ export default function App() {
         <Route
           path="/reports"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUDITOR']}>
+            <ProtectedRoute section="reports" roles={['ADMIN', 'MANAGER', 'AUDITOR']}>
               <Reports />
             </ProtectedRoute>
           }
@@ -157,7 +170,7 @@ export default function App() {
         <Route
           path="/revenue"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER']}>
+            <ProtectedRoute section="reports" roles={['ADMIN', 'MANAGER']}>
               <Revenue />
             </ProtectedRoute>
           }
@@ -169,7 +182,7 @@ export default function App() {
         <Route
           path="/audit"
           element={
-            <ProtectedRoute roles={['ADMIN', 'AUDITOR', 'MANAGER']}>
+            <ProtectedRoute section="audit" roles={['ADMIN', 'AUDITOR', 'MANAGER']}>
               <Audit />
             </ProtectedRoute>
           }
@@ -177,7 +190,7 @@ export default function App() {
         <Route
           path="/users"
           element={
-            <ProtectedRoute roles={['ADMIN', 'MANAGER']}>
+            <ProtectedRoute section="users" roles={['ADMIN', 'MANAGER']}>
               <Users />
             </ProtectedRoute>
           }
@@ -187,7 +200,7 @@ export default function App() {
           element={
             // ADMIN only — service health is operational data withheld from
             // MANAGER; see the matching guard on GET /api/health/services.
-            <ProtectedRoute roles={['ADMIN']}>
+            <ProtectedRoute section="health" roles={['ADMIN']}>
               <Health />
             </ProtectedRoute>
           }
@@ -198,7 +211,7 @@ export default function App() {
         <Route
           path="/room-layouts"
           element={
-            <ProtectedRoute roles={['ADMIN']}>
+            <ProtectedRoute section="room-layouts" roles={['ADMIN']}>
               <RoomLayouts />
             </ProtectedRoute>
           }
@@ -208,7 +221,7 @@ export default function App() {
         <Route
           path="/inspection-scenarios"
           element={
-            <ProtectedRoute roles={['ADMIN']}>
+            <ProtectedRoute section="room-layouts" roles={['ADMIN']}>
               <InspectionScenarios />
             </ProtectedRoute>
           }

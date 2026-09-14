@@ -14,6 +14,10 @@ export function AuthProvider({ children }) {
     }
   });
   const [loading, setLoading] = useState(false);
+  // The sections an admin has left visible to this account's roles. Fetched
+  // rather than read off the token so that saving a layout takes effect on the
+  // next navigation instead of at the next sign-in.
+  const [sections, setSections] = useState(null);
 
   // The shared room layouts are fetched once per session. Every 3D consumer
   // reads them synchronously through getRoomPlan(), so they must be in place
@@ -28,6 +32,27 @@ export function AuthProvider({ children }) {
     // the six built-in categories, which is a working room, not a broken one.
     hydrateCategories();
   }, [user]);
+
+  // Refreshed on sign-in and on every navigation (see refreshSections below), so
+  // an admin saving a new layout reaches staff who are already signed in without
+  // anybody having to log out. Fail-soft: a failure leaves `sections` null, which
+  // hasSection reads as "show everything this role allows".
+  useEffect(() => {
+    if (!user) {
+      setSections(null);
+      return;
+    }
+    refreshSections();
+  }, [user]);
+
+  async function refreshSections() {
+    try {
+      const { data } = await api.get('/api/settings/my-sections');
+      setSections(Array.isArray(data?.sections) ? data.sections : null);
+    } catch {
+      setSections(null);
+    }
+  }
 
   useEffect(() => {
     const token = localStorage.getItem('innsight_token');
@@ -100,6 +125,21 @@ export function AuthProvider({ children }) {
     return roles.some((r) => user.roles?.includes(r));
   }
 
+  // Which sections this account can reach, after an admin's Sidebar Visibility
+  // settings have been applied on top of its roles. `null` means "not known
+  // yet" — see hasSection.
+  function hasSection(key) {
+    if (!user) return false;
+    // FAIL OPEN, on purpose and in only one direction. Before the list arrives
+    // (or if the request failed), every section the ROLE allows stays reachable:
+    // the role guards in App.jsx and on every API route are untouched and still
+    // decide what this account may actually do. Failing closed would blank the
+    // sidebar on a slow first paint and strand anyone whose auth service blipped
+    // — a far worse outcome than a hidden link appearing for a moment.
+    if (sections === null) return true;
+    return sections.includes(key);
+  }
+
   function updateUser(next) {
     setUser(next);
     if (next) localStorage.setItem('innsight_user', JSON.stringify(next));
@@ -107,7 +147,18 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, loginWithGoogle, logout, hasRole, setUser: updateUser }}
+      value={{
+        user,
+        loading,
+        login,
+        loginWithGoogle,
+        logout,
+        hasRole,
+        sections,
+        hasSection,
+        refreshSections,
+        setUser: updateUser,
+      }}
     >
       {children}
     </AuthContext.Provider>

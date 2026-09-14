@@ -83,9 +83,14 @@ const EVENT_LINK = {
   'guest:profile_created': (d) => (d?.guestId ? `/guests?id=${d.guestId}` : '/guests'),
   'guest:profile_updated': (d) => (d?.guestId ? `/guests?id=${d.guestId}` : '/guests'),
   'guest:flagged': (d) => (d?.guestId ? `/guests?id=${d.guestId}` : '/guests'),
-  'maintenance:work_order_created': () => '/rooms',
-  'maintenance:room_out_of_service': () => '/rooms',
-  'maintenance:room_restored': () => '/rooms',
+  // The map, not /rooms. These three are the notifications Housekeeping &
+  // Maintenance actually receives, and /rooms is now management-only — a
+  // notification whose only action is a link into a page you cannot open is
+  // worse than no link. The map carries live room status, which is what these
+  // events are about.
+  'maintenance:work_order_created': () => '/housekeeping',
+  'maintenance:room_out_of_service': () => '/housekeeping',
+  'maintenance:room_restored': () => '/housekeeping',
   'audit:day_opened': () => '/audit',
   'audit:day_closed': () => '/audit',
   'facility:changed': () => '/amenities',

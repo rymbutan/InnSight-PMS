@@ -3,6 +3,7 @@ const PDFDocument = require('pdfkit');
 const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS, signServiceToken } = require('../middleware/auth');
 const { classifyTransactions } = require('../lib/folioSummary');
+const { auditApprovalOf } = require('../lib/auditApproval');
 const { folioListRow } = require('../lib/folioList');
 const { folioPrintModel } = require('../lib/folioPrintModel');
 const { buildLaundryTicket } = require('../lib/laundryTicket');
@@ -23,7 +24,7 @@ const {
   savePaymentFeePercent,
 } = require('../lib/settingsStore');
 const { computeTax, paymentProcessingFeeCents } = require('../lib/policies');
-const { postRefund } = require('../lib/refund');
+const { postRefund, findPaymentTx, refundableCents } = require('../lib/refund');
 const { PAYMENT_METHODS, isEWallet, simulateGatewayRef } = require('../lib/paymentMethods');
 const storage = require('../lib/storage');
 
@@ -581,9 +582,88 @@ router.get('/folios/outstanding', requireRole(...ROLE_GROUPS.DESK_AUDIT), async 
       .filter((f) => f.balanceCents !== 0n)
       .map((f) => ({ ...f, balanceCents: f.balanceCents.toString() }));
 
-    res.json({ stayId, unsettled });
+    // Folios still awaiting night-audit sign-off, reported alongside the unpaid
+    // ones so the check-out guard makes both decisions from a single call. A
+    // zero balance is not the same as a CHECKED balance: the second question is
+    // whether an auditor has confirmed the charges and payments are right.
+    const unapproved = folios
+      .map((f) => ({ f, a: auditApprovalOf(f, f.transactions) }))
+      .filter(({ a }) => !a.approved)
+      .map(({ f, a }) => ({
+        id: f.id,
+        folioNumber: f.folioNumber,
+        // Distinguishes "never checked" from "checked, then the bill moved".
+        stale: a.stale,
+      }));
+
+    res.json({ stayId, unsettled, unapproved });
   } catch (err) {
     console.error('[Folio] Outstanding error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ── Night-audit sign-off ────────────────────────────────────────────────────
+// POST /api/folios/:id/audit-approve — the auditor confirms this folio's charges
+// and payments are correct, which is what releases it for check-out.
+//
+// AUDITOR and ADMIN only — deliberately NOT Manager or Front Desk. The whole
+// value of the control is that the person who takes the money is not the person
+// who certifies it: letting the desk approve its own folio would make the gate
+// a formality. Admin is kept as the break-glass path for a property with no
+// auditor on shift, and every approval records WHO gave it.
+const AUDIT_SIGNOFF = ['AUDITOR', 'ADMIN'];
+router.post('/folios/:id/audit-approve', requireRole(...AUDIT_SIGNOFF), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({
+      where: { id: req.params.id },
+      include: { transactions: true },
+    });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+    if (folio.status !== 'OPEN') {
+      return res.status(409).json({ error: `Only an open folio can be approved (current: ${folio.status}).` });
+    }
+    const updated = await prisma.folio.update({
+      where: { id: folio.id },
+      data: { auditApprovedAt: new Date(), auditApprovedBy: req.user?.sub || null },
+    });
+    // Approving is what unblocks a guest waiting at the desk, so it is worth a
+    // live event rather than leaving the desk to re-poll the folio.
+    redis.publish(
+      'folio:audit',
+      JSON.stringify({
+        event: 'folio.audit_approved',
+        folioId: folio.id,
+        folioNumber: folio.folioNumber,
+        stayId: folio.stayId,
+      })
+    );
+    res.json({
+      id: updated.id,
+      folioNumber: updated.folioNumber,
+      auditApprovedAt: updated.auditApprovedAt,
+      auditApprovedBy: updated.auditApprovedBy,
+    });
+  } catch (err) {
+    console.error('[Folio] Audit approve error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/folios/:id/audit-revoke — withdraw a sign-off given in error.
+// Same roles: whoever may certify a bill must be able to un-certify it, or a
+// mistaken approval can only be undone in the database.
+router.post('/folios/:id/audit-revoke', requireRole(...AUDIT_SIGNOFF), async (req, res) => {
+  try {
+    const folio = await prisma.folio.findUnique({ where: { id: req.params.id } });
+    if (!folio) return res.status(404).json({ error: 'Folio not found.' });
+    const updated = await prisma.folio.update({
+      where: { id: folio.id },
+      data: { auditApprovedAt: null, auditApprovedBy: null },
+    });
+    res.json({ id: updated.id, folioNumber: updated.folioNumber, auditApprovedAt: null });
+  } catch (err) {
+    console.error('[Folio] Audit revoke error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -729,7 +809,17 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
     // real, named guest attached via its stay). The reservation's guestName
     // is a required, always-present string, so this is reliable wherever a
     // folio has a stayId at all.
-    res.json({ ...folio, adults: reservation?.adults ?? null, guestName: reservation?.guestName ?? null });
+    // The DERIVED approval, not just the raw column: the page has to be able to
+    // show "approved, then the bill changed" as its own state, and that is a
+    // comparison against the transactions rather than anything stored.
+    const audit = auditApprovalOf(folio, folio.transactions);
+    res.json({
+      ...folio,
+      adults: reservation?.adults ?? null,
+      guestName: reservation?.guestName ?? null,
+      auditApproved: audit.approved,
+      auditApprovalStale: audit.stale,
+    });
   } catch (err) {
     console.error('[Folio] Get folio error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -1203,6 +1293,42 @@ const DISPUTE_TRANSITIONS = {
   PENDING: ['APPROVED', 'REJECTED', 'DISPUTED'],
   DISPUTED: ['APPROVED', 'REJECTED'],
 };
+// Every decision the resolve route understands at all, as opposed to the ones
+// reachable from a given status. A decision outside this list is a malformed
+// request, not a rejected transition — the transition message would otherwise
+// answer `decision: "banana"` with "a PENDING dispute can only move to…",
+// which reads as if banana were a state it could have moved to.
+const DISPUTE_DECISIONS = [...new Set(Object.values(DISPUTE_TRANSITIONS).flat())];
+// A case that has not reached a terminal status: it is still claiming money
+// that has not moved. Doubles as the filter for "is a case already open
+// against this payment" below.
+const OPEN_DISPUTE_STATUSES = Object.keys(DISPUTE_TRANSITIONS);
+const DISPUTE_STATUSES = [...OPEN_DISPUTE_STATUSES, 'APPROVED', 'REJECTED'];
+// Payment statuses a claim can be filed against. A VOIDED or FAILED payment
+// never settled, and a REFUNDED one has already gone back in full — neither
+// has anything left for a gateway to claw back.
+const DISPUTABLE_PAYMENT_STATUSES = ['AUTHORIZED', 'CAPTURED'];
+
+// Aborts an interactive $transaction with a chosen HTTP response. It has to be
+// a throw: RETURNING a value from the callback COMMITS, so a failed refund
+// inside dispute approval would otherwise leave the case marked APPROVED with
+// no refund behind it.
+class DisputeAbort extends Error {
+  constructor(payload) {
+    super(payload.error || 'Dispute aborted.');
+    this.payload = payload;
+  }
+}
+function sendDisputeAbort(res, payload) {
+  const { ok: _ok, status, error, ...extra } = payload;
+  return res.status(status || 400).json({ error, ...extra });
+}
+// Someone else moved the case between this request's read and its write. The
+// caller did nothing wrong; their view is just stale.
+const STALE_DISPUTE = {
+  status: 409,
+  error: 'This dispute was already acted on by someone else. Reload it and check its current status.',
+};
 
 // POST /api/folios/:id/payments/:paymentId/disputes — file a new case.
 router.post('/folios/:id/payments/:paymentId/disputes', requireRole(...FINANCE), async (req, res) => {
@@ -1220,11 +1346,48 @@ router.post('/folios/:id/payments/:paymentId/disputes', requireRole(...FINANCE),
         error: `${payment.method} is not an e-wallet payment. Use /folios/:id/refund for cash, card, or bank transfer.`,
       });
     }
+    if (!DISPUTABLE_PAYMENT_STATUSES.includes(payment.status)) {
+      return res
+        .status(409)
+        .json({ error: `This payment is ${payment.status} — there is nothing left to dispute.` });
+    }
+    // One open case per payment. Without this the same wallet payment could
+    // carry three PENDING full-value claims at once: the first approval pays
+    // out and the other two then die at postRefund's cumulative cap, having sat
+    // in the queue looking payable the whole time.
+    const open = await prisma.paymentDispute.findFirst({
+      where: { paymentId: payment.id, status: { in: OPEN_DISPUTE_STATUSES } },
+    });
+    if (open) {
+      return res.status(409).json({
+        error: `A ${open.status} case is already open against this payment. Resolve that one before filing another.`,
+        disputeId: open.id,
+      });
+    }
+    // Approval refunds against the payment's ledger row, so a case whose row
+    // cannot be found can never pay out. Say so now, rather than after the case
+    // has been filed, queued and approved.
+    const originalTx = await findPaymentTx(prisma, { folioId: req.params.id, paymentId: payment.id });
+    if (!originalTx) {
+      return res.status(409).json({ error: 'Could not find the ledger transaction for this payment.' });
+    }
+    // The ceiling is what is STILL refundable, not the original amount. A
+    // payment already partly refunded at the desk has that much less left to
+    // claim; checking against the original let a case be filed — and queued as
+    // payable — for money that had already gone back.
+    const { alreadyRefunded, remaining } = await refundableCents(prisma, originalTx);
+    if (remaining <= 0n) {
+      return res.status(409).json({
+        error: 'This payment has already been refunded in full.',
+        alreadyRefundedCents: alreadyRefunded.toString(),
+      });
+    }
     const amountCents =
-      req.body.amountCents === undefined ? payment.amountCents : parseCents(req.body.amountCents);
-    if (amountCents === null || amountCents <= 0n || amountCents > payment.amountCents) {
+      req.body.amountCents === undefined ? remaining : parseCents(req.body.amountCents);
+    if (amountCents === null || amountCents <= 0n || amountCents > remaining) {
       return res.status(400).json({
-        error: 'amountCents must be a positive integer no greater than the original payment.',
+        error: 'amountCents must be a positive integer no greater than the amount still refundable.',
+        remainingRefundableCents: remaining.toString(),
       });
     }
     const dispute = await prisma.paymentDispute.create({
@@ -1249,14 +1412,20 @@ router.post('/folios/:id/payments/:paymentId/disputes', requireRole(...FINANCE),
   }
 });
 
-// GET /api/payment-disputes?status=&folioId= — every desk role can see the
-// queue; only FINANCE can file or resolve one (below).
+// GET /api/payment-disputes?status=&folioId=&paymentId= — every desk role can
+// see the queue; only FINANCE can file or resolve one (below).
 router.get('/payment-disputes', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
   try {
-    const { status, folioId } = req.query;
+    const { status, folioId, paymentId } = req.query;
+    // `status` goes straight into a Prisma enum filter, so an unknown value is
+    // a client typo that used to surface as a 500 from the query layer.
+    if (status && !DISPUTE_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${DISPUTE_STATUSES.join(', ')}.` });
+    }
     const where = {};
     if (status) where.status = status;
     if (folioId) where.folioId = folioId;
+    if (paymentId) where.paymentId = paymentId;
     const disputes = await prisma.paymentDispute.findMany({ where, orderBy: { filedAt: 'desc' } });
     res.json(disputes);
   } catch (err) {
@@ -1273,12 +1442,20 @@ router.get('/payment-disputes', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (r
 router.post('/payment-disputes/:disputeId/resolve', requireRole(...FINANCE), async (req, res) => {
   try {
     const { decision, resolutionNote } = req.body;
+    if (!DISPUTE_DECISIONS.includes(decision)) {
+      return res.status(400).json({ error: `decision must be one of: ${DISPUTE_DECISIONS.join(', ')}.` });
+    }
+    const note =
+      typeof resolutionNote === 'string' && resolutionNote.trim() ? resolutionNote.trim() : undefined;
+
     const dispute = await prisma.paymentDispute.findUnique({ where: { id: req.params.disputeId } });
     if (!dispute) return res.status(404).json({ error: 'Dispute not found.' });
 
     const allowed = DISPUTE_TRANSITIONS[dispute.status] || [];
     if (!allowed.includes(decision)) {
-      return res.status(400).json({
+      // 409, not 400: the request is well formed, it just arrived at a case
+      // that has moved past the point where this decision means anything.
+      return res.status(409).json({
         error: allowed.length
           ? `A ${dispute.status} dispute can only move to: ${allowed.join(', ')}.`
           : `A ${dispute.status} dispute is already resolved and cannot be changed.`,
@@ -1292,55 +1469,104 @@ router.post('/payment-disputes/:disputeId/resolve', requireRole(...FINANCE), asy
       // postRefund refunds against a FolioTransaction, and Payment/
       // FolioTransaction are linked by FolioTransaction.reference === Payment.id
       // (see the /payments route above, and /refund's originalTxId).
-      const originalTx = await prisma.folioTransaction.findFirst({
-        where: { folioId: dispute.folioId, type: 'PAYMENT', reference: dispute.paymentId },
+      const originalTx = await findPaymentTx(prisma, {
+        folioId: dispute.folioId,
+        paymentId: dispute.paymentId,
       });
       if (!originalTx) {
         return res.status(409).json({ error: 'Could not find the ledger transaction for this payment.' });
       }
-      const result = await prisma.$transaction(async (px) => {
-        const refund = await postRefund(px, {
-          folioId: dispute.folioId,
-          originalTxId: originalTx.id,
-          amountCents: dispute.amountCents,
-          reason: `${dispute.type === 'CHARGEBACK' ? 'Chargeback' : 'E-wallet refund'} — ${dispute.reason || 'no reason'}`,
-          postedBy: resolvedBy,
+      let result;
+      try {
+        result = await prisma.$transaction(async (px) => {
+          // Claim the case BEFORE posting the refund, filtered on the status
+          // the transition check above was made against. That filter is what
+          // makes two simultaneous Approve clicks safe: the second matches no
+          // rows and aborts, instead of both reading PENDING and both paying
+          // the same claim out. postRefund's cumulative cap only catches that
+          // when the two refunds together exceed the payment — two approvals of
+          // a 40% claim went straight through it.
+          const claimed = await px.paymentDispute.updateMany({
+            where: { id: dispute.id, status: dispute.status },
+            data: { status: 'APPROVED', resolvedBy, resolvedAt: new Date(), resolutionNote: note },
+          });
+          if (claimed.count === 0) throw new DisputeAbort(STALE_DISPUTE);
+
+          const refund = await postRefund(px, {
+            folioId: dispute.folioId,
+            originalTxId: originalTx.id,
+            amountCents: dispute.amountCents,
+            reason: `${dispute.type === 'CHARGEBACK' ? 'Chargeback' : 'E-wallet refund'} — ${dispute.reason || 'no reason'}`,
+            postedBy: resolvedBy,
+          });
+          // Throw rather than return: returning commits, which would mark the
+          // case APPROVED with no refund behind it.
+          if (!refund.ok) throw new DisputeAbort(refund);
+
+          const updated = await px.paymentDispute.update({
+            where: { id: dispute.id },
+            data: { refundTxId: refund.tx.id },
+          });
+          return { dispute: updated, refundTx: refund.tx };
         });
-        if (!refund.ok) return refund;
-        const updated = await px.paymentDispute.update({
-          where: { id: dispute.id },
-          data: {
-            status: 'APPROVED',
-            resolvedBy,
-            resolvedAt: new Date(),
-            resolutionNote,
-            refundTxId: refund.tx.id,
-          },
-        });
-        return { ok: true, dispute: updated, refundTx: refund.tx };
-      });
-      if (!result.ok) {
-        const { ok: _ok, status, error, ...extra } = result;
-        return res.status(status).json({ error, ...extra });
+      } catch (err) {
+        if (err instanceof DisputeAbort) return sendDisputeAbort(res, err.payload);
+        throw err;
       }
       redis.publish(
         'folio:dispute_resolved',
-        JSON.stringify({ folioId: dispute.folioId, disputeId: dispute.id, status: 'APPROVED' })
+        JSON.stringify({
+          folioId: dispute.folioId,
+          disputeId: dispute.id,
+          status: 'APPROVED',
+          resolvedBy,
+          refundTxId: result.refundTx.id,
+        })
+      );
+      // An approval moves real money, so everything watching for refunds — not
+      // just the dispute queue — has to hear about it. The plain /refund route
+      // publishes this; a refund that arrived through a dispute used to move
+      // the money silently, leaving the statement and the folio list stale
+      // until someone reloaded by hand.
+      redis.publish(
+        'folio:refund_posted',
+        JSON.stringify({
+          folioId: dispute.folioId,
+          txId: result.refundTx.id,
+          originalTxId: originalTx.id,
+          amountCents: result.refundTx.amountCents.toString(),
+        })
       );
       return res.json(result.dispute);
     }
 
-    // REJECTED or DISPUTED — a status change only, no money moves.
-    const updated = await prisma.paymentDispute.update({
-      where: { id: dispute.id },
-      data:
-        decision === 'DISPUTED'
-          ? { status: 'DISPUTED' }
-          : { status: 'REJECTED', resolvedBy, resolvedAt: new Date(), resolutionNote },
+    // REJECTED or DISPUTED — a status change only, no money moves. Same
+    // status-filtered write as the approval path, so a decision cannot land on
+    // a case somebody else has already moved.
+    const data =
+      decision === 'DISPUTED'
+        ? // Escalated to the gateway: still open, so nothing is resolved and
+          // resolvedBy/resolvedAt stay empty for whoever closes it out. The
+          // note is kept — it is the only record of WHY the case went to the
+          // gateway, and it used to be dropped on the floor here.
+          { status: 'DISPUTED', resolutionNote: note }
+        : { status: 'REJECTED', resolvedBy, resolvedAt: new Date(), resolutionNote: note };
+    const changed = await prisma.paymentDispute.updateMany({
+      where: { id: dispute.id, status: dispute.status },
+      data,
     });
+    if (changed.count === 0) return sendDisputeAbort(res, STALE_DISPUTE);
+    const updated = await prisma.paymentDispute.findUnique({ where: { id: dispute.id } });
     redis.publish(
       'folio:dispute_resolved',
-      JSON.stringify({ folioId: dispute.folioId, disputeId: dispute.id, status: decision })
+      JSON.stringify({
+        folioId: dispute.folioId,
+        disputeId: dispute.id,
+        status: decision,
+        // Who escalated a case matters as much as who closed it, and DISPUTED
+        // deliberately leaves resolvedBy empty on the row.
+        actedBy: resolvedBy,
+      })
     );
     res.json(updated);
   } catch (err) {

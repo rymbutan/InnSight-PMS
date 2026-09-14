@@ -15,6 +15,8 @@ const STATUSES = ['CLEAN', 'CLEAN_INSPECTED', 'DIRTY', 'OCCUPIED', 'OUT_OF_ORDER
 export default function Rooms() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('ADMIN'); // property configuration is ADMIN-only
+  // Promotions are commercial, not configuration — see the panel below.
+  const canManagePromos = hasRole('ADMIN', 'MANAGER');
   const [rooms, setRooms] = useState([]);
   const [types, setTypes] = useState([]);
   const [newRoom, setNewRoom] = useState({ number: '', typeCode: '', floor: 1 });
@@ -207,9 +209,15 @@ export default function Rooms() {
     <div>
       <h2>{isAdmin ? 'Hotel Room Information Editor' : 'Hotel Rooms'}</h2>
 
+      {/* The only non-admin who reaches this page now is a Manager — Front Desk
+          and Housekeeping no longer have it at all — so the note says what a
+          manager can actually do here, rather than the old line about updating
+          housekeeping status, which was written for readers who can no longer
+          open the page. */}
       {!isAdmin && (
         <p className="muted rooms-note">
-          Room types &amp; pricing are managed by an administrator. You can update housekeeping status here.
+          Room types &amp; pricing are managed by an administrator. You can create and manage promo codes
+          here.
         </p>
       )}
 
@@ -326,7 +334,13 @@ export default function Rooms() {
               it reads as cards rather than the five-column table it used to be —
               that table needed the full page width, which is why it used to live
               below the grid instead of here. */}
-          {isAdmin && (
+          {/* Manager too, not Admin only. A promotion is a commercial decision
+              — the manager running the shoulder-season rate is the person who
+              should be able to open and close it — and it is the one thing in
+              this aside that is not property configuration. Mirrors the MGMT
+              guard on POST/PATCH /api/promo-codes; gating it any tighter here
+              would hide a form the API would have accepted. */}
+          {canManagePromos && (
             <div className="panel">
               <h3>Promo codes</h3>
               <form onSubmit={createPromo}>

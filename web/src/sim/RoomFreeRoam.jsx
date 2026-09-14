@@ -19,8 +19,9 @@ export { MODEL_CFG, fitPropsFor };
 // Everything (room size, walls, furniture, collision, station markers, spawn)
 // comes from the `layout` prop (see roomLayouts.js), so a Suite is a bigger,
 // multi-zone room with more stations than a Standard with zero special-casing.
-// Walk with WASD + mouse-look (drag fallback), approach a station and press E /
-// click it to perform that task (the existing task components), end at the door.
+// Walk with WASD + first-person mouse-look (click the view to lock the pointer,
+// Esc to release), approach a station and press E / click it to perform that
+// task (the existing task components), end at the door.
 //
 // One WebGL context at a time: the room unmounts while a task panel is open and
 // restores the camera pose from viewRef.
@@ -536,7 +537,7 @@ function Furniture({ item }) {
 // saw into the held-keys map, including ones movement never reads.
 const MOVE_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
 
-export function Player({ paused, onHover, interactRef, viewRef, layout, dragRef, onLockedChange }) {
+export function Player({ paused, onHover, interactRef, viewRef, layout, onLockedChange }) {
   const { camera, gl } = useThree();
   const yaw = useRef(viewRef.current ? viewRef.current.yaw : 0);
   const pitch = useRef(viewRef.current ? viewRef.current.pitch : 0);
@@ -600,76 +601,66 @@ export function Player({ paused, onHover, interactRef, viewRef, layout, dragRef,
   }, [paused, interactRef]);
 
   // ── Look vs interact ───────────────────────────────────────────────────────
-  // This used to call `el.requestPointerLock()` on ANY click, while the station
-  // rings were separately clickable. Two consequences:
-  //   • Clicking a ring also grabbed the pointer and swung the camera, because
-  //     drag-look listened on bare `pointerdown` with no movement threshold.
-  //   • Once locked, the OS pointer stops moving, so r3f kept raycasting from the
-  //     last unlocked cursor position and ring clicks silently stopped working —
-  //     which is why `E` was the only dependable way to open a station, despite the
-  //     on-screen hint promising "drag or click to look · walk up to a marker".
+  // Standard first-person mouse-look: click the view once to enter, and from
+  // then on the mouse turns the camera with no button held and no cursor on
+  // screen. Escape leaves (the browser owns that key), L toggles.
   //
-  // Now: drag-look is opt-in by DRAGGING (a click that doesn't move is an
-  // interaction, never a look), and pointer lock is entirely explicit — press L or
-  // use the on-screen toggle. `dragRef.moved` is what the station rings check so a
-  // look-drag that happens to end over a ring doesn't open it.
+  // THE HISTORY THIS REPLACES. Pointer lock used to fire on ANY click while the
+  // station rings were separately clickable, which broke both: a ring click also
+  // swung the camera, and once locked r3f kept raycasting from the last unlocked
+  // cursor position, so ring clicks silently stopped working. That was solved by
+  // making look a button-drag, then briefly by a free-cursor hover-look — both of
+  // which kept the OS cursor as the thing you aim with.
+  //
+  // The cursor is gone now, so aiming moved to the crosshair instead: see
+  // <CrosshairAim> in inspection/InspectionShift.jsx, which raycasts from the
+  // centre of the frame every frame. That is what makes the lock safe here —
+  // nothing depends on where the OS pointer happens to be any more.
+  //
+  // Yaw is unbounded, so the full 360° is a single continuous motion. Pitch stays
+  // clamped short of vertical, or the room ends up upside down.
   useEffect(() => {
     const el = gl.domElement;
-    const drag = { on: false, x: 0, y: 0 };
-    const DRAG_SLOP = 5; // px of travel before a press counts as a look, not a click
+    const SENS = 0.0023; // rad per px of mouse travel
+    const isLocked = () => document.pointerLockElement === el;
 
     const onMove = (e) => {
-      if (paused) return;
-      const locked = document.pointerLockElement === el;
-      if (!locked && !drag.on) return;
-      if (drag.on && !locked) {
-        const dx = e.clientX - drag.x,
-          dy = e.clientY - drag.y;
-        if (!dragRef.current.moved && Math.hypot(dx, dy) > DRAG_SLOP) dragRef.current.moved = true;
-        // Ignore the movement until it clears the slop, so a shaky click doesn't
-        // nudge the camera before being treated as a click.
-        if (!dragRef.current.moved) return;
-      }
-      yaw.current -= e.movementX * 0.0023;
-      pitch.current = Math.max(-1.2, Math.min(1.0, pitch.current - e.movementY * 0.0023));
+      if (paused || !isLocked()) return;
+      yaw.current -= e.movementX * SENS;
+      pitch.current = Math.max(-1.2, Math.min(1.0, pitch.current - e.movementY * SENS));
     };
-    const onDown = (e) => {
-      if (paused) return;
-      drag.on = true;
-      drag.x = e.clientX;
-      drag.y = e.clientY;
-      dragRef.current.moved = false;
+    // Click to enter. While already locked this does nothing: the click is an
+    // INTERACTION, and InspectionShift picks it up to flag whatever the
+    // crosshair is on. Keeping those two jobs apart is what stops the click that
+    // enters look mode from also flagging the item behind the cursor.
+    const onDown = () => {
+      if (paused || isLocked()) return;
+      el.requestPointerLock?.();
     };
-    const onUp = () => {
-      drag.on = false;
-    };
-    // L toggles true mouse-look. Escape is handled by the browser (it exits lock).
     // Same focus rule as the walk keys: typing an "l" into a field must not grab
     // the pointer.
     const onKey = (e) => {
       const tag = (e.target?.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
       if (paused || e.key.toLowerCase() !== 'l') return;
-      if (document.pointerLockElement === el) document.exitPointerLock?.();
+      if (isLocked()) document.exitPointerLock?.();
       else el.requestPointerLock?.();
     };
     const onLockChange = () => {
-      onLockedChange?.(document.pointerLockElement === el);
+      onLockedChange?.(isLocked());
     };
 
     el.addEventListener('pointerdown', onDown);
-    window.addEventListener('pointerup', onUp);
     document.addEventListener('mousemove', onMove);
     window.addEventListener('keydown', onKey);
     document.addEventListener('pointerlockchange', onLockChange);
     return () => {
       el.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('pointerup', onUp);
       document.removeEventListener('mousemove', onMove);
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerlockchange', onLockChange);
     };
-  }, [gl, paused, dragRef, onLockedChange]);
+  }, [gl, paused, onLockedChange]);
 
   useFrame((_, dt) => {
     camera.rotation.set(pitch.current, yaw.current, 0);
@@ -707,7 +698,9 @@ export function Player({ paused, onHover, interactRef, viewRef, layout, dragRef,
     });
     if (best !== hoverRef.current) {
       hoverRef.current = best;
-      onHover(best);
+      // Optional: the inspection decides what you are looking at with a
+      // crosshair raycast instead, and passes no handler at all.
+      onHover?.(best);
     }
     viewRef.current = { pos: [px, camera.position.y, pz], yaw: yaw.current, pitch: pitch.current };
   });
