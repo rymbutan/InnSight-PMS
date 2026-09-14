@@ -109,6 +109,7 @@ router.post('/login', async (req, res) => {
         // a new photo appears immediately instead of after the 5-minute
         // private cache expires. Null means "no photo — draw the monogram".
         avatarUpdatedAt: user.avatarUpdatedAt,
+        hasSeenTutorial: user.hasSeenTutorial,
         roles: ctx.roles,
         permissions: ctx.permissions,
       },
@@ -154,6 +155,7 @@ async function issueSession(user, res) {
       email: user.email,
       mustChangePwd: user.mustChangePwd,
       avatarUpdatedAt: user.avatarUpdatedAt,
+      hasSeenTutorial: user.hasSeenTutorial,
       roles: ctx.roles,
       permissions: ctx.permissions,
     },
@@ -290,11 +292,31 @@ router.get('/me', verifyToken, async (req, res) => {
       mustChangePwd: user.mustChangePwd,
       lastLoginAt: user.lastLoginAt,
       avatarUpdatedAt: user.avatarUpdatedAt,
+      hasSeenTutorial: user.hasSeenTutorial,
       roles: ctx.roles,
       permissions: ctx.permissions,
     });
   } catch (err) {
     console.error('[Auth] Me error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/auth/tutorial-seen — marks the first-run product tour as done for
+// this account, so it does not greet the same person again on their next
+// sign-in (from this browser or any other). Fired once the tour is finished
+// OR explicitly skipped; replaying it later from the account menu does not
+// touch this flag again — a manual replay is not "the first time" and must
+// not reset anything.
+router.post('/tutorial-seen', verifyToken, async (req, res) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.user.sub },
+      data: { hasSeenTutorial: true },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Auth] Tutorial-seen error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

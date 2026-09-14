@@ -3967,6 +3967,74 @@ tr.active td {
   }
 }
 
+/* ── First-run product tour ──────────────────────────────────────────────
+   Four masks around the highlighted element rather than one full-screen
+   scrim with a cutout — no SVG mask/clip-path needed, and it composites the
+   same in every browser. `.tour-ring` draws the glow on top of the hole so
+   the highlighted control still reads as "the thing you should look at"
+   even though it's the one part of the screen NOT dimmed. */
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+.tour-mask {
+  position: fixed;
+  background: rgba(15, 23, 42, 0.55);
+  animation: fade-in 0.12s ease-out;
+}
+.tour-ring {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  /* Deliberately NOT pointer-events: none — see the comment on this element
+     in TutorialTour.jsx. It has to catch clicks, not just draw a border. */
+}
+.tour-pop {
+  z-index: 1201;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  background: var(--overlay);
+  border-radius: 10px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  padding: 16px;
+  animation: fade-in 0.12s ease-out;
+}
+.tour-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.tour-step-count {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.tour-pop h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.tour-pop p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.tour-pop-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tour-pop-nav {
+  display: flex;
+  gap: 8px;
+}
+
 .spinner {
   display: inline-block;
   width: 14px;

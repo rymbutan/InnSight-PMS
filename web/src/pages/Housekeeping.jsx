@@ -456,7 +456,7 @@ export default function Housekeeping() {
       </div>
 
       <div className="hk-layout">
-        <div className="panel hk-map-panel">
+        <div className="panel hk-map-panel" data-tour="tour-process-housekeeping">
           {/* The drawing keeps its rooms at a legible width and grows past the
               panel when the property is large, so this scrolls rather than
               squeezing forty-five rooms into one screen-width. */}

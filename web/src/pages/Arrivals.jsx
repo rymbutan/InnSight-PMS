@@ -212,7 +212,7 @@ export default function Arrivals() {
     <div>
       <h2>Arrivals &amp; Departures</h2>
 
-      <div className="panel">
+      <div className="panel" data-tour="tour-process-arrivals">
         <div className="panel-head">
           <h3>Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}</h3>
           {/* The range switcher sits in the panel header, top right. */}

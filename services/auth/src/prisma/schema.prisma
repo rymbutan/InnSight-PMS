@@ -37,6 +37,13 @@ model User {
   avatarData      Bytes?
   avatarMime      String?
   avatarUpdatedAt DateTime?
+
+  // Flips to true once this account has clicked through (or skipped) the
+  // first-run product tour. Persisted per-account rather than in
+  // localStorage so the tour follows a user across devices/browsers instead
+  // of repeating every time they sign in somewhere new — see
+  // POST /api/auth/tutorial-seen.
+  hasSeenTutorial Boolean    @default(false)
 }
 
 // Someone asked for an account from the sign-in screen. This is NOT a user:

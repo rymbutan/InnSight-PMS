@@ -143,7 +143,7 @@ export default function Reservations() {
           <h1>Reservations</h1>
           <FilterPill open={filtersOpen} onClick={() => setFiltersOpen((o) => !o)} />
         </div>
-        <button className="btn-cta" onClick={() => navigate('/reservations/new')}>
+        <button className="btn-cta" data-tour="tour-process-reservations" onClick={() => navigate('/reservations/new')}>
           <Icon name="plus" size={14} style={{ marginRight: 6 }} />
           Create new reservation
         </button>

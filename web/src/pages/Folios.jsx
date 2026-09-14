@@ -756,7 +756,7 @@ export default function Folios() {
           </div>
         )}
 
-        <div className="guest-search-bar">
+        <div className="guest-search-bar" data-tour="tour-process-folios">
           <input
             className="guest-search-input"
             value={q}
