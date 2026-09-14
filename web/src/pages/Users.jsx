@@ -519,16 +519,25 @@ export default function Users() {
                           so neither can work here — but an invisible button and
                           an omitted one made this row render three different
                           ways, and the reason was never stated anywhere the
-                          reader could see it. Disabled-with-a-title says it. */}
+                          reader could see it. Disabled-with-a-title says it.
+
+                          The bootstrap 'admin' account gets the same treatment,
+                          for the same reason: the server refuses both actions on
+                          it unconditionally (blockIfBootstrapAdmin in
+                          users.routes.js) — a break-glass account has to survive
+                          no matter how many other admins exist, not just while
+                          it's the last one. */}
                       <button
                         className="small danger"
-                        disabled={u.id === me?.id}
+                        disabled={u.id === me?.id || u.username === 'admin'}
                         title={
                           u.id === me?.id
                             ? 'You cannot disable your own account — ask another admin.'
-                            : undefined
+                            : u.username === 'admin'
+                              ? "The 'admin' account cannot be disabled."
+                              : undefined
                         }
-                        onClick={() => u.id !== me?.id && toggle(u)}
+                        onClick={() => u.id !== me?.id && u.username !== 'admin' && toggle(u)}
                       >
                         {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
                       </button>{' '}
@@ -541,13 +550,15 @@ export default function Users() {
                       {isAdmin && (
                         <button
                           className="small danger"
-                          disabled={u.id === me?.id}
+                          disabled={u.id === me?.id || u.username === 'admin'}
                           title={
                             u.id === me?.id
                               ? 'You cannot delete your own account — ask another admin.'
-                              : undefined
+                              : u.username === 'admin'
+                                ? "The 'admin' account cannot be deleted."
+                                : undefined
                           }
-                          onClick={() => u.id !== me?.id && removeUser(u)}
+                          onClick={() => u.id !== me?.id && u.username !== 'admin' && removeUser(u)}
                         >
                           Delete
                         </button>
