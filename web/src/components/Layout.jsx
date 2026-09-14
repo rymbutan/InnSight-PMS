@@ -8,6 +8,7 @@ import KeyboardShortcuts from './KeyboardShortcuts';
 import Greeting from './Greeting';
 import NotificationBell from './NotificationBell';
 import IncomingCall from './IncomingCall';
+import TutorialTour from './TutorialTour';
 import { applyAccent } from '../lib/accent';
 import { primaryRole } from '../lib/roles';
 import RoleBadge from './RoleBadge';
@@ -35,7 +36,7 @@ const NAV_SECTIONS = CATALOGUE.sections;
 const COLLAPSE_KEY = 'innsight_sidebar_collapsed';
 
 export default function Layout() {
-  const { user, logout, hasRole, hasSection, refreshSections } = useAuth();
+  const { user, logout, hasRole, hasSection, refreshSections, setUser } = useAuth();
   // The desk roles. Drives both the top-bar "create" menu and the calendar
   // shortcut, which are the two top-bar controls whose every destination is
   // guarded to exactly these three.
@@ -55,6 +56,7 @@ export default function Layout() {
   });
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [acctMenuOpen, setAcctMenuOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -161,6 +163,41 @@ export default function Layout() {
       });
   }, []);
 
+  // First-run product tour. `hasSeenTutorial` is a DB column (see
+  // services/auth/src/routes/auth.routes.js), not localStorage, so it follows
+  // the ACCOUNT rather than the browser — signing in on a different machine
+  // must not show it again, and clearing site data must not bring it back.
+  //
+  // The ref guards against re-checking on every `user` identity change (e.g.
+  // finishTour's own setUser call below) — this must fire at most once per
+  // mount, not once per render.
+  const autoTourChecked = useRef(false);
+  useEffect(() => {
+    if (autoTourChecked.current || !user) return;
+    autoTourChecked.current = true;
+    if (user.hasSeenTutorial === false) {
+      // A beat after paint, so the tour's first spotlight doesn't fight the
+      // sidebar/topbar's own mount animations for the highlighted rect.
+      const t = setTimeout(() => setTourOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+  }, [user]);
+
+  // Shared by both "finished the tour" and "skipped it" — either way counts
+  // as this account having seen it, so it stops greeting them at every
+  // sign-in. Replaying it later (the account-menu button) calls setTourOpen
+  // directly and never reaches here, so a replay can never re-flip this flag.
+  async function finishTour() {
+    setTourOpen(false);
+    if (!user || user.hasSeenTutorial) return;
+    try {
+      await api.post('/api/auth/tutorial-seen');
+    } catch {
+      /* best-effort — worst case this account sees the tour once more */
+    }
+    setUser({ ...user, hasSeenTutorial: true });
+  }
+
   function onSearchChange(v) {
     setSearchQ(v);
     setSearchOpen(true);
@@ -234,6 +271,7 @@ export default function Layout() {
           control, and this div is not focusable. */}
       <nav
         className="side-nav"
+        data-tour="tour-sidebar"
         aria-label="Main navigation"
         onClick={(e) => {
           if (drawerOpen) return;
@@ -360,7 +398,7 @@ export default function Layout() {
             </button>
           )}
 
-          <div className="cb-search-wrap" ref={searchRef}>
+          <div className="cb-search-wrap" data-tour="tour-search" ref={searchRef}>
             <input
               className="cb-search"
               placeholder="Search reservations, guests, and more"
@@ -425,6 +463,7 @@ export default function Layout() {
                 <button
                   type="button"
                   className="cb-icon-btn cb-icon-create"
+                  data-tour="tour-create"
                   title="Create new"
                   onClick={() => setCreateMenuOpen((o) => !o)}
                 >
@@ -488,6 +527,20 @@ export default function Layout() {
             >
               <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
             </button>
+            {/* A standalone topbar icon rather than another line in the account
+                menu — replaying the tour is something people reach for in the
+                moment ("wait, how do I..."), not something they go looking for
+                inside Settings-adjacent account chrome. graduation-cap, not
+                sparkles — sparkles is already Amenities & Facilities' icon in
+                the sidebar, and reusing it here read as the same feature. */}
+            <button
+              type="button"
+              className="cb-icon-btn"
+              title="Replay tutorial"
+              onClick={() => setTourOpen(true)}
+            >
+              <Icon name="graduation-cap" size={18} />
+            </button>
             {/* Gated to the roles that can actually open /calendar. This button
                 is the only route to that page, so leaving it unguarded handed
                 Housekeeping a shortcut straight into a "not authorised" screen —
@@ -502,7 +555,9 @@ export default function Layout() {
                 <Icon name="calendar" size={18} />
               </button>
             )}
-            <NotificationBell userId={user?.id} />
+            <span data-tour="tour-notifications">
+              <NotificationBell userId={user?.id} />
+            </span>
 
             {/* The role, spelled out, in place of an avatar initial — a circle
                 with "A" in it identifies nobody and says nothing about what the
@@ -521,6 +576,7 @@ export default function Layout() {
                 type="button"
                 ref={acctTriggerRef}
                 className="cb-acct-trigger"
+                data-tour="tour-account"
                 onClick={() => setAcctMenuOpen((v) => !v)}
                 // ArrowDown/Up opens the menu straight onto the first/last item,
                 // which is the behaviour a menu button is expected to have — a
@@ -593,6 +649,7 @@ export default function Layout() {
           housekeeper happens to be, which is the difference between a call and
           a notification. */}
       <IncomingCall />
+      <TutorialTour open={tourOpen} onFinish={finishTour} />
     </div>
   );
 }

@@ -120,7 +120,7 @@ export default function Audit() {
                   onChange={(e) => setNightlyRate(e.target.value)}
                 />
               </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end' }} data-tour="tour-process-audit">
                 <button onClick={run} disabled={running}>
                   {running ? <span className="spinner" /> : 'Run audit'}
                 </button>
