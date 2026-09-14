@@ -34,6 +34,21 @@ async function blockIfAdminTarget(req, res, targetRoles) {
   return false;
 }
 
+// The bootstrap account is protected unconditionally — independent of, and
+// checked before, the "last active admin" counting below. That guard only
+// stops removing the LAST admin; it does nothing the moment a second admin
+// exists, which is exactly when someone could delete or disable 'admin' and
+// not notice until it mattered. Keyed on username rather than "is this
+// account currently ADMIN", since a break-glass account has to survive even
+// if its own role were ever stripped by mistake elsewhere.
+function blockIfBootstrapAdmin(res, target, action) {
+  if (target.username === 'admin') {
+    res.status(400).json({ error: `The 'admin' account cannot be ${action}.` });
+    return true;
+  }
+  return false;
+}
+
 // For routes that SET a roles list (creating a user, or replacing one's
 // roles) — blocks a non-ADMIN from handing out the ADMIN role at all, not
 // just from touching an account that already has it. Without this, a
@@ -238,6 +253,7 @@ router.post('/users/:id/disable', verifyToken, requireRole(...STAFF_ROLES), asyn
       include: { roles: true },
     });
     if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (blockIfBootstrapAdmin(res, target, 'disabled')) return;
     if (await blockIfAdminTarget(req, res, target.roles)) return;
 
     const err = await lockoutError(req.params.id, req.user?.sub, target.roles);
@@ -285,6 +301,7 @@ router.delete('/users/:id', verifyToken, requireRole('ADMIN'), async (req, res) 
       include: { roles: true },
     });
     if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (blockIfBootstrapAdmin(res, target, 'deleted')) return;
 
     // Deleting yourself signs you out of an account that no longer exists, with
     // no way back in. Checked before the admin count, so the message names the
