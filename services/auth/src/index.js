@@ -3,6 +3,7 @@ const authRoutes = require('./routes/auth.routes');
 const usersRoutes = require('./routes/users.routes');
 const layoutsRoutes = require('./routes/layouts.routes');
 const assetsRoutes = require('./routes/assets.routes');
+const navVisibilityRoutes = require('./routes/navVisibility.routes');
 const trainingRoutes = require('./routes/training.routes');
 const { verifyToken, requireRole } = require('./middleware/auth');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
@@ -157,6 +158,15 @@ app.use('/api', trainingRoutes);
 app.use('/api', usersRoutes);
 app.use('/api', layoutsRoutes);
 app.use('/api', assetsRoutes);
+app.use('/api', navVisibilityRoutes);
+
+// Push the stored Sidebar Visibility map into Redis at boot. The eight other
+// services read it from there on every request, so without this a restart with
+// a cold (or flushed) Redis would run with every section visible until the next
+// time an admin happened to save the layout.
+navVisibilityRoutes.publish().catch((e) => {
+  console.warn('[Auth] initial nav visibility publish failed:', e.message);
+});
 
 const subscriber = startSubscriber();
 

@@ -159,6 +159,9 @@ const LIVE_CHANNELS = [
   'folio:early_departure_adjusted',
   // Bill splitting: a charge moved between two folios of one stay.
   'folio:transferred',
+  // E-wallet refund/chargeback claims (services/folio's PaymentDispute).
+  'folio:dispute_filed',
+  'folio:dispute_resolved',
   // Guests
   'guest:profile_created',
   'guest:profile_updated',
@@ -241,6 +244,12 @@ const CHANNEL_DOMAIN = {
   'folio:deposit_received': 'folio',
   'folio:refund_posted': 'folio',
   'folio:early_departure_adjusted': 'folio',
+  // These three were in LIVE_CHANNELS with no domain, and an unmapped channel
+  // is CLOSED (see mayReceive below) — so bill-split transfers and every
+  // dispute event were forwarded to nobody at all.
+  'folio:transferred': 'folio',
+  'folio:dispute_filed': 'folio',
+  'folio:dispute_resolved': 'folio',
   'guest:profile_created': 'guests',
   'guest:profile_updated': 'guests',
   'guest:flagged': 'guests',

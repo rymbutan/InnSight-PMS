@@ -46,6 +46,8 @@ export const LIVE_CHANNELS = [
   'folio:refund_posted',
   'folio:early_departure_adjusted',
   'folio:transferred',
+  'folio:dispute_filed',
+  'folio:dispute_resolved',
   'guest:profile_created',
   'guest:profile_updated',
   'guest:flagged',
@@ -88,7 +90,12 @@ export const CHANNEL_GROUPS = {
     'folio:deposit_received',
     'folio:refund_posted',
     'folio:early_departure_adjusted',
-  'folio:transferred',
+    'folio:transferred',
+    // An e-wallet refund/chargeback claim is folio money like any other: the
+    // page that shows the queue has to repaint when a colleague files or
+    // resolves one, or two cashiers work from two different pictures of it.
+    'folio:dispute_filed',
+    'folio:dispute_resolved',
   ],
   guests: ['guest:profile_created', 'guest:profile_updated', 'guest:flagged'],
   maintenance: [
