@@ -230,6 +230,16 @@ export default function RoomLayoutEditor({
   const orbit = useRef();
   const anchor = useRef(null); // last plain-clicked row, for shift-range in the lists
   const dragStart = useRef(null); // per-object transforms captured at gizmo mousedown
+  // A gizmo arrow is deliberately drawn away from the object it moves, so the
+  // mouse routinely ends a drag hovering a totally different mesh (or empty
+  // floor) rather than the object just dropped. The browser's native `click`
+  // fires there right after mouseup, which — left unguarded — reselects
+  // whatever's underneath (or clears selection via onPointerMissed), reading
+  // as the move tool "teleporting". Set true for the whole drag gesture and
+  // cleared on a macrotask (after that trailing click has already been
+  // ignored), so pick()/onPointerMissed can tell a drag-release click apart
+  // from a real click.
+  const draggingRef = useRef(false);
   const hist = useRef([]);
   // The redo branch. A ref like `hist`, plus a counter that exists only to make
   // the two toolbar buttons re-render when the stacks change — a ref mutation
@@ -484,6 +494,7 @@ export default function RoomLayoutEditor({
   // object's start transform on mousedown, mirror the pivot's delta onto them
   // live, then commit the same delta to the DATA on mouseup.
   function groupDragStart() {
+    draggingRef.current = true;
     snapshot();
     if (orbit.current) orbit.current.enabled = false;
     dragStart.current = {
@@ -530,10 +541,14 @@ export default function RoomLayoutEditor({
     dragStart.current = null;
     // Remount the pivot so it re-centres on the new centroid with rotation cleared.
     setPivotEpoch((n) => n + 1);
+    setTimeout(() => {
+      draggingRef.current = false;
+    }, 0);
   }
 
   /** Click routing shared by the 3D scene and the side lists. */
   function pick(kind, i, e) {
+    if (draggingRef.current) return;
     if (e?.shiftKey && anchor.current && anchor.current.kind === kind) {
       setSel((cur) => rangeIn(cur, kind, anchor.current.i, i));
       return;
@@ -1106,7 +1121,10 @@ export default function RoomLayoutEditor({
               glRef.current = gl;
               gl.setClearColor(stageColor());
             }}
-            onPointerMissed={() => setSel([])}
+            onPointerMissed={() => {
+              if (draggingRef.current) return;
+              setSel([]);
+            }}
           >
             <Env room={room} walls={walls} />
             {furniture.map((it, i) => (
@@ -1234,12 +1252,16 @@ export default function RoomLayoutEditor({
                       m === 'translate' || m === 'rotate' || (m === 'scale' && single.kind === 'furniture')
                     }
                     onMouseDown={() => {
+                      draggingRef.current = true;
                       snapshot();
                       if (orbit.current) orbit.current.enabled = false;
                     }}
                     onMouseUp={() => {
                       if (orbit.current) orbit.current.enabled = true;
                       commit();
+                      setTimeout(() => {
+                        draggingRef.current = false;
+                      }, 0);
                     }}
                   />
                 );
