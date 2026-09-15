@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// A read-only mirror of auth-service's User, kept current by the auth:user_*
+// Redis events (see src/subscribers/redis.subscriber.js) and backfilled once on
+// boot via the service caller.
+//
+// WHY MIRROR AT ALL. The contact list is re-read by every online user on every
+// poll. Resolving it through a live call to auth-service on that cadence would
+// put the whole directory read on the hot path of a feature whose entire point
+// is to be cheap enough to poll. The data it holds — who exists, what they are
+// called, what role they hold — changes on the order of days; a few seconds of
+// staleness is invisible. Presence is the one genuinely live thing here, and
+// that lives in Redis, not in this table.
+//
+// NOT a source of truth: never consulted for authorization, only to render a
+// name and a role badge beside a message.
+model UserCache {
+  id          String   @id // auth-service's User.id — no cross-DB foreign key
+  username    String   @unique
+  displayName String
+  roles       String[]
+  status      String   @default("ACTIVE") // ACTIVE | DISABLED — disabled drop out of the contact list
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, displayName])
+}
+
+model Message {
+  id          String    @id @default(uuid())
+  // Sender and recipient are auth-service User ids held as plain strings. The
+  // per-service-database rule means there is no foreign key to point at them —
+  // the same convention Reservation.createdBy and FolioTransaction.postedBy use.
+  senderId    String
+  recipientId String
+  // The conversation key, stored rather than derived at query time: userLo is
+  // the lexicographically smaller of the two participant ids and userHi the
+  // larger, so both directions of one conversation share a pair and an index
+  // range. A Conversation table would buy nothing here — 1-to-1 has exactly one
+  // conversation per unordered pair, so the pair IS the identity, and there is
+  // no row to create-or-find (and therefore no race) when two people happen to
+  // open a new conversation at the same moment. If group chat is ever added,
+  // that is the point to introduce a real Conversation row.
+  userLo      String
+  userHi      String
+  body        String
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  // Reading one conversation newest-first.
+  @@index([userLo, userHi, createdAt])
+  // Counting what is unread for me, per sender, without scanning my whole inbox.
+  @@index([recipientId, readAt])
+}

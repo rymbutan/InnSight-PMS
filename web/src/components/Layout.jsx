@@ -163,6 +163,57 @@ export default function Layout() {
       });
   }, []);
 
+  // ── Presence heartbeat ──────────────────────────────────────────────────
+  // Lives in Layout, not on the Messages page, because "online" has to mean
+  // "has the PMS open" rather than "is looking at the chat". Someone working
+  // the arrivals list is reachable; a colleague who sees them greyed out would
+  // go and find them in person instead of typing.
+  //
+  // 25s against the 45s TTL in services/messaging — one dropped request must
+  // not flicker the dot for everybody watching.
+  useEffect(() => {
+    if (!user) return;
+    const beat = () => api.post('/api/messages/presence/ping').catch(() => {});
+    beat();
+    const t = setInterval(beat, 25000);
+    return () => clearInterval(t);
+  }, [user]);
+
+  // ── Unread messages badge ───────────────────────────────────────────────
+  // Deliberately its own tiny endpoint rather than a slice of the contact
+  // list: this runs on every page in the product, so it must stay one count
+  // and not drag the whole Messages payload onto screens that never show it.
+  // 20s, because a badge is an ambient nudge — the open conversation is what
+  // needs to feel live, and that polls far faster from the page itself.
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  useEffect(() => {
+    if (!user) return;
+    const load = () =>
+      api
+        .get('/api/messages/unread-count')
+        .then(({ data }) => setUnreadMessages(data?.total || 0))
+        .catch(() => {
+          /* the badge is not worth an error surface — leave the last count */
+        });
+    load();
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, [user]);
+
+  // Opening the page is the moment the count is most wrong: the thread marks
+  // everything read server-side, so wait for that and re-read rather than
+  // leaving a stale badge up for the rest of the 20s window.
+  useEffect(() => {
+    if (location.pathname !== '/messages') return;
+    const t = setTimeout(() => {
+      api
+        .get('/api/messages/unread-count')
+        .then(({ data }) => setUnreadMessages(data?.total || 0))
+        .catch(() => {});
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [location.pathname]);
+
   // First-run product tour. `hasSeenTutorial` is a DB column (see
   // services/auth/src/routes/auth.routes.js), not localStorage, so it follows
   // the ACCOUNT rather than the browser — signing in on a different machine
@@ -234,9 +285,7 @@ export default function Layout() {
   // by somebody clicking a checkbox. `core` entries skip the second entirely.
   const sections = NAV_SECTIONS.map((s) => ({
     ...s,
-    items: s.items.filter(
-      (n) => (!n.roles || hasRole(...n.roles)) && (n.core || hasSection(n.key))
-    ),
+    items: s.items.filter((n) => (!n.roles || hasRole(...n.roles)) && (n.core || hasSection(n.key))),
   })).filter((s) => s.items.length > 0);
 
   const initial = (user?.displayName || '?').slice(0, 1).toUpperCase();
@@ -311,6 +360,16 @@ export default function Layout() {
                 >
                   <Icon name={n.icon} size={18} strokeWidth={1.9} />
                   <span className="side-link-label">{label}</span>
+                  {n.key === 'messages' && unreadMessages > 0 && (
+                    <span
+                      className="side-badge"
+                      // Collapsed, the label is gone and the number would sit
+                      // beside an icon with nothing to say what it counts.
+                      title={`${unreadMessages} unread message${unreadMessages === 1 ? '' : 's'}`}
+                    >
+                      {unreadMessages > 9 ? '9+' : unreadMessages}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}
