@@ -1,6 +1,7 @@
 const express = require('express');
 const Redis = require('ioredis');
 const { requireRole, ROLE_GROUPS } = require('../middleware/auth');
+const { makeServiceCaller } = require('../lib/serviceCall');
 
 const ADMIN = ['ADMIN', 'MANAGER'];
 const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK']; // front desk maintains guest profiles
@@ -8,6 +9,12 @@ const STAFF = ['ADMIN', 'MANAGER', 'FRONT_DESK']; // front desk maintains guest 
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+const STAY_URL = process.env.STAY_URL || 'http://stay-service:3006';
+// Used on exactly one path — the delete below. Claims no roles, because the
+// only question it asks is "does this guest have a live stay", which
+// /api/stays answers to any authenticated caller.
+const stayCall = makeServiceCaller({ name: 'guest', roles: [], permissions: [] });
 
 function nextProfileNumber() {
   return `G-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -300,6 +307,84 @@ router.post('/guests/:id/anonymize', requireRole(...ADMIN), async (req, res) => 
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Guest not found.' });
     console.error('[Guest] Anonymize error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// DELETE /api/guests/:id — remove the profile permanently.
+//
+// ADMIN and MANAGER only. Front desk maintains profiles (POST/PATCH above) but
+// does not destroy them: a mistyped name is fixed with an edit, and the one
+// operation that cannot be undone should need someone who can also undo the
+// decision to hire.
+//
+// DELETE vs ANONYMIZE. Both exist and they answer different questions.
+// Anonymize (above) is the data-protection action: the guest stayed here, the
+// stay must remain on the books, and only the identifying fields go. Delete is
+// for a profile that should never have existed — a duplicate, a test record, a
+// typo'd walk-in — where there is nothing to preserve. If a guest asks to be
+// forgotten and has history, anonymize is the correct tool and this route will
+// still happily run; the difference is a judgement the operator makes, which is
+// why the confirmation in the browser spells both out.
+//
+// WHAT IS NOT CASCADED, AND WHY THAT IS SAFE. Reservations, stays and folios
+// live in other services and hold `guestId` as a plain string — the
+// per-service-database rule means there is no foreign key to violate. They also
+// denormalise `guestName` at write time, so a past booking keeps showing who it
+// was for after the profile is gone. It loses the link to a profile, not the
+// record of the stay.
+router.delete('/guests/:id', requireRole(...ADMIN), async (req, res) => {
+  try {
+    const guest = await prisma.guest.findUnique({ where: { id: req.params.id } });
+    if (!guest) return res.status(404).json({ error: 'Guest not found.' });
+
+    // The one refusal. Erasing the profile of the guest currently in a room
+    // leaves the desk holding a stay it cannot look up, mid-stay, which is the
+    // exact moment they most need to. Anything already departed is fair game.
+    try {
+      const stays = await stayCall.call(`${STAY_URL}/api/stays?guestId=${encodeURIComponent(guest.id)}`);
+      const live = (Array.isArray(stays) ? stays : []).find((s) => s.status === 'IN_HOUSE');
+      if (live) {
+        return res.status(409).json({
+          error:
+            'This guest is currently checked in. Check them out first, or use Anonymize to clear their ' +
+            'personal details while keeping the stay.',
+        });
+      }
+    } catch (err) {
+      // FAIL CLOSED. Everywhere else in this codebase a degraded dependency
+      // falls open so the desk keeps working — but "keep working" for a delete
+      // means destroying a profile we could not prove was safe to destroy.
+      // Refusing costs a retry; guessing costs the record.
+      console.error('[Guest] Delete: stay lookup failed, refusing:', err.message);
+      return res.status(503).json({
+        error: 'Cannot confirm whether this guest is checked in right now. Please try again shortly.',
+      });
+    }
+
+    await prisma.$transaction(async (px) => {
+      // The guest's own rows, which DO have foreign keys to it.
+      await px.guestContact.deleteMany({ where: { guestId: guest.id } });
+      await px.guestPreference.deleteMany({ where: { guestId: guest.id } });
+      await px.consentRecord.deleteMany({ where: { guestId: guest.id } });
+      await px.loyaltyAccount.deleteMany({ where: { guestId: guest.id } });
+      await px.guest.delete({ where: { id: guest.id } });
+    });
+
+    console.log(`[Guest] Profile ${guest.profileNumber} deleted by ${req.user?.username || req.user?.sub}.`);
+    redis.publish(
+      'guest:profile_deleted',
+      JSON.stringify({
+        guestId: guest.id,
+        profileNumber: guest.profileNumber,
+        guestName: guest.displayName || `${guest.firstName} ${guest.lastName}`.trim(),
+        deletedBy: req.user?.username || req.user?.sub,
+      })
+    );
+    res.json({ deleted: true, id: guest.id, profileNumber: guest.profileNumber });
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Guest not found.' });
+    console.error('[Guest] Delete error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

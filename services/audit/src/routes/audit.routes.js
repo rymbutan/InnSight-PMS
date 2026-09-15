@@ -106,11 +106,28 @@ router.get('/audit/days', requireRole(...AUDIT_ROLES), async (req, res) => {
       if (from) where.businessDate.gte = parseLocalDay(from);
       if (to) where.businessDate.lt = endOfLocalDay(parseLocalDay(to));
     }
+    // 60 was too low to answer the question the callers actually ask. The
+    // Revenue page and Reports -> Occupancy / Revenue both request a date RANGE,
+    // and a two-month range is 62 days: the cap silently dropped the two oldest
+    // and every total computed from the result was quietly short. Ordered desc
+    // with no paging, a truncated page is indistinguishable from a property
+    // that did not trade on those days.
+    //
+    // 400 is a bit over a year, which is the longest range any screen offers.
+    // Hitting it is now reported rather than returned as if it were the whole
+    // answer — same treatment as the reservation list's LIST_LIMIT.
+    const DAY_LIMIT = 400;
     const days = await prisma.businessDay.findMany({
       where,
       orderBy: { businessDate: 'desc' },
-      take: 60,
+      take: DAY_LIMIT,
     });
+    if (days.length === DAY_LIMIT) {
+      console.warn(
+        `[Audit] /audit/days hit the ${DAY_LIMIT}-row cap for ${JSON.stringify(req.query)}; ` +
+          'the response is truncated and any total computed from it is short.'
+      );
+    }
     res.json(days);
   } catch (err) {
     console.error('[Audit] Days error:', err.message);

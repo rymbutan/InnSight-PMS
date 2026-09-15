@@ -252,7 +252,7 @@ export default function Rooms() {
                     <option value="">All statuses</option>
                     {ROOM_STATUSES.map((s) => (
                       <option key={s} value={s}>
-                        {s.replace(/_/g, ' ')}
+                        {labelize(s)}
                       </option>
                     ))}
                   </select>
@@ -300,7 +300,7 @@ export default function Rooms() {
                           <td>{r.typeCode}</td>
                           <td className="t-c">{r.floor}</td>
                           <td className="t-c">
-                            <span className={`badge ${dotCls}`}>{r.status}</span>
+                            <span className={`badge ${dotCls}`}>{labelize(r.status)}</span>
                           </td>
                           <td className="t-c">
                             {/* `value` is set explicitly now: the option previously

@@ -297,12 +297,28 @@ export default function Arrivals() {
                   <td className="t-c">{s.nights ?? '—'}</td>
                   <td className="t-c">{s.adults == null ? '—' : s.adults + (s.children || 0)}</td>
                   <td className="t-actions">
-                    <button
-                      className="small"
-                      onClick={() => setCheckInModal({ open: true, stay: s, roomId: '' })}
-                    >
-                      Check-in
-                    </button>
+                    {/* An overdue booking gets no Check-in button at all, rather
+                        than one that fails. The server refuses it (POST
+                        /api/check-in) and the sweep in services/stay cancels the
+                        booking within fifteen minutes; offering the action and
+                        then rejecting it would just be a slower way of saying
+                        the same thing, after the desk had already picked a room
+                        for a guest who is not coming. */}
+                    {s.overdue ? (
+                      <span
+                        className="badge cancelled auto-cancelled"
+                        title="The check-in date has passed and the guest never arrived, so this booking is cancelled automatically. Create a new booking, or take the guest as a walk-in."
+                      >
+                        Auto-cancelled
+                      </span>
+                    ) : (
+                      <button
+                        className="small"
+                        onClick={() => setCheckInModal({ open: true, stay: s, roomId: '' })}
+                      >
+                        Check-in
+                      </button>
+                    )}
                     {canDelete && (
                       <button
                         className="small danger"

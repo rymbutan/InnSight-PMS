@@ -13,6 +13,7 @@ const {
 const { buildSpec, mountDocs } = require('./lib/openapi');
 const logger = makeLogger('stay');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
+const { startOverdueSweeper } = require('./overdue/sweeper');
 
 const app = express();
 const PORT = process.env.PORT || 3006;
@@ -32,10 +33,16 @@ app.use('/api', verifyToken, idempotency, stayRoutes);
 
 const subscriber = startSubscriber();
 
+// Cancels bookings whose check-in day has passed without the guest arriving, so
+// an overdue row leaves the arrivals worklist instead of sitting there with a
+// live Check-in button. POST /api/check-in refuses them regardless of when this
+// last ran — see overdue/sweeper.js.
+const overdueSweeper = startOverdueSweeper();
+
 app.use(jsonErrorHandler);
 
 const server = app.listen(PORT, () => {
   console.log(`[InnSight] Stay Service running on port ${PORT}`);
 });
 
-gracefulShutdown(server, [() => subscriber?.disconnect?.()]);
+gracefulShutdown(server, [() => clearInterval(overdueSweeper), () => subscriber?.disconnect?.()]);

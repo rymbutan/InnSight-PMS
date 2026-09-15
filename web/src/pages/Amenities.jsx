@@ -125,9 +125,7 @@ export default function Amenities() {
   // A bar on the facility calendar links to the booking it draws, not just to
   // this page. Read once at mount: the highlight is a landing cue, so it must
   // not come back every time the schedule reloads.
-  const [focusBookingId] = useState(
-    () => new URLSearchParams(window.location.search).get('booking') || ''
-  );
+  const [focusBookingId] = useState(() => new URLSearchParams(window.location.search).get('booking') || '');
   const focusRowRef = useRef(null);
   const didFocusRef = useRef(false);
   const [bookings, setBookings] = useState([]);
@@ -669,7 +667,9 @@ export default function Amenities() {
                         onChange={(e) => setBookForm((b) => ({ ...b, method: e.target.value }))}
                       >
                         {METHODS.map((m) => (
-                          <option key={m}>{m}</option>
+                          <option key={m} value={m}>
+                            {labelize(m)}
+                          </option>
                         ))}
                       </select>
                     </>
@@ -797,7 +797,7 @@ export default function Amenities() {
                     <option value="">All categories</option>
                     {catalogCategories.map((c) => (
                       <option key={c} value={c}>
-                        {c.replace(/_/g, ' ')}
+                        {labelize(c)}
                       </option>
                     ))}
                   </select>
@@ -856,7 +856,9 @@ export default function Amenities() {
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                   >
                     {CATEGORIES.map((c) => (
-                      <option key={c}>{c}</option>
+                      <option key={c} value={c}>
+                        {labelize(c)}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -867,7 +869,9 @@ export default function Amenities() {
                     onChange={(e) => setForm({ ...form, pricingModel: e.target.value })}
                   >
                     {MODELS.map((m) => (
-                      <option key={m}>{m}</option>
+                      <option key={m} value={m}>
+                        {labelize(m)}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -967,7 +971,9 @@ export default function Amenities() {
                   <label>Payment method</label>
                   <select value={laundryMethod} onChange={(e) => setLaundryMethod(e.target.value)}>
                     {METHODS.map((m) => (
-                      <option key={m}>{m}</option>
+                      <option key={m} value={m}>
+                        {labelize(m)}
+                      </option>
                     ))}
                   </select>
                 </div>

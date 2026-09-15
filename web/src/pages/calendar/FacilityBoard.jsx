@@ -29,6 +29,7 @@ import { buildFacilityBars } from '../../lib/facilityBars';
 import { useTheme } from '../../theme';
 import CalendarShell from '../../components/CalendarShell';
 import Icon from '../../components/Icon';
+import { labelize } from '../../lib/labels';
 
 // One lane is a bar plus the gap under it. The cell has to be tall enough for
 // every lane in its row, or a stacked booking is drawn outside its own row.
@@ -227,7 +228,7 @@ export default function FacilityBoard({ startDate, days }) {
                 >
                   <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
                 </button>
-                <span style={{ marginLeft: 4 }}>{g.code.replace(/_/g, ' ')}</span>
+                <span style={{ marginLeft: 4 }}>{labelize(g.code)}</span>
               </div>
               {days.map((d) => {
                 // How many of this category's spaces have nothing on them that

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useTheme } from '../theme';
@@ -7,10 +7,12 @@ import Icon from './Icon';
 import KeyboardShortcuts from './KeyboardShortcuts';
 import Greeting from './Greeting';
 import NotificationBell from './NotificationBell';
+import NotificationPopups from './NotificationPopups';
 import IncomingCall from './IncomingCall';
 import TutorialTour from './TutorialTour';
 import { applyAccent } from '../lib/accent';
 import { playMessageChime } from '../lib/sound';
+import { useNotificationFeed } from '../lib/notifications';
 import { primaryRole } from '../lib/roles';
 import RoleBadge from './RoleBadge';
 import CATALOGUE from '../lib/navSections.json';
@@ -56,6 +58,33 @@ export default function Layout() {
     }
   });
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+
+  // ── Notifications: ONE subscription, two surfaces ───────────────────────
+  // The bell (a place you go and look) and the pop-ups (which come to you) show
+  // the same rows. useNotificationFeed opens an SSE stream per call, so it is
+  // held here once and handed to both rather than being called in each.
+  const [popups, setPopups] = useState([]);
+  const dismissPopup = useCallback((id) => setPopups((p) => p.filter((x) => x.id !== id)), []);
+  // `location` is read through a ref: putting it in this callback's deps would
+  // rebuild it on every navigation, and useNotificationFeed keys its subscription
+  // off the callback identity.
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
+  const onNotification = useCallback((item) => {
+    if (item.channel === 'messaging:message_sent') {
+      // The chime lives here rather than on the unread-count poll below: this
+      // fires the moment the message is sent, and the poll can be twenty
+      // seconds behind it.
+      playMessageChime();
+      // No pop-up over the Messages page itself — the message is already
+      // arriving in the thread the reader is looking at, and a card announcing
+      // what is visibly on screen is just something else to dismiss.
+      if (pathRef.current === '/messages') return;
+    }
+    setPopups((p) => [item, ...p].slice(0, 6));
+  }, []);
+  const notifications = useNotificationFeed(user?.id, onNotification);
+  const liveConnected = notifications.connected;
   const [acctMenuOpen, setAcctMenuOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
@@ -201,7 +230,15 @@ export default function Layout() {
           const total = data?.total || 0;
           // Only a RISE is an arrival. The count also falls (a thread was read)
           // and holds steady (nothing happened), and neither is news.
-          if (lastUnread.current !== null && total > lastUnread.current) playMessageChime();
+          //
+          // And only while the live stream is DOWN. When SSE is connected the
+          // chime has already rung from the message event above, up to twenty
+          // seconds earlier; ringing again here would be the same message
+          // announced twice. This is the fallback for a dropped stream, not a
+          // second announcement.
+          if (lastUnread.current !== null && total > lastUnread.current && !liveConnected) {
+            playMessageChime();
+          }
           lastUnread.current = total;
           setUnreadMessages(total);
         })
@@ -211,7 +248,7 @@ export default function Layout() {
     load();
     const t = setInterval(load, 20000);
     return () => clearInterval(t);
-  }, [user]);
+  }, [user, liveConnected]);
 
   // Opening the page is the moment the count is most wrong: the thread marks
   // everything read server-side, so wait for that and re-read rather than
@@ -635,7 +672,7 @@ export default function Layout() {
               </button>
             )}
             <span data-tour="tour-notifications">
-              <NotificationBell userId={user?.id} />
+              <NotificationBell feed={notifications} />
             </span>
 
             {/* The role, spelled out, in place of an avatar initial — a circle
@@ -722,6 +759,11 @@ export default function Layout() {
         <main className="cb-main">
           <Outlet />
         </main>
+
+        {/* In the shell rather than on a page: an event that happened elsewhere
+            in the hotel has to reach whoever is on screen, whatever they have
+            open. */}
+        <NotificationPopups items={popups} onDismiss={dismissPopup} />
       </div>
       <KeyboardShortcuts />
       {/* In the SHELL, not on a page: a call has to interrupt wherever the

@@ -60,6 +60,9 @@ export const LIVE_CHANNELS = [
   'facility:booked',
   'housekeeping:call_placed',
   'housekeeping:call_answered',
+  // Delivered only to the recipient's own stream — see directedTargetOf in
+  // services/inventory/src/index.js.
+  'messaging:message_sent',
 ];
 
 // Named groups, so a page declares the DOMAIN it renders rather than pasting

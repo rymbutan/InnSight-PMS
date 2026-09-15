@@ -7,6 +7,7 @@ import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { STATUS_META, STATUS_ORDER } from '../sim/statusMeta';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
+import { labelize } from '../lib/labels';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The dashboard a Housekeeping & Maintenance account sees instead of the
@@ -96,7 +97,7 @@ function Pill({ bg, fg, children, title }) {
 
 function RoomStatusPill({ status }) {
   const meta = STATUS_META[status];
-  if (!meta) return <span className="muted">{status}</span>;
+  if (!meta) return <span className="muted">{labelize(status)}</span>;
   return (
     <Pill bg={meta.fill} fg={meta.color} title={meta.hint}>
       {meta.label}
@@ -442,7 +443,9 @@ export default function HousekeepingDashboard() {
                         /* Age, not a timestamp: a call that has been ringing for
                            40 minutes is the problem, and the reader should not
                            have to do the subtraction. */
-                        <Pill bg="#fee2e2" fg="#dc2626">Waiting {ageSince(c.placedAt)}</Pill>
+                        <Pill bg="#fee2e2" fg="#dc2626">
+                          Waiting {ageSince(c.placedAt)}
+                        </Pill>
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>

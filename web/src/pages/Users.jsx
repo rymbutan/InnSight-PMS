@@ -391,7 +391,7 @@ export default function Users() {
                         checked={form.roles.includes(r.code)}
                         onChange={() => toggleRoleInForm(r.code)}
                       />
-                      <span>{r.code}</span>
+                      <span>{roleLabel(r.code)}</span>
                     </label>
                   ))}
               </div>

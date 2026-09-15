@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveEvents, LIVE_CHANNELS } from './useLiveEvents';
+import { labelize } from './labels';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // In-app notification feed.
@@ -11,12 +12,17 @@ import { useLiveEvents, LIVE_CHANNELS } from './useLiveEvents';
 // deliberately does no filtering of its own: what arrives here is already
 // everything this user is entitled to see, and nothing else. Re-filtering in the
 // browser would imply the client is the security boundary, which it is not.
+//
+// Direct messages ride the same stream, on `messaging:message_sent`. That one is
+// DIRECTED rather than broadcast — the fan-out sends it to the recipient's
+// stream alone (see directedTargetOf in the inventory service) — which is what
+// makes it safe for the payload to carry a sender name and a preview.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// How each channel reads to a human, plus the icon its row carries. `subject`
-// pulls the most identifying field out of the payload — room number,
-// confirmation code, guest name — so a row says which thing changed rather than
-// just that something did.
+// How each channel reads to a human, plus the icon its row carries. `text` is
+// normally a string; where the most useful headline depends on the payload — a
+// message is "Message from Maria Santos", not "New message" — it is a function
+// of the event data instead.
 const EVENT_MAP = {
   'room:status_changed': { icon: 'bed', text: 'Room status changed' },
   'room:maintenance': { icon: 'settings', text: 'Room flagged for maintenance' },
@@ -44,6 +50,7 @@ const EVENT_MAP = {
 
   'guest:profile_created': { icon: 'users', text: 'Guest profile created' },
   'guest:profile_updated': { icon: 'users', text: 'Guest profile updated' },
+  'guest:profile_deleted': { icon: 'trash', text: 'Guest profile deleted' },
   'guest:flagged': { icon: 'info', text: 'Guest flagged' },
 
   'maintenance:work_order_created': { icon: 'settings', text: 'Work order created' },
@@ -55,6 +62,13 @@ const EVENT_MAP = {
 
   'facility:changed': { icon: 'sparkles', text: 'Amenity updated' },
   'facility:booked': { icon: 'sparkles', text: 'Facility booked' },
+
+  // The sender's name IS the headline — "New message" tells the reader nothing
+  // they did not already learn from the notification appearing at all.
+  'messaging:message_sent': {
+    icon: 'message-circle',
+    text: (d) => (d.senderName ? `Message from ${d.senderName}` : 'New message'),
+  },
 };
 
 // Where clicking the row should go. Kept separate from EVENT_MAP so a channel
@@ -82,6 +96,8 @@ const EVENT_LINK = {
   'folio:early_departure_adjusted': () => '/folios',
   'guest:profile_created': (d) => (d?.guestId ? `/guests?id=${d.guestId}` : '/guests'),
   'guest:profile_updated': (d) => (d?.guestId ? `/guests?id=${d.guestId}` : '/guests'),
+  // No id — the profile is gone, so linking to it would open an empty page.
+  'guest:profile_deleted': () => '/guests',
   'guest:flagged': (d) => (d?.guestId ? `/guests?id=${d.guestId}` : '/guests'),
   // The map, not /rooms. These three are the notifications Housekeeping &
   // Maintenance actually receives, and /rooms is now management-only — a
@@ -95,32 +111,135 @@ const EVENT_LINK = {
   'audit:day_closed': () => '/audit',
   'facility:changed': () => '/amenities',
   'facility:booked': () => '/amenities',
+  // Straight into the conversation it came from.
+  'messaging:message_sent': (d) => (d?.senderId ? `/messages?peer=${d.senderId}` : '/messages'),
+};
+
+// ── Turning a payload into a sentence ────────────────────────────────────────
+//
+// Every row used to read "Payment received" and nothing else, which is true of
+// every payment and therefore says nothing about this one. These helpers pull
+// the identifying facts out of whatever the event actually carries, so a row
+// names the room, the guest, the amount.
+//
+// Payload shapes differ per publisher and several are thin. Each formatter is
+// written to degrade: a field that is missing drops out of the sentence instead
+// of printing "undefined", and a channel whose payload carries nothing useful
+// still renders its headline on its own.
+
+const peso = (cents) => {
+  const n = Number(cents);
+  if (!Number.isFinite(n)) return null;
+  return `₱${(n / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+const shortDate = (v) => {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+
+const roomOf = (d) => {
+  const n = d.number || d.roomNumber || d.room;
+  return n ? `Room ${n}` : null;
+};
+
+const whoOf = (d) => d.guestName || d.displayName || d.name || null;
+
+const refOf = (d) => d.confirmationNumber || d.folioNumber || null;
+
+// Joins the parts that survived, so a thin payload produces a short line rather
+// than a string of separators.
+const parts = (...bits) => bits.filter(Boolean).join(' · ');
+
+// Per-channel detail. A channel not listed here falls back to the generic
+// subject line, which is what every channel did before.
+const DETAIL = {
+  'room:status_changed': (d) => parts(roomOf(d), d.status ? `now ${labelize(d.status)}` : null),
+  'room:maintenance': (d) => parts(roomOf(d), d.reason),
+
+  'reservation:created': (d) =>
+    parts(
+      whoOf(d),
+      refOf(d),
+      d.nights ? `${d.nights} night${d.nights === 1 ? '' : 's'}` : null,
+      shortDate(d.checkIn) ? `from ${shortDate(d.checkIn)}` : null
+    ),
+  'reservation:updated': (d) => parts(whoOf(d), refOf(d)),
+  'reservation:confirmed': (d) => parts(whoOf(d), refOf(d)),
+  'reservation:cancelled': (d) => parts(whoOf(d), refOf(d), d.reason),
+
+  'room:checkin': (d) => parts(whoOf(d), roomOf(d), d.walkIn ? 'walk-in' : null),
+  'room:checkout': (d) => parts(whoOf(d), roomOf(d)),
+  'stay:no_show': (d) => parts(whoOf(d), refOf(d)),
+  'stay:extended': (d) =>
+    parts(whoOf(d), roomOf(d), shortDate(d.newCheckOut) ? `until ${shortDate(d.newCheckOut)}` : null),
+  'stay:room_changed': (d) =>
+    parts(whoOf(d), d.fromRoom && d.toRoom ? `${d.fromRoom} to ${d.toRoom}` : roomOf(d)),
+  'stay:early_departure': (d) => parts(whoOf(d), roomOf(d)),
+
+  'folio:opened': (d) => parts(whoOf(d), refOf(d)),
+  'folio:charge_posted': (d) =>
+    parts(peso(d.amountCents), d.chargeCode ? labelize(d.chargeCode) : null, whoOf(d)),
+  'folio:payment_received': (d) => parts(peso(d.amountCents), d.method ? labelize(d.method) : null, whoOf(d)),
+  'folio:settled': (d) => parts(whoOf(d), refOf(d), peso(d.totalCents)),
+  'folio:closed': (d) => parts(whoOf(d), refOf(d)),
+  'folio:deposit_received': (d) => parts(peso(d.amountCents), whoOf(d)),
+  'folio:refund_posted': (d) => parts(peso(d.amountCents), whoOf(d)),
+  'folio:early_departure_adjusted': (d) => parts(peso(d.amountCents), whoOf(d)),
+
+  'guest:profile_created': (d) => parts(whoOf(d), d.profileNumber),
+  'guest:profile_updated': (d) => parts(whoOf(d), d.profileNumber),
+  'guest:profile_deleted': (d) => parts(whoOf(d), d.profileNumber),
+  'guest:flagged': (d) => parts(whoOf(d), d.vipLevel ? labelize(d.vipLevel) : null, d.reason),
+
+  'maintenance:work_order_created': (d) =>
+    parts(roomOf(d), d.category ? labelize(d.category) : null, d.description),
+  'maintenance:room_out_of_service': (d) => parts(roomOf(d), d.reason),
+  'maintenance:room_restored': (d) => parts(roomOf(d)),
+
+  'audit:day_opened': (d) => parts(shortDate(d.businessDate)),
+  'audit:day_closed': (d) =>
+    parts(
+      shortDate(d.businessDate),
+      d.occupancyPct != null ? `${Math.round(d.occupancyPct)}% occupancy` : null
+    ),
+
+  'facility:changed': (d) => parts(d.name || d.code),
+  'facility:booked': (d) => parts(d.name || d.code, whoOf(d), shortDate(d.startsAt)),
+
+  // The preview IS the detail. A "new message" with no hint of what it says is
+  // one more thing to go and check rather than one less.
+  'messaging:message_sent': (d) => d.preview || '',
 };
 
 function subjectOf(data) {
   if (!data || typeof data !== 'object') return '';
-  const d = data;
-  const room = d.number || d.roomNumber || d.room;
-  if (room) return `Room ${room}`;
-  return (
-    d.confirmationNumber ||
-    d.guestName ||
-    d.displayName ||
-    d.folioNumber ||
-    d.businessDate ||
-    d.name ||
-    ''
-  );
+  return roomOf(data) || refOf(data) || whoOf(data) || data.businessDate || '';
 }
 
 export function describeEvent(channel, data) {
   const meta = EVENT_MAP[channel];
   if (!meta) return null;
+  const d = data && typeof data === 'object' ? data : {};
+  const text = typeof meta.text === 'function' ? meta.text(d) : meta.text;
+  let subject = '';
+  try {
+    subject = DETAIL[channel] ? DETAIL[channel](d) : subjectOf(d);
+  } catch {
+    // A payload shaped differently from what a formatter assumed must not take
+    // the notification down with it — fall back to the generic subject.
+    subject = '';
+  }
   return {
     icon: meta.icon,
-    text: meta.text,
-    subject: subjectOf(data),
-    to: EVENT_LINK[channel]?.(data) || null,
+    text,
+    subject: subject || subjectOf(d),
+    to: EVENT_LINK[channel]?.(d) || null,
   };
 }
 
@@ -156,10 +275,18 @@ function readStored(userId) {
   }
 }
 
-export function useNotificationFeed(userId) {
+// `onArrive` is called with each newly arrived item, for the on-screen pop-ups.
+// A callback rather than a second subscription: every call to this hook opens
+// its own SSE stream, so the bell and the pop-ups have to share one.
+export function useNotificationFeed(userId, onArrive) {
   const [state, setState] = useState(() => readStored(userId));
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Held in a ref so a caller passing an inline arrow does not re-subscribe the
+  // event stream on every render.
+  const arriveRef = useRef(onArrive);
+  arriveRef.current = onArrive;
 
   // Switching accounts must swap the whole feed, not merge into it.
   useEffect(() => {
@@ -194,6 +321,11 @@ export function useNotificationFeed(userId) {
       };
       setState(next);
       persist(next);
+      try {
+        arriveRef.current?.(item);
+      } catch {
+        /* a failing pop-up must not cost the feed the notification */
+      }
     },
     [persist]
   );
@@ -221,14 +353,8 @@ export function useNotificationFeed(userId) {
     persist(next);
   }, [persist]);
 
-  const unreadItems = useMemo(
-    () => state.items.filter((i) => i.at > state.lastReadAt),
-    [state]
-  );
-  const readItems = useMemo(
-    () => state.items.filter((i) => i.at <= state.lastReadAt),
-    [state]
-  );
+  const unreadItems = useMemo(() => state.items.filter((i) => i.at > state.lastReadAt), [state]);
+  const readItems = useMemo(() => state.items.filter((i) => i.at <= state.lastReadAt), [state]);
 
   return {
     items: state.items,

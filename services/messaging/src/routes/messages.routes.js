@@ -223,11 +223,29 @@ router.post('/messages', async (req, res) => {
       data: { senderId: me, recipientId, ...pairOf(me, recipientId), body: text },
     });
 
-    // Published for anything that wants to react (the SSE bus, a future push
-    // notification). The browser does not depend on this — it polls — so a
-    // failed publish must not fail the send.
+    // Carries enough to RENDER the notification, not just to trigger a refetch.
+    // The SSE fan-out in services/inventory treats this channel as DIRECTED (the
+    // same mechanism the housekeeping call uses), so the only browser that ever
+    // receives this frame is the recipient's — which is what makes it safe to
+    // put the sender's name and a preview of the body on the bus at all.
+    //
+    // The preview is short on purpose: a notification is a nudge to go and read
+    // the thread, and the full body has no business sitting in a toast on a
+    // shared front-desk screen.
+    const senderName = (await prisma.userCache.findUnique({ where: { id: me } }).catch(() => null))
+      ?.displayName;
     redis
-      .publish('messaging:message_sent', JSON.stringify({ messageId: message.id, senderId: me, recipientId }))
+      .publish(
+        'messaging:message_sent',
+        JSON.stringify({
+          messageId: message.id,
+          senderId: me,
+          senderName: senderName || 'A colleague',
+          recipientId,
+          preview: text.slice(0, 90),
+          createdAt: message.createdAt,
+        })
+      )
       .catch(() => {});
 
     res.status(201).json(message);
