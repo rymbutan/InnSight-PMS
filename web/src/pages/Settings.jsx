@@ -7,6 +7,7 @@ import Avatar from '../components/Avatar';
 import { useToast, errMsg } from '../components/Toast';
 import { DEFAULT_ACCENT, applyAccent } from '../lib/accent';
 import { primaryRole, roleLabel } from '../lib/roles';
+import { useMessageSound } from '../lib/sound';
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -118,6 +119,44 @@ export default function Settings() {
   // Color Changer above gates on `canTheme`, so a FRONT_DESK user is not shown
   // editable inputs that only end in a 403 toast on save.
   const canBilling = hasRole('ADMIN', 'MANAGER');
+  // Message retention is ADMIN-only for the same reason Edit System Layout is,
+  // only more so: shortening the window DELETES other people's conversations,
+  // hotel-wide and irreversibly. MANAGER configures the desk; this configures
+  // what the desk is allowed to keep.
+  const canRetention = hasRole('ADMIN');
+
+  // Per-device, like the theme toggle below it — whether a chime is welcome
+  // depends on the room the terminal is in, not on who is signed in to it.
+  const [soundOn, setSoundOn] = useMessageSound();
+  const [retention, setRetention] = useState(null);
+
+  useEffect(() => {
+    if (!canRetention) return;
+    api
+      .get('/api/messages/settings/retention')
+      .then(({ data }) => setRetention(data))
+      .catch(() => {
+        /* messaging service down — the card stays in its loading state */
+      });
+  }, [canRetention]);
+
+  async function saveRetention(mode) {
+    setBusy('retention');
+    try {
+      const { data } = await api.put('/api/messages/settings/retention', { mode });
+      setRetention((r) => ({ ...r, ...data }));
+      toast.success(
+        data.purged > 0
+          ? `Retention saved. ${data.purged} message${data.purged === 1 ? '' : 's'} past the new limit ` +
+              'were cleared.'
+          : 'Retention saved. It applies to everyone, on every device.'
+      );
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy('');
+    }
+  }
 
   useEffect(() => {
     api
@@ -411,132 +450,134 @@ export default function Settings() {
 
       {/* ── Account information ── */}
       <AccordionSection icon="user" title="Account Information">
-      <div className="set-grid">
-        <SettingCard
-          icon="user"
-          title="Change Username"
-          subtitle={
-            <>
-              Current: <strong>@{user?.username}</strong>
-            </>
-          }
-          onSubmit={submitUsername}
-          busy={busy === 'username'}
-          action="Update Username"
-        >
-          <Field label="New Username">
-            <input
-              placeholder="Enter new username"
-              value={uForm.next}
-              onChange={(e) => setUForm({ ...uForm, next: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Confirm Username">
-            <input
-              placeholder="Re-enter username"
-              value={uForm.confirm}
-              onChange={(e) => setUForm({ ...uForm, confirm: e.target.value })}
-              required
-            />
-          </Field>
-          {/* The username is a login identifier, so the server re-checks the
+        <div className="set-grid">
+          <SettingCard
+            icon="user"
+            title="Change Username"
+            subtitle={
+              <>
+                Current: <strong>@{user?.username}</strong>
+              </>
+            }
+            onSubmit={submitUsername}
+            busy={busy === 'username'}
+            action="Update Username"
+          >
+            <Field label="New Username">
+              <input
+                placeholder="Enter new username"
+                value={uForm.next}
+                onChange={(e) => setUForm({ ...uForm, next: e.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Confirm Username">
+              <input
+                placeholder="Re-enter username"
+                value={uForm.confirm}
+                onChange={(e) => setUForm({ ...uForm, confirm: e.target.value })}
+                required
+              />
+            </Field>
+            {/* The username is a login identifier, so the server re-checks the
               password before moving it. */}
-          <Field label="Current Password">
-            <input
-              type="password"
-              placeholder="Confirm with your password"
-              value={uForm.password}
-              onChange={(e) => setUForm({ ...uForm, password: e.target.value })}
-              required
-            />
-          </Field>
-          <div className="set-note">Changing your username signs you out of every device.</div>
-        </SettingCard>
+            <Field label="Current Password">
+              <input
+                type="password"
+                placeholder="Confirm with your password"
+                value={uForm.password}
+                onChange={(e) => setUForm({ ...uForm, password: e.target.value })}
+                required
+              />
+            </Field>
+            <div className="set-note">Changing your username signs you out of every device.</div>
+          </SettingCard>
+
+          <SettingCard
+            icon="mail"
+            title="Change Email"
+            subtitle={
+              <>
+                Current: <strong>{user?.email || 'not set'}</strong>
+              </>
+            }
+            onSubmit={submitEmail}
+            busy={busy === 'email'}
+            action="Update Email"
+          >
+            <Field label="New Email">
+              <input
+                type="email"
+                placeholder="Enter new email"
+                value={eForm.next}
+                onChange={(e) => setEForm({ ...eForm, next: e.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Confirm Email">
+              <input
+                type="email"
+                placeholder="Re-enter email"
+                value={eForm.confirm}
+                onChange={(e) => setEForm({ ...eForm, confirm: e.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Current Password">
+              <input
+                type="password"
+                placeholder="Confirm with your password"
+                value={eForm.password}
+                onChange={(e) => setEForm({ ...eForm, password: e.target.value })}
+                required
+              />
+            </Field>
+          </SettingCard>
+        </div>
 
         <SettingCard
-          icon="mail"
-          title="Change Email"
-          subtitle={
-            <>
-              Current: <strong>{user?.email || 'not set'}</strong>
-            </>
-          }
-          onSubmit={submitEmail}
-          busy={busy === 'email'}
-          action="Update Email"
+          wide
+          icon="lock"
+          title="Change Password"
+          subtitle="At least 8 characters with uppercase, lowercase, a number & a special character"
+          onSubmit={submitPassword}
+          busy={busy === 'password'}
+          action="Update Password"
         >
-          <Field label="New Email">
-            <input
-              type="email"
-              placeholder="Enter new email"
-              value={eForm.next}
-              onChange={(e) => setEForm({ ...eForm, next: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Confirm Email">
-            <input
-              type="email"
-              placeholder="Re-enter email"
-              value={eForm.confirm}
-              onChange={(e) => setEForm({ ...eForm, confirm: e.target.value })}
-              required
-            />
-          </Field>
           <Field label="Current Password">
             <input
               type="password"
-              placeholder="Confirm with your password"
-              value={eForm.password}
-              onChange={(e) => setEForm({ ...eForm, password: e.target.value })}
+              placeholder="Enter current password"
+              value={pForm.current}
+              onChange={(e) => setPForm({ ...pForm, current: e.target.value })}
               required
             />
           </Field>
+          <div className="set-row-2">
+            <Field label="New Password">
+              <input
+                type="password"
+                placeholder="Min 8 chars, mixed case, number & symbol"
+                minLength={8}
+                value={pForm.next}
+                onChange={(e) => setPForm({ ...pForm, next: e.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Confirm New Password">
+              <input
+                type="password"
+                placeholder="Re-enter new password"
+                value={pForm.confirm}
+                onChange={(e) => setPForm({ ...pForm, confirm: e.target.value })}
+                required
+              />
+            </Field>
+          </div>
+          <div className="set-note">
+            Must include uppercase, lowercase, a number, and a special character.
+          </div>
         </SettingCard>
-      </div>
-
-      <SettingCard
-        wide
-        icon="lock"
-        title="Change Password"
-        subtitle="At least 8 characters with uppercase, lowercase, a number & a special character"
-        onSubmit={submitPassword}
-        busy={busy === 'password'}
-        action="Update Password"
-      >
-        <Field label="Current Password">
-          <input
-            type="password"
-            placeholder="Enter current password"
-            value={pForm.current}
-            onChange={(e) => setPForm({ ...pForm, current: e.target.value })}
-            required
-          />
-        </Field>
-        <div className="set-row-2">
-          <Field label="New Password">
-            <input
-              type="password"
-              placeholder="Min 8 chars, mixed case, number & symbol"
-              minLength={8}
-              value={pForm.next}
-              onChange={(e) => setPForm({ ...pForm, next: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Confirm New Password">
-            <input
-              type="password"
-              placeholder="Re-enter new password"
-              value={pForm.confirm}
-              onChange={(e) => setPForm({ ...pForm, confirm: e.target.value })}
-              required
-            />
-          </Field>
-        </div>
-        <div className="set-note">Must include uppercase, lowercase, a number, and a special character.</div>
-      </SettingCard>
       </AccordionSection>
 
       {/* ── Billing ──
@@ -735,84 +776,167 @@ export default function Settings() {
 
       {/* ── Appearance ── */}
       <AccordionSection icon="palette" title="System Appearance">
-      <div className="set-card is-wide">
-        <div className="set-card-head">
-          <span className="set-card-icon">
-            <Icon name="sun" size={16} strokeWidth={1.9} />
-          </span>
-          <div className="set-card-heading">
-            <div className="set-card-title">Theme</div>
-            <div className="set-card-sub">
-              Currently {theme === 'dark' ? 'dark' : 'light'}. Saved on this device only.
-            </div>
-          </div>
-        </div>
-        <div className="set-card-foot">
-          <button type="button" className="set-btn" onClick={toggleTheme}>
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} strokeWidth={1.9} />
-            Switch to {theme === 'dark' ? 'light' : 'dark'}
-          </button>
-        </div>
-      </div>
-
-      {canTheme ? (
-        <form className="set-card is-wide" onSubmit={applyColors}>
+        <div className="set-card is-wide">
           <div className="set-card-head">
             <span className="set-card-icon">
-              <Icon name="palette" size={16} strokeWidth={1.9} />
+              <Icon name="sun" size={16} strokeWidth={1.9} />
             </span>
             <div className="set-card-heading">
-              <div className="set-card-title">System Color Changer</div>
-              <div className="set-card-sub">Customize the accent colors used throughout the system</div>
-            </div>
-          </div>
-          <div className="set-card-body">
-            <div className="set-row-3">
-              <Field label="Primary Accent">
-                <input
-                  type="color"
-                  className="set-color"
-                  value={accent.primary}
-                  onChange={(e) => setAccent({ ...accent, primary: e.target.value })}
-                />
-              </Field>
-              <Field label="Secondary Accent">
-                <input
-                  type="color"
-                  className="set-color"
-                  value={accent.secondary}
-                  onChange={(e) => setAccent({ ...accent, secondary: e.target.value })}
-                />
-              </Field>
-              <Field label="Hover / Dark Accent">
-                <input
-                  type="color"
-                  className="set-color"
-                  value={accent.hover}
-                  onChange={(e) => setAccent({ ...accent, hover: e.target.value })}
-                />
-              </Field>
-            </div>
-            <div className="set-note">
-              Applies to every user on every device. Buttons and highlights place white text on the primary
-              and hover colours, so choose shades dark enough to read against.
+              <div className="set-card-title">Theme</div>
+              <div className="set-card-sub">
+                Currently {theme === 'dark' ? 'dark' : 'light'}. Saved on this device only.
+              </div>
             </div>
           </div>
           <div className="set-card-foot">
-            <button
-              type="button"
-              className="set-btn is-quiet"
-              onClick={resetColors}
-              disabled={busy === 'accent'}
-            >
-              Reset to default
-            </button>
-            <button type="submit" className="btn-primary" disabled={busy === 'accent'}>
-              {busy === 'accent' ? 'Applying…' : 'Apply Colors'}
+            <button type="button" className="set-btn" onClick={toggleTheme}>
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} strokeWidth={1.9} />
+              Switch to {theme === 'dark' ? 'light' : 'dark'}
             </button>
           </div>
-        </form>
-      ) : null}
+        </div>
+
+        {canTheme ? (
+          <form className="set-card is-wide" onSubmit={applyColors}>
+            <div className="set-card-head">
+              <span className="set-card-icon">
+                <Icon name="palette" size={16} strokeWidth={1.9} />
+              </span>
+              <div className="set-card-heading">
+                <div className="set-card-title">System Color Changer</div>
+                <div className="set-card-sub">Customize the accent colors used throughout the system</div>
+              </div>
+            </div>
+            <div className="set-card-body">
+              <div className="set-row-3">
+                <Field label="Primary Accent">
+                  <input
+                    type="color"
+                    className="set-color"
+                    value={accent.primary}
+                    onChange={(e) => setAccent({ ...accent, primary: e.target.value })}
+                  />
+                </Field>
+                <Field label="Secondary Accent">
+                  <input
+                    type="color"
+                    className="set-color"
+                    value={accent.secondary}
+                    onChange={(e) => setAccent({ ...accent, secondary: e.target.value })}
+                  />
+                </Field>
+                <Field label="Hover / Dark Accent">
+                  <input
+                    type="color"
+                    className="set-color"
+                    value={accent.hover}
+                    onChange={(e) => setAccent({ ...accent, hover: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <div className="set-note">
+                Applies to every user on every device. Buttons and highlights place white text on the primary
+                and hover colours, so choose shades dark enough to read against.
+              </div>
+            </div>
+            <div className="set-card-foot">
+              <button
+                type="button"
+                className="set-btn is-quiet"
+                onClick={resetColors}
+                disabled={busy === 'accent'}
+              >
+                Reset to default
+              </button>
+              <button type="submit" className="btn-primary" disabled={busy === 'accent'}>
+                {busy === 'accent' ? 'Applying…' : 'Apply Colors'}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </AccordionSection>
+
+      {/* ── Messaging ──
+          Two settings that look similar and are not. The sound is a personal,
+          per-device convenience stored in localStorage. Retention is hotel
+          policy that deletes other people's messages, so it is ADMIN-only,
+          server-side, and applies to every user on every device. They share a
+          section because that is where people will look for both, but the
+          copy on each card has to keep the difference obvious. */}
+      <AccordionSection icon="message-circle" title="Messaging">
+        <div className="set-card is-wide">
+          <div className="set-card-head">
+            <span className="set-card-icon">
+              <Icon name={soundOn ? 'bell' : 'bell-off'} size={16} strokeWidth={1.9} />
+            </span>
+            <div className="set-card-heading">
+              <div className="set-card-title">Message Sound</div>
+              <div className="set-card-sub">
+                A short chime when a message arrives. Currently {soundOn ? 'on' : 'muted'}. Saved on this
+                device only.
+              </div>
+            </div>
+          </div>
+          <div className="set-card-foot">
+            <button type="button" className="set-btn" onClick={() => setSoundOn(!soundOn)}>
+              <Icon name={soundOn ? 'bell-off' : 'bell'} size={14} strokeWidth={1.9} />
+              {soundOn ? 'Mute notifications' : 'Unmute notifications'}
+            </button>
+          </div>
+        </div>
+
+        {canRetention ? (
+          <div className="set-card is-wide">
+            <div className="set-card-head">
+              <span className="set-card-icon">
+                <Icon name="trash" size={16} strokeWidth={1.9} />
+              </span>
+              <div className="set-card-heading">
+                <div className="set-card-title">Message Retention</div>
+                <div className="set-card-sub">
+                  How long a staff message survives before it is deleted. Applies to everyone — a conversation
+                  has two ends, so this cannot be a personal preference.
+                </div>
+              </div>
+            </div>
+            <div className="set-card-body">
+              {!retention ? (
+                <p className="muted" style={{ fontSize: 12 }}>
+                  Loading current setting…
+                </p>
+              ) : (
+                <>
+                  <div className="retention-options">
+                    {retention.options?.map((o) => (
+                      <label
+                        key={o.mode}
+                        className={`retention-option${retention.mode === o.mode ? ' is-active' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="retention"
+                          value={o.mode}
+                          checked={retention.mode === o.mode}
+                          disabled={busy === 'retention'}
+                          onChange={() => saveRetention(o.mode)}
+                        />
+                        <span className="retention-option-text">
+                          <span className="retention-option-label">{o.label}</span>
+                          {o.detail ? <span className="retention-option-detail">{o.detail}</span> : null}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="set-note">
+                    Saved the moment you choose one, and anything already past the new limit is cleared
+                    straight away — this is not a change you get to review before it takes effect. Deleting is
+                    permanent, and it clears the message for both people in the conversation.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
       </AccordionSection>
 
       {/* ── Edit System Layout ──
@@ -889,7 +1013,12 @@ function SidebarVisibility() {
     }
   }
 
-  if (!cfg) return <p className="muted" style={{ padding: 16 }}>Loading layout…</p>;
+  if (!cfg)
+    return (
+      <p className="muted" style={{ padding: 16 }}>
+        Loading layout…
+      </p>
+    );
 
   const hiddenForRole = hidden[role] || [];
 
@@ -902,8 +1031,8 @@ function SidebarVisibility() {
         <div className="set-card-heading">
           <div className="set-card-title">Sidebar Visibility</div>
           <div className="set-card-sub">
-            Show or hide sections per role. Core items (Dashboard, Settings) always stay visible, and
-            Admin is not configurable — it is the only role that can undo a change made here.
+            Show or hide sections per role. Core items (Dashboard, Settings) always stay visible, and Admin is
+            not configurable — it is the only role that can undo a change made here.
           </div>
         </div>
       </div>

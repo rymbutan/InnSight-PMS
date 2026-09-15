@@ -3,6 +3,8 @@ const Redis = require('ioredis');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const retention = require('../retention/policy');
+const profanity = require('../moderation/profanity');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 redis.on('error', (e) => console.error('[Messaging] redis error:', e.message));
 
@@ -35,6 +37,14 @@ const presenceKey = (userId) => `presence:${userId}`;
 // The stable conversation key: the same unordered pair in both directions.
 const pairOf = (a, b) => (a < b ? { userLo: a, userHi: b } : { userLo: b, userHi: a });
 
+// EVERY read below is filtered by the retention cutoff, not just the thread.
+// The purge sweep runs once a minute, so for up to a minute there are rows in
+// the table that the configured policy says should be gone. If the contact list
+// still previewed them, or the badge still counted them, a message would appear
+// to outlive the setting — and the one place that inconsistency would show up
+// worst is an unread badge for a message that no longer opens. See
+// retention/policy.js for why the cutoff and the sweep are separate layers.
+
 // GET /api/messages/contacts — everyone you can talk to, with live presence and
 // what you have not read from each of them.
 router.get('/messages/contacts', async (req, res) => {
@@ -48,6 +58,7 @@ router.get('/messages/contacts', async (req, res) => {
     if (contacts.length === 0) return res.json([]);
 
     const ids = contacts.map((c) => c.id);
+    const live = await retention.createdAtFilter();
 
     // One pipelined round trip for every contact's presence, not one call each —
     // this runs on a ~4s poll for every signed-in user, so an N-call loop here
@@ -64,7 +75,7 @@ router.get('/messages/contacts', async (req, res) => {
     // regardless of how many people have written to me.
     const unread = await prisma.message.groupBy({
       by: ['senderId'],
-      where: { recipientId: me, readAt: null },
+      where: { recipientId: me, readAt: null, ...live },
       _count: { _all: true },
     });
     const unreadBySender = new Map(unread.map((u) => [u.senderId, u._count._all]));
@@ -72,7 +83,7 @@ router.get('/messages/contacts', async (req, res) => {
     // The most recent message in each of my conversations, for ordering and a
     // preview. Bounded by my own message volume, not the whole table.
     const recent = await prisma.message.findMany({
-      where: { OR: [{ senderId: me }, { recipientId: me }] },
+      where: { OR: [{ senderId: me }, { recipientId: me }], ...live },
       orderBy: { createdAt: 'desc' },
       take: 400,
       select: { senderId: true, recipientId: true, body: true, createdAt: true },
@@ -124,7 +135,7 @@ router.get('/messages/contacts', async (req, res) => {
 router.get('/messages/unread-count', async (req, res) => {
   try {
     const total = await prisma.message.count({
-      where: { recipientId: req.user.sub, readAt: null },
+      where: { recipientId: req.user.sub, readAt: null, ...(await retention.createdAtFilter()) },
     });
     res.json({ total });
   } catch (err) {
@@ -151,7 +162,7 @@ router.get('/messages/with/:userId', async (req, res) => {
 
     // Newest-first for the LIMIT to take the recent end, reversed for display.
     const rows = await prisma.message.findMany({
-      where: { userLo, userHi },
+      where: { userLo, userHi, ...(await retention.createdAtFilter()) },
       orderBy: { createdAt: 'desc' },
       take: limit + 1,
     });
@@ -185,6 +196,23 @@ router.post('/messages', async (req, res) => {
       return res.status(400).json({ error: `Message cannot exceed ${MAX_BODY} characters.` });
     }
     if (recipientId === me) return res.status(400).json({ error: 'Cannot message yourself.' });
+
+    // Moderation, enforced HERE rather than in the browser. A client-side check
+    // is a courtesy to the person typing; this is the one that holds, because
+    // the endpoint is reachable without the page. See moderation/profanity.js
+    // for why this blocks the send instead of masking the words.
+    const verdict = profanity.check(text);
+    if (!verdict.clean) {
+      // Log the rule, never the message — a moderation log that quotes what was
+      // refused just relocates the problem into a file more people can read.
+      console.warn(`[Messaging] Blocked a message from ${me} (matched: ${verdict.matches.join(', ')}).`);
+      return res.status(400).json({
+        // `code` so the composer can show this inline and keep the draft, rather
+        // than flashing it as one more transient toast the sender may miss.
+        code: 'PROFANITY',
+        error: 'That message contains language this system does not allow. Please reword it and try again.',
+      });
+    }
 
     const recipient = await prisma.userCache.findUnique({ where: { id: recipientId } });
     if (!recipient || recipient.status !== 'ACTIVE') {
