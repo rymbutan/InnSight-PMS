@@ -2,6 +2,7 @@ const Redis = require('ioredis');
 
 const prisma = require('../lib/prisma');
 const { makeServiceCaller, ServiceCallError } = require('../lib/serviceCall');
+const retention = require('../retention/policy');
 
 const AUTH_URL = process.env.AUTH_URL || 'http://auth-service:3010';
 
@@ -55,6 +56,12 @@ function startSubscriber() {
     'auth:user_roles_changed',
     'auth:user_disabled',
     'auth:user_deleted',
+    // Session boundaries, for the 'logout' retention mode. Both ends, not just
+    // the sign-out: a browser that is simply closed never fires a logout, so
+    // purging on sign-in too is what makes "a session starts empty" actually
+    // true rather than true only for people who click the button.
+    'auth:logout',
+    'auth:login',
     (err) => {
       if (err) {
         console.error('[Messaging] Redis subscribe error:', err);
@@ -68,6 +75,20 @@ function startSubscriber() {
     try {
       const data = JSON.parse(message);
       if (!data.userId) return;
+
+      if (channel === 'auth:logout' || channel === 'auth:login') {
+        // Only in the session-scoped mode. Every other mode is governed by age,
+        // so signing in and out must leave the history exactly as it was.
+        const policy = await retention.getPolicy();
+        if (policy.mode !== 'logout') return;
+        const count = await retention.purgeForUser(data.userId);
+        if (count > 0) {
+          console.log(
+            `[Messaging] Session retention: cleared ${count} message(s) for ${data.userId} on ${channel}.`
+          );
+        }
+        return;
+      }
 
       if (channel === 'auth:user_deleted') {
         // Drop the contact. Their messages stay — a conversation is a record of

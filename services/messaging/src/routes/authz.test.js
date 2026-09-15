@@ -44,6 +44,7 @@ try {
 
 const { auditRouter, listRoutes } = require('../lib/authzAudit');
 const router = require('./messages.routes');
+const settingsRouter = require('./settings.routes');
 
 // Deliberately open to any authenticated caller, per the reasoning above.
 const OPEN = [
@@ -57,6 +58,30 @@ const OPEN = [
 test('every route is either guarded or deliberately open', () => {
   const problems = auditRouter(router, { open: OPEN });
   assert.deepEqual(problems, [], `unguarded routes:\n  ${problems.join('\n  ')}`);
+});
+
+// ── The settings router is the exception to the exception ────────────────────
+// Message retention is hotel configuration, not correspondence: it changes what
+// every user sees and it DELETES data. So unlike everything above, its write has
+// a real role guard, and it lives in its own file precisely so that the "no role
+// guards in this service" statement above stays true of the file it describes.
+const SETTINGS_OPEN = [
+  // Read-only. Staff are told, on the Messages page, how long what they type
+  // will survive — a retention rule people cannot see is one they get caught by.
+  // Mirrors GET /api/settings/theme in the reservation service, open for the
+  // same reason: it is a fact about the product, not about anyone's data.
+  'GET /messages/settings/retention',
+];
+
+test('the settings router guards its write and opens only its read', () => {
+  const problems = auditRouter(settingsRouter, { open: SETTINGS_OPEN });
+  assert.deepEqual(problems, [], `unguarded routes:\n  ${problems.join('\n  ')}`);
+  // PUT must NOT be in the open list — pin that, because adding it there is the
+  // one edit that would silently let any signed-in user wipe everyone's history.
+  assert.ok(
+    !SETTINGS_OPEN.includes('PUT /messages/settings/retention'),
+    'the retention write must stay role-guarded'
+  );
 });
 
 test('the router actually exposes routes (guards the audit itself)', () => {

@@ -10,6 +10,7 @@ import NotificationBell from './NotificationBell';
 import IncomingCall from './IncomingCall';
 import TutorialTour from './TutorialTour';
 import { applyAccent } from '../lib/accent';
+import { playMessageChime } from '../lib/sound';
 import { primaryRole } from '../lib/roles';
 import RoleBadge from './RoleBadge';
 import CATALOGUE from '../lib/navSections.json';
@@ -186,12 +187,24 @@ export default function Layout() {
   // 20s, because a badge is an ambient nudge — the open conversation is what
   // needs to feel live, and that polls far faster from the page itself.
   const [unreadMessages, setUnreadMessages] = useState(0);
+  // The count as of the previous poll. `null` means "not polled yet", which is
+  // the case that must NOT ring: signing in with four messages waiting is not
+  // four messages arriving, and chiming at a count we are merely seeing for the
+  // first time would make the sound meaningless.
+  const lastUnread = useRef(null);
   useEffect(() => {
     if (!user) return;
     const load = () =>
       api
         .get('/api/messages/unread-count')
-        .then(({ data }) => setUnreadMessages(data?.total || 0))
+        .then(({ data }) => {
+          const total = data?.total || 0;
+          // Only a RISE is an arrival. The count also falls (a thread was read)
+          // and holds steady (nothing happened), and neither is news.
+          if (lastUnread.current !== null && total > lastUnread.current) playMessageChime();
+          lastUnread.current = total;
+          setUnreadMessages(total);
+        })
         .catch(() => {
           /* the badge is not worth an error surface — leave the last count */
         });
@@ -208,7 +221,14 @@ export default function Layout() {
     const t = setTimeout(() => {
       api
         .get('/api/messages/unread-count')
-        .then(({ data }) => setUnreadMessages(data?.total || 0))
+        .then(({ data }) => {
+          // No chime here. This re-read exists because opening the page CLEARS
+          // the count; ringing off the same ref the poll uses would be sounding
+          // an alarm about our own read receipt.
+          const total = data?.total || 0;
+          lastUnread.current = total;
+          setUnreadMessages(total);
+        })
         .catch(() => {});
     }, 1200);
     return () => clearTimeout(t);
