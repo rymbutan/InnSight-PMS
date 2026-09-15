@@ -1,0 +1,297 @@
+{
+  "_comment": [
+    "THE catalogue of navigable sections — the sidebar's contents, the routes they",
+    "reach, and the API prefixes each one legitimately calls. One file, vendored",
+    "byte-identically into every service's src/lib and into web/src/lib, because a",
+    "service's Docker build context is its own directory (see scripts/check-shared.sh,",
+    "which fails the build if any copy drifts).",
+    "",
+    "JSON, not JS, for exactly one reason: the services are CommonJS and the web is",
+    "an ES module Vite build. A .js file cannot be required by one and imported by",
+    "the other without a wrapper per side, and a wrapper per side is a second place",
+    "for the list to drift. Both `require()` and Vite read JSON natively.",
+    "",
+    "WHAT EACH FIELD IS FOR",
+    "  key         stable id. Stored in the Sidebar Visibility config and matched by",
+    "              the server guard, so it must never be renamed casually — a rename",
+    "              silently un-hides whatever an admin had hidden.",
+    "  to/label/   presentation, read only by web/src/components/Layout.jsx. Moved",
+    "  icon/end/   here verbatim from that file's old NAV_SECTIONS constant.",
+    "  matchPaths/",
+    "  nonAdminLabel",
+    "  roles       THE BASELINE: who may ever reach this section. Absent = every",
+    "              signed-in role. The visibility config can only ever SUBTRACT from",
+    "              this, never add — so a mis-ticked checkbox cannot hand a",
+    "              housekeeper the folio ledger.",
+    "  core        cannot be hidden from anyone. Dashboard is where a blocked route",
+    "              redirects to, and Settings is where the person changing their own",
+    "              password goes; hiding either strands the user.",
+    "  api         the API prefixes this page actually calls, measured from the page",
+    "              source rather than guessed. See navScope.js for how these combine",
+    "              — a prefix stays reachable while ANY section that lists it is",
+    "              still visible to the user, which is what stops hiding Folios from",
+    "              also breaking the folio tab of Arrivals."
+  ],
+
+  "_alwaysAllowComment": [
+    "Prefixes no section owns and no configuration may ever close: signing in,",
+    "reading your own account, changing your own password, signing out, and the",
+    "public guest-facing endpoints that have no session at all. Locking someone out",
+    "of /api/auth would make the misconfiguration unrecoverable from the browser."
+  ],
+  "alwaysAllow": ["/api/auth", "/api/public", "/api/health"],
+
+  "_configurableRolesComment": [
+    "Roles an admin may configure. ADMIN is deliberately absent and the write route",
+    "rejects it: an admin who hid Settings and Users from ADMIN would have removed",
+    "the only screen that could put them back, from the only role that can reach it."
+  ],
+  "configurableRoles": ["MANAGER", "FRONT_DESK", "HOUSEKEEPING_MAINTENANCE", "AUDITOR"],
+
+  "sections": [
+    {
+      "label": "Main",
+      "items": [
+        {
+          "key": "dashboard",
+          "to": "/",
+          "label": "Dashboard",
+          "icon": "layout-dashboard",
+          "end": true,
+          "core": true,
+          "_apiComment": [
+            "The operational day-sheets, plus ONE report sub-path. Every role",
+            "legitimately needs these here — housekeeping reads arrivals and",
+            "in-house through OPS_READ and has no other section that would grant",
+            "them, so dropping any would break the dashboard for the role least",
+            "able to work around it.",
+            "",
+            "/api/reports/room-status, not /api/reports: the room-status donut is",
+            "ALL_STAFF and is the one call on this page with no .catch() of its",
+            "own, so denying it takes the whole dashboard down with it. Claiming",
+            "the WHOLE /api/reports prefix here would be the easy fix and the",
+            "wrong one — dashboard is a core section, so anything it claims is",
+            "pinned open for every role forever, and hiding Reports & Revenue",
+            "from a manager is meant to close the revenue endpoints too, not just",
+            "the sidebar link. Prefixes match on segment boundaries, so naming the",
+            "exact sub-path costs nothing and gives up nothing.",
+            "",
+            "/api/audit is deliberately absent for the same reason; that call",
+            "already degrades to an empty list on this page."
+          ],
+          "api": [
+            "/api/arrivals",
+            "/api/departures",
+            "/api/in-house",
+            "/api/reservations",
+            "/api/rooms",
+            "/api/room-types",
+            "/api/reports/room-status"
+          ]
+        },
+        {
+          "key": "messages",
+          "to": "/messages",
+          "label": "Messages",
+          "icon": "message-circle",
+          "_rolesComment": [
+            "No `roles` key, so every signed-in role — which is the whole point.",
+            "Messages are addressed to a person, not to a department: restricting",
+            "this by role would be deciding which staff may be contacted, and a",
+            "housekeeper who cannot reply to the manager is not a chat feature.",
+            "",
+            "Not `core` though: an admin may still hide it per role from Sidebar",
+            "Visibility if they do not want a given role messaging at all. Core is",
+            "for the two pages that strand a user when hidden (Dashboard, Settings),",
+            "and this is not one of them."
+          ],
+          "_apiComment": [
+            "/api/users is listed because the contact list reads",
+            "/api/users/directory, which is authenticated-only rather than",
+            "STAFF_ROLES-gated (see services/auth/src/routes/users.routes.js).",
+            "",
+            "This widens nothing: prefixes here are a union that keeps a path open",
+            "while a visible section needs it, and the requireRole guards on the",
+            "other /api/users routes are untouched — an auditor calling GET",
+            "/api/users still gets Forbidden. What it buys is that hiding",
+            "Housekeeping from the front desk (the other section claiming",
+            "/api/users) no longer takes their contact list down with it."
+          ],
+          "api": ["/api/messages", "/api/users"]
+        }
+      ]
+    },
+    {
+      "label": "Frontdesk",
+      "items": [
+        {
+          "key": "guests",
+          "to": "/guests",
+          "label": "Guests",
+          "icon": "users",
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK"],
+          "api": ["/api/guests", "/api/loyalty", "/api/reservations", "/api/stays"]
+        },
+        {
+          "key": "folios",
+          "to": "/folios",
+          "label": "Folios",
+          "icon": "file-text",
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK", "AUDITOR"],
+          "api": [
+            "/api/folios",
+            "/api/payment-disputes",
+            "/api/charge-codes",
+            "/api/payment-methods"
+          ]
+        },
+        {
+          "key": "reservations",
+          "to": "/reservations",
+          "label": "Booking & Reservations",
+          "icon": "book-marked",
+          "matchPaths": ["/calendar"],
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK"],
+          "api": [
+            "/api/reservations",
+            "/api/room-types",
+            "/api/availability",
+            "/api/holds",
+            "/api/guests",
+            "/api/folios",
+            "/api/charge-codes",
+            "/api/check-in",
+            "/api/check-out",
+            "/api/no-show",
+            "/api/stays",
+            "/api/settings"
+          ]
+        },
+        {
+          "key": "arrivals",
+          "to": "/arrivals",
+          "label": "Arrivals & Departures",
+          "icon": "arrow-left-right",
+          "matchPaths": ["/walk-in"],
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK"],
+          "api": [
+            "/api/arrivals",
+            "/api/departures",
+            "/api/in-house",
+            "/api/check-in",
+            "/api/check-out",
+            "/api/walk-in",
+            "/api/stays",
+            "/api/rooms",
+            "/api/reservations",
+            "/api/folios"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Housekeeping",
+      "items": [
+        {
+          "key": "housekeeping",
+          "to": "/housekeeping",
+          "label": "Map & Housekeeping",
+          "icon": "map",
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK", "HOUSEKEEPING_MAINTENANCE"],
+          "api": [
+            "/api/rooms",
+            "/api/housekeeping-calls",
+            "/api/training",
+            "/api/users",
+            "/api/reservations",
+            "/api/work-orders",
+            "/api/assets",
+            "/api/parts"
+          ]
+        },
+        {
+          "key": "rooms",
+          "to": "/rooms",
+          "label": "Hotel Room Information Editor",
+          "nonAdminLabel": "Hotel Rooms",
+          "icon": "bed",
+          "roles": ["ADMIN", "MANAGER"],
+          "api": ["/api/rooms", "/api/room-types", "/api/promo-codes"]
+        },
+        {
+          "key": "amenities",
+          "to": "/amenities",
+          "label": "Amenities & Facilities",
+          "icon": "sparkles",
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK"],
+          "api": ["/api/facilities", "/api/facility-bookings", "/api/folios"]
+        }
+      ]
+    },
+    {
+      "label": "Accounting",
+      "items": [
+        {
+          "key": "reports",
+          "to": "/reports",
+          "label": "Reports & Revenue",
+          "icon": "bar-chart",
+          "matchPaths": ["/revenue"],
+          "roles": ["ADMIN", "MANAGER", "AUDITOR"],
+          "api": ["/api/reports", "/api/audit", "/api/reservations"]
+        },
+        {
+          "key": "audit",
+          "to": "/audit",
+          "label": "Night Audit",
+          "icon": "sunrise",
+          "roles": ["ADMIN", "MANAGER", "AUDITOR"],
+          "api": ["/api/audit", "/api/in-house"]
+        }
+      ]
+    },
+    {
+      "label": "Design & Layout",
+      "items": [
+        {
+          "key": "room-layouts",
+          "to": "/room-layouts",
+          "label": "Room & Scenario Editor",
+          "icon": "box",
+          "matchPaths": ["/inspection-scenarios"],
+          "roles": ["ADMIN"],
+          "api": ["/api/room-layouts", "/api/room-assets", "/api/room-types", "/api/training"]
+        }
+      ]
+    },
+    {
+      "label": "Settings",
+      "items": [
+        {
+          "key": "users",
+          "to": "/users",
+          "label": "User & Roles",
+          "icon": "shield",
+          "roles": ["ADMIN", "MANAGER"],
+          "api": ["/api/users", "/api/roles", "/api/permissions", "/api/access-requests"]
+        },
+        {
+          "key": "health",
+          "to": "/health",
+          "label": "Service Health",
+          "icon": "activity",
+          "roles": ["ADMIN"],
+          "api": ["/api/health"]
+        },
+        {
+          "key": "settings",
+          "to": "/settings",
+          "label": "Settings",
+          "icon": "settings",
+          "core": true,
+          "api": ["/api/settings"]
+        }
+      ]
+    }
+  ]
+}

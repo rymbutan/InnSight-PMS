@@ -28,6 +28,7 @@ import Revenue from './pages/Revenue';
 import Amenities from './pages/Amenities';
 import RoomLayouts from './pages/RoomLayouts';
 import InspectionScenarios from './pages/InspectionScenarios';
+import Messages from './pages/Messages';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -138,7 +139,10 @@ export default function App() {
         <Route
           path="/housekeeping"
           element={
-            <ProtectedRoute section="housekeeping" roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}>
+            <ProtectedRoute
+              section="housekeeping"
+              roles={['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE']}
+            >
               <Housekeeping />
             </ProtectedRoute>
           }
@@ -176,6 +180,20 @@ export default function App() {
           }
         />
         <Route path="/change-password" element={<ChangePassword />} />
+        {/* No `roles`, mirroring the messages entry in navSections.json, which
+            has no `roles` key either — the two are the same fact written twice
+            and a mismatch shows up as a visible link that dead-ends. Messaging
+            is addressed person-to-person rather than by department, so every
+            signed-in role gets it. `section` is still set, so an admin can
+            hide it per role from Sidebar Visibility. */}
+        <Route
+          path="/messages"
+          element={
+            <ProtectedRoute section="messages">
+              <Messages />
+            </ProtectedRoute>
+          }
+        />
         {/* Per-user preferences only, so no role guard — every signed-in account
             has an account and a theme. */}
         <Route path="/settings" element={<Settings />} />
