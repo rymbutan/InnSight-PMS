@@ -163,6 +163,43 @@ router.get('/users/housekeepers', verifyToken, requireRole(...ROSTER_ROLES), asy
   }
 });
 
+// GET /api/users/directory — who you can message, and nothing else.
+//
+// The staff directory behind Messages. Unlike every other route in this file it
+// carries NO requireRole, because messaging is not departmental: a housekeeper
+// has to be able to look up the manager exactly as the manager looks up them.
+// Restricting this by role would mean deciding which staff are allowed to be
+// contacted, which is not a decision this feature makes.
+//
+// Widening GET /api/users was the alternative and is the wrong trade: that route
+// returns whole account records — email, status, last login, avatar, every role
+// — and opening it to all five roles to populate a contact list would hand out
+// the account inventory to read four columns.
+//
+// Narrow by construction, like /users/housekeepers above: it selects the fields
+// a contact row renders, for active accounts only, so there is no filter here a
+// later edit could relax into a general user list.
+//
+// MUST be declared before /users/:id, or the param route swallows "directory".
+router.get('/users/directory', verifyToken, async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { status: 'ACTIVE' }, // a disabled account cannot read its messages
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        roles: { select: { roleCode: true } },
+      },
+      orderBy: { displayName: 'asc' },
+    });
+    res.json(users.map((u) => ({ ...u, roles: u.roles.map((r) => r.roleCode) })));
+  } catch (err) {
+    console.error('[Auth] Directory error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/users/:id
 router.get('/users/:id', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {

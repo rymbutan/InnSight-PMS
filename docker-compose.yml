@@ -389,6 +389,30 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
+  messaging-service:
+    build: ./services/messaging
+    restart: unless-stopped
+    # NOT published. Every service used to publish its raw port to the host, so
+    # `curl :3014/api/...` bypassed the gateway entirely — and with it the rate
+    # limiting, the CORS allowlist and the security headers. Reachable in-network as
+    # http://messaging-service:3014. Publish them for debugging with the dev overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    expose:
+      - "3014"
+    environment:
+      DATABASE_URL: postgresql://innsight:${POSTGRES_PASSWORD:?required}@postgres:5432/innsight_messaging?connection_limit=8&pool_timeout=20
+      JWT_SECRET: ${JWT_SECRET:?required}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?required}
+      PORT: 3014
+      REDIS_URL: redis://redis:6379
+      TZ: ${TZ:-Asia/Manila}
+      # Read once at boot to mirror the staff directory; after that the
+      # auth:user_* Redis events keep it current. See src/subscribers/.
+      AUTH_URL: http://auth-service:3010
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
   # ── The browser's single entry point ──
   #
   # The gateway now serves the SPA at `/` (proxied from the `web` container) as
@@ -415,6 +439,7 @@ services:
       - inventory-service
       - audit-service
       - reports-service
+      - messaging-service
 
   web:
     build: ./web
