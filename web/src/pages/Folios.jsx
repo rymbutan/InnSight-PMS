@@ -12,6 +12,7 @@ import SplitBillDialog from '../components/SplitBillDialog';
 import Modal from '../components/Modal';
 import { useAuth } from '../auth';
 import { paymentMethodGroups, isEWallet } from '../lib/paymentMethods';
+import { labelize } from '../lib/labels';
 
 // Mirrors ReservationDetail.jsx's CreditCardsTab — never a full card number,
 // only what a terminal receipt already shows.
@@ -847,7 +848,7 @@ export default function Folios() {
                       </span>
                     </td>
                     <td className="t-c">
-                      <span className={`badge ${String(f.status).toLowerCase()}`}>{f.status}</span>
+                      <span className={`badge ${String(f.status).toLowerCase()}`}>{labelize(f.status)}</span>
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {formatPeso(f.balanceCents, { currency: f.currency })}
@@ -874,7 +875,7 @@ export default function Folios() {
                   <div className="folio-summary-name">{headerGuestName}</div>
                   <div className="folio-summary-sub">
                     Folio {folio.folioNumber}
-                    <span className={`badge ${folio.status.toLowerCase()}`}>{folio.status}</span>
+                    <span className={`badge ${folio.status.toLowerCase()}`}>{labelize(folio.status)}</span>
                   </div>
                 </div>
               </div>
@@ -933,8 +934,8 @@ export default function Folios() {
                   <>Audit approved — this folio is cleared for check-out.</>
                 ) : folio.auditApprovalStale ? (
                   <>
-                    Approved earlier, but the bill has changed since. The auditor must re-check it
-                    before this guest can check out.
+                    Approved earlier, but the bill has changed since. The auditor must re-check it before this
+                    guest can check out.
                   </>
                 ) : (
                   <>Awaiting auditor approval. The guest cannot check out until an auditor signs this off.</>
@@ -1005,101 +1006,101 @@ export default function Folios() {
                       return (
                         <tr key={t.id}>
                           <td>{new Date(t.postedAt).toLocaleDateString()}</td>
-                            <td className="t-c">
-                              <span className={`badge ${t.type.toLowerCase()}`}>{t.type}</span>
-                            </td>
-                            <td>{t.chargeCode || '—'}</td>
-                            <td>{t.description}</td>
-                            {/* The gateway/bank reference now lives in its own column
+                          <td className="t-c">
+                            <span className={`badge ${t.type.toLowerCase()}`}>{labelize(t.type)}</span>
+                          </td>
+                          <td>{t.chargeCode || '—'}</td>
+                          <td>{t.description}</td>
+                          {/* The gateway/bank reference now lives in its own column
                                 instead of a full-width row under the date — a payment
                                 with nothing to show (cash, or an e-wallet entry with no
                                 typed-in reference) just reads as "—", same as Code. */}
-                            <td>
-                              {summaryTag ? (
-                                hasExtra ? (
-                                  <details className="payment-tx-details">
-                                    <summary>{summaryTag}</summary>
-                                    <div className="payment-tx-details-body">
-                                      {linkedPayment.method === 'CARD' && linkedPayment.cardholderName && (
-                                        <div>Cardholder: {linkedPayment.cardholderName}</div>
-                                      )}
-                                      {linkedPayment.method === 'BANK_TRANSFER' && (
-                                        <>
-                                          {linkedPayment.senderName && (
-                                            <div>Sender: {linkedPayment.senderName}</div>
-                                          )}
-                                          {linkedPayment.transferredAt && (
-                                            <div>
-                                              Transferred:{' '}
-                                              {new Date(linkedPayment.transferredAt).toLocaleString()}
-                                            </div>
-                                          )}
-                                          {linkedPayment.proof ? (
-                                            <div>
-                                              <button
-                                                type="button"
-                                                className="secondary small"
-                                                onClick={() => viewPaymentProof(linkedPayment)}
-                                              >
-                                                View proof ({linkedPayment.proof.filename})
-                                              </button>
-                                            </div>
-                                          ) : (
-                                            <div className="muted">No proof of transfer on file.</div>
-                                          )}
-                                        </>
-                                      )}
-                                    </div>
-                                  </details>
-                                ) : (
-                                  summaryTag
-                                )
+                          <td>
+                            {summaryTag ? (
+                              hasExtra ? (
+                                <details className="payment-tx-details">
+                                  <summary>{summaryTag}</summary>
+                                  <div className="payment-tx-details-body">
+                                    {linkedPayment.method === 'CARD' && linkedPayment.cardholderName && (
+                                      <div>Cardholder: {linkedPayment.cardholderName}</div>
+                                    )}
+                                    {linkedPayment.method === 'BANK_TRANSFER' && (
+                                      <>
+                                        {linkedPayment.senderName && (
+                                          <div>Sender: {linkedPayment.senderName}</div>
+                                        )}
+                                        {linkedPayment.transferredAt && (
+                                          <div>
+                                            Transferred:{' '}
+                                            {new Date(linkedPayment.transferredAt).toLocaleString()}
+                                          </div>
+                                        )}
+                                        {linkedPayment.proof ? (
+                                          <div>
+                                            <button
+                                              type="button"
+                                              className="secondary small"
+                                              onClick={() => viewPaymentProof(linkedPayment)}
+                                            >
+                                              View proof ({linkedPayment.proof.filename})
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <div className="muted">No proof of transfer on file.</div>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </details>
                               ) : (
-                                '—'
-                              )}
-                            </td>
-                            <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
-                            {/* taxAmountCents arrives as a decimal STRING (BigInt has no
+                                summaryTag
+                              )
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>{formatPeso(t.amountCents)}</td>
+                          {/* taxAmountCents arrives as a decimal STRING (BigInt has no
                                 JSON form); formatPeso takes either. Compared as a
                                 string rather than parsed — there is no arithmetic to do
                                 here, and money must never touch a float. A row with no
                                 tax shows a dash rather than 0.00, so a genuinely
                                 untaxed line reads as untaxed at a glance. */}
+                          <td style={{ textAlign: 'right' }}>
+                            {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
+                              ? '—'
+                              : formatPeso(t.taxAmountCents)}
+                          </td>
+                          {siblings.length > 0 && (
                             <td style={{ textAlign: 'right' }}>
-                              {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
-                                ? '—'
-                                : formatPeso(t.taxAmountCents)}
-                            </td>
-                            {siblings.length > 0 && (
-                              <td style={{ textAlign: 'right' }}>
-                                {/* Payments stay where they were taken, and a transfer cannot
+                              {/* Payments stay where they were taken, and a transfer cannot
                                     itself be transferred — the service refuses both, so the
                                     control is not offered for them. */}
-                                {folio.status === 'OPEN' &&
-                                  t.type !== 'PAYMENT' &&
-                                  t.type !== 'REFUND' &&
-                                  t.type !== 'TRANSFER' &&
-                                  (moving === t.id ? (
-                                    <select
-                                      autoFocus
-                                      defaultValue=""
-                                      onBlur={() => setMoving(null)}
-                                      onChange={(e) => moveTransaction(t.id, e.target.value)}
-                                    >
-                                      <option value="">Move to…</option>
-                                      {siblings.map((f) => (
-                                        <option key={f.id} value={f.id}>
-                                          {f.folioNumber}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  ) : (
-                                    <button className="secondary small" onClick={() => setMoving(t.id)}>
-                                      Move
-                                    </button>
-                                  ))}
-                              </td>
-                            )}
+                              {folio.status === 'OPEN' &&
+                                t.type !== 'PAYMENT' &&
+                                t.type !== 'REFUND' &&
+                                t.type !== 'TRANSFER' &&
+                                (moving === t.id ? (
+                                  <select
+                                    autoFocus
+                                    defaultValue=""
+                                    onBlur={() => setMoving(null)}
+                                    onChange={(e) => moveTransaction(t.id, e.target.value)}
+                                  >
+                                    <option value="">Move to…</option>
+                                    {siblings.map((f) => (
+                                      <option key={f.id} value={f.id}>
+                                        {f.folioNumber}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <button className="secondary small" onClick={() => setMoving(t.id)}>
+                                    Move
+                                  </button>
+                                ))}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -1131,9 +1132,9 @@ export default function Folios() {
                       {statement.folio.payments.map((p) => (
                         <tr key={p.id}>
                           <td>{new Date(p.createdAt).toLocaleDateString()}</td>
-                          <td>{p.method}</td>
+                          <td>{labelize(p.method)}</td>
                           <td>
-                            <span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span>
+                            <span className={`badge ${p.status.toLowerCase()}`}>{labelize(p.status)}</span>
                           </td>
                           <td className="payment-reference">{p.gatewayRef || '—'}</td>
                           <td style={{ textAlign: 'right' }}>{formatPeso(p.amountCents)}</td>
@@ -1193,7 +1194,7 @@ export default function Folios() {
                       {disputes.map((d) => (
                         <tr key={d.id}>
                           <td>{new Date(d.filedAt).toLocaleDateString()}</td>
-                          <td>{d.method}</td>
+                          <td>{labelize(d.method)}</td>
                           <td>{d.type === 'CHARGEBACK' ? 'Chargeback' : 'Refund request'}</td>
                           <td style={{ textAlign: 'right' }}>{formatPeso(d.amountCents)}</td>
                           <td className="muted">
@@ -1203,9 +1204,7 @@ export default function Folios() {
                                 was ever shown, so a second cashier could not
                                 tell an escalated case from an abandoned one. */}
                             {d.filedBy && <div style={{ fontSize: 12 }}>Filed by {d.filedBy}</div>}
-                            {d.resolutionNote && (
-                              <div style={{ fontSize: 12 }}>Note: {d.resolutionNote}</div>
-                            )}
+                            {d.resolutionNote && <div style={{ fontSize: 12 }}>Note: {d.resolutionNote}</div>}
                             {d.resolvedBy && (
                               <div style={{ fontSize: 12 }}>
                                 {d.status === 'APPROVED' ? 'Approved' : 'Rejected'} by {d.resolvedBy}
@@ -1213,7 +1212,7 @@ export default function Folios() {
                             )}
                           </td>
                           <td>
-                            <span className={`badge ${d.status.toLowerCase()}`}>{d.status}</span>
+                            <span className={`badge ${d.status.toLowerCase()}`}>{labelize(d.status)}</span>
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {/* Only the transitions the service will actually
@@ -1631,7 +1630,7 @@ export default function Folios() {
       <Modal
         open={!!disputeFor}
         onClose={() => setDisputeFor(null)}
-        title={disputeFor ? `File a dispute — ${disputeFor.method}` : 'File a dispute'}
+        title={disputeFor ? `File a dispute — ${labelize(disputeFor.method)}` : 'File a dispute'}
         width={420}
         footer={
           <>
@@ -1667,9 +1666,8 @@ export default function Folios() {
                 the ceiling IS the amount and repeating it is noise. */}
             {disputeFor.refundableCents !== Number(disputeFor.amountCents) && (
               <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                {formatPeso(disputeFor.refundableCents)} of the original{' '}
-                {formatPeso(disputeFor.amountCents)} is still refundable — the rest has already gone
-                back to the guest.
+                {formatPeso(disputeFor.refundableCents)} of the original {formatPeso(disputeFor.amountCents)}{' '}
+                is still refundable — the rest has already gone back to the guest.
               </p>
             )}
             <label style={{ marginTop: 10 }}>Reason</label>
@@ -1699,11 +1697,7 @@ export default function Folios() {
               Cancel
             </button>
             <button onClick={submitResolve} disabled={!!resolvingId}>
-              {resolvingId
-                ? 'Working…'
-                : resolving
-                  ? DISPUTE_DECISIONS[resolving.decision].verb
-                  : 'Confirm'}
+              {resolvingId ? 'Working…' : resolving ? DISPUTE_DECISIONS[resolving.decision].verb : 'Confirm'}
             </button>
           </>
         }
@@ -1725,7 +1719,7 @@ export default function Folios() {
               onChange={(e) => setResolveNote(e.target.value)}
               placeholder={
                 resolving.decision === 'DISPUTED'
-                  ? "The reference the provider gave you, and what you sent them."
+                  ? 'The reference the provider gave you, and what you sent them.'
                   : 'Why this claim was decided this way.'
               }
             />

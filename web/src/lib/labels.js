@@ -15,9 +15,30 @@ const SPECIAL = {
   AIRBNB: 'Airbnb',
   GCASH: 'GCash',
   VIP: 'VIP',
+
+  // Statuses and codes whose words are not independent — the generic rule
+  // title-cases each one separately and produces "Out Of Order", "In House",
+  // "No Show", "Qr Wallet". Everything whose words DO stand alone
+  // ("Bank Transfer", "Meeting Room", "Checked In") is left to fall through.
+  IN_HOUSE: 'In-House',
+  NOT_IN_HOUSE: 'Not In-House',
+  NO_SHOW: 'No-Show',
+  PRE_ARRIVAL: 'Pre-Arrival',
+  OUT_OF_ORDER: 'Out of Order',
+  OUT_OF_SERVICE: 'Out of Service',
+  CLEAN_INSPECTED: 'Clean (Inspected)',
+  QR_WALLET: 'QR Wallet',
+  FRONT_DESK: 'Front Desk',
+  HOUSEKEEPING_MAINTENANCE: 'Housekeeping & Maintenance',
 };
 
 // WALK_IN -> Walk-in, ONLINE_BOOKING -> Online Booking, DIRECT -> Direct.
+//
+// Safe to apply anywhere a value is DISPLAYED, including to values that are not
+// enums at all: anything that is already prose falls straight through. That is
+// deliberate — the fix for "the screen shows BANK_TRANSFER" should be reachable
+// by wrapping the render site, without first having to prove what the column
+// can contain.
 export function labelize(code) {
   if (code === null || code === undefined || code === '') return '';
   const raw = String(code).trim();

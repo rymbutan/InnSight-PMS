@@ -4,6 +4,7 @@ import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { pesosToCents, formatPeso } from '../lib/money';
+import { labelize } from '../lib/labels';
 
 export default function Audit() {
   const toast = useToast();
@@ -78,7 +79,7 @@ export default function Audit() {
           <>
             <p>
               Date: <strong>{new Date(current.businessDate).toDateString()}</strong> · Status:{' '}
-              <span className={`badge ${current.status.toLowerCase()}`}>{current.status}</span>
+              <span className={`badge ${current.status.toLowerCase()}`}>{labelize(current.status)}</span>
             </p>
             <div className="metrics" style={{ marginBottom: 12 }}>
               <div className="metric">
@@ -128,8 +129,8 @@ export default function Audit() {
             </div>
             <p className="muted">
               The audit posts a room charge to each in-house folio, combines all of the day's sales — rooms
-              plus amenities, laundry, spa and visitor sales — marks unarrived confirmed bookings as
-              no-show, auto-cancels overdue unconfirmed bookings, and closes the day.
+              plus amenities, laundry, spa and visitor sales — marks unarrived confirmed bookings as no-show,
+              auto-cancels overdue unconfirmed bookings, and closes the day.
             </p>
           </>
         ) : (
@@ -166,7 +167,7 @@ export default function Audit() {
                 <tr key={d.id}>
                   <td>{new Date(d.businessDate).toDateString()}</td>
                   <td className="t-c">
-                    <span className={`badge ${d.status.toLowerCase()}`}>{d.status}</span>
+                    <span className={`badge ${d.status.toLowerCase()}`}>{labelize(d.status)}</span>
                   </td>
                   <td>{d.arrivals ?? 0}</td>
                   <td>{d.departures ?? 0}</td>

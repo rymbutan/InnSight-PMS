@@ -143,7 +143,11 @@ export default function Reservations() {
           <h1>Reservations</h1>
           <FilterPill open={filtersOpen} onClick={() => setFiltersOpen((o) => !o)} />
         </div>
-        <button className="btn-cta" data-tour="tour-process-reservations" onClick={() => navigate('/reservations/new')}>
+        <button
+          className="btn-cta"
+          data-tour="tour-process-reservations"
+          onClick={() => navigate('/reservations/new')}
+        >
           <Icon name="plus" size={14} style={{ marginRight: 6 }} />
           Create new reservation
         </button>
@@ -187,7 +191,7 @@ export default function Reservations() {
         <FilterField label="Status">
           <MultiSelect
             label={`${filters.statuses.length} of ${STATUS_OPTIONS.length} selected`}
-            options={STATUS_OPTIONS.map((s) => ({ value: s, label: s.replace(/_/g, ' ') }))}
+            options={STATUS_OPTIONS.map((s) => ({ value: s, label: labelize(s) }))}
             selected={filters.statuses}
             onChange={(v) => setFilters({ ...filters, statuses: v })}
             open={statusOpen}
@@ -383,10 +387,7 @@ export default function Reservations() {
 function SortableTh({ field, label, sortBy, onClick, align = '' }) {
   const active = sortBy.key === field;
   return (
-    <th
-      className={`sortable ${active ? 'active' : ''} ${align}`.trim()}
-      onClick={() => onClick(field)}
-    >
+    <th className={`sortable ${active ? 'active' : ''} ${align}`.trim()} onClick={() => onClick(field)}>
       {label}{' '}
       <span className="sort-arrow">
         <Icon

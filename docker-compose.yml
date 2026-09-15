@@ -238,6 +238,11 @@ services:
       PORT: 3008
       REDIS_URL: redis://redis:6379
       TZ: ${TZ:-Asia/Manila}
+      # Read only when a profile is being DELETED, to refuse deleting someone
+      # who is currently in a room. Guest holds no stay data of its own, and a
+      # front desk that can erase the profile of the guest in 305 mid-stay is a
+      # worse problem than one extra service dependency on a rare path.
+      STAY_URL: http://stay-service:3006
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

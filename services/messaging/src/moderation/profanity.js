@@ -159,6 +159,43 @@ const WORDS = [
   'kantot',
   'kantutan',
   'chupa',
+  'tangna',
+  'tangena',
+  'tangine',
+  'putragis',
+  'pakshit',
+  'gagu',
+  'bwiset',
+
+  // ── Abbreviations and textspeak ──
+  // A separate group because the precision rule bites hardest here: these are
+  // short, and a short token is the easiest kind to collide with something
+  // legitimate. Three are deliberately absent for exactly that reason —
+  // "pos" (this product posts amenity charges from a POS), "bs" (a room or
+  // rate code, and a degree) and "af" (two letters, and a plausible code).
+  'wtf',
+  'wtaf',
+  'stfu',
+  'gtfo',
+  'ffs',
+  'omfg',
+  'lmfao',
+  'mf',
+  'mfer',
+  'mofo',
+  'kys',
+  'fck',
+  'fuk',
+  'fuq',
+  'phuck',
+  'azz',
+  'biatch',
+  'beotch',
+  'btch',
+  'shyt',
+  'biyatch',
+  'byotch',
+  'ahole',
 
   // ── Bisaya / Cebuano ──
   'yawa',

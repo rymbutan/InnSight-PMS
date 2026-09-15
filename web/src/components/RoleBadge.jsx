@@ -13,9 +13,9 @@ export default function RoleBadge({ code, upper = false, title }) {
     <span
       className={`role-badge${upper ? ' is-upper' : ''}`}
       style={{ background: roleColor(code) }}
-      title={title || code}
+      title={title || roleLabel(code)}
     >
-      {upper ? code : roleLabel(code)}
+      {upper ? roleLabel(code).toUpperCase() : roleLabel(code)}
     </span>
   );
 }

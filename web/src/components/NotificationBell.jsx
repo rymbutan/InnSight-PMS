@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from './Icon';
-import { useNotificationFeed, relativeTime } from '../lib/notifications';
+import { relativeTime } from '../lib/notifications';
 
-export default function NotificationBell({ userId }) {
+// The feed arrives as a PROP rather than being subscribed here. Every call to
+// useNotificationFeed opens its own SSE stream, and the on-screen pop-ups need
+// the same events this does — so Layout holds the one subscription and hands
+// the result to both. See components/NotificationPopups.jsx.
+export default function NotificationBell({ feed }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState('unread');
-  const { unreadItems, readItems, unread, markAllRead, clearRead } = useNotificationFeed(userId);
+  const { unreadItems, readItems, unread, markAllRead, clearRead } = feed;
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -98,9 +102,7 @@ export default function NotificationBell({ userId }) {
                 <button
                   key={n.id}
                   type="button"
-                  className={`notif-item${tab === 'unread' ? ' is-new' : ''}${
-                    n.to ? '' : ' is-static'
-                  }`}
+                  className={`notif-item${tab === 'unread' ? ' is-new' : ''}${n.to ? '' : ' is-static'}`}
                   onClick={() => {
                     if (!n.to) return;
                     setOpen(false);
