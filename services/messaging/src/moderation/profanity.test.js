@@ -43,6 +43,12 @@ const CLEAN = [
   'Dick Smith checked in at 2pm.',
   // Numbers must survive leetspeak handling untouched.
   'Rooms 101, 305 and 1001 are ready for inspection.',
+  // Short tokens the abbreviation list must NOT reach. "POS" is this product's
+  // own amenity point-of-sale, "BS" and "AF" are plausible rate or room codes,
+  // and "sht" is how a housekeeper abbreviates "sheet".
+  'Post the minibar sale through the POS terminal.',
+  'Rate code BS applies to the AF block this week.',
+  'Room 214 needs 2 sht and 1 blanket.',
 ];
 
 const DIRTY = [
@@ -74,6 +80,14 @@ const DIRTY = [
   // Slurs.
   'stop being a retard',
   'faggot',
+  // Abbreviations and textspeak.
+  'wtf is going on',
+  'stfu',
+  'ffs this again',
+  'omfg',
+  'lmfao',
+  'tangna naman',
+  'putragis',
 ];
 
 test('ordinary hotel messages are never blocked', () => {
