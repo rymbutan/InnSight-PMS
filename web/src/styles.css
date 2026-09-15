@@ -9076,6 +9076,154 @@ button.danger:disabled:hover {
   padding: 8px 10px;
 }
 
+/* ── Messages page header: title, retention notice, sound toggle ──
+   The two tools sit with the heading rather than inside either pane, because
+   both describe the whole screen: the retention note applies to every
+   conversation, and the chime rings on pages other than this one. */
+.msg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.msg-head h2 {
+  margin: 0;
+}
+.msg-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.msg-policy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.msg-sound-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.msg-sound-toggle:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* Sound ON is the accented state. Muted is the one that should look switched
+   off, so the default grey carries it — there is no second colour to learn.
+   The ink is --on-accent-soft, not --accent: --accent is a FILL colour, and the
+   admin-set palette (lib/accent.js writes it as a custom property) is the same
+   dark green in dark mode as in light, so using it as text here put dark green
+   on a dark green pill. --on-accent-soft is the ink paired with this exact
+   background and is defined per theme. */
+.msg-sound-toggle[aria-pressed='true'] {
+  color: var(--on-accent-soft);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* A refused message. Sits directly above the composer, between the thread and
+   the text it is complaining about, and stays until the draft is edited —
+   unlike a toast, which would fade while the unsent draft sat there. */
+.msg-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--on-danger-soft);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+}
+.msg-blocked svg {
+  flex: none;
+  margin-top: 1px;
+}
+.msg-composer textarea.is-blocked {
+  border-color: var(--danger);
+}
+
+/* ── Message retention chooser (Settings → Messaging) ──
+   Radios rather than a <select>: each option carries a consequence, and two of
+   them ('Keep messages', 'Clear when a participant signs out') need a line of
+   explanation that a dropdown has nowhere to put. */
+.retention-options {
+  display: grid;
+  gap: 8px;
+}
+.retention-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  /* The global `label` rule uppercases and letter-spaces for dense table
+     headers. These are sentence-case option names, so opt out — same reason
+     .nav-vis-item above does. */
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  margin: 0;
+}
+.retention-option:hover {
+  border-color: var(--accent);
+}
+.retention-option.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* The global `input` rule is written for text fields: width 100%, a border, a
+   background and a min-height. Applied to a radio it stretches the control
+   across the whole row and shoves the label out of the card. Undo all four. */
+.retention-option input[type='radio'] {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.retention-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.retention-option-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.retention-option-detail {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 /* One pane at a time on a phone: side by side, neither would be usable. The
    list collapses to a strip tall enough to pick from, and the conversation
    takes the rest. */

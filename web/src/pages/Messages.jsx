@@ -6,6 +6,7 @@ import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import RoleBadge from '../components/RoleBadge';
 import { primaryRole } from '../lib/roles';
+import { playMessageChime, useMessageSound } from '../lib/sound';
 
 // Staff direct messages.
 //
@@ -53,12 +54,22 @@ export default function Messages() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState('');
+  const [retention, setRetention] = useState(null);
+  // Set when the server refuses a message on moderation grounds. Kept as state
+  // rather than raised as a toast because the sender has to act on it: the toast
+  // would fade while the rejected draft sat there looking sent.
+  const [blocked, setBlocked] = useState(false);
+  const [soundOn, setSoundOn] = useMessageSound();
 
   const scrollRef = useRef(null);
   // Whether the thread was pinned to the bottom before the latest poll landed.
   // Re-scrolling unconditionally would yank someone out of older messages they
   // scrolled up to read, every three seconds.
   const wasAtBottom = useRef(true);
+  // The last message id this thread has already shown. `null` means the thread
+  // has not loaded yet — opening a conversation with unread replies in it must
+  // not chime, because nothing arrived, we just looked.
+  const lastSeenId = useRef(null);
 
   const peer = useMemo(() => contacts.find((c) => c.id === peerId) || null, [contacts, peerId]);
 
@@ -69,6 +80,26 @@ export default function Messages() {
       (c) => c.displayName.toLowerCase().includes(q) || c.username.toLowerCase().includes(q)
     );
   }, [contacts, filter]);
+
+  // Staff are told how long what they type will last. A retention rule nobody
+  // can see is one people only discover by losing something.
+  const policyNote = useMemo(() => {
+    if (!retention || retention.mode === 'never') return null;
+    if (retention.mode === 'logout') return 'Cleared when you sign out';
+    return retention.label.replace(/^Clear\b/, 'Cleared');
+  }, [retention]);
+
+  // ── Retention policy ────────────────────────────────────────────────────
+  // Read once. It is hotel configuration that changes on the order of never, so
+  // polling it alongside the conversation would be pure noise.
+  useEffect(() => {
+    api
+      .get('/api/messages/settings/retention')
+      .then(({ data }) => setRetention(data))
+      .catch(() => {
+        /* the notice is informational; the server enforces the policy either way */
+      });
+  }, []);
 
   // ── Contact list ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -100,12 +131,24 @@ export default function Messages() {
       return;
     }
     let cancelled = false;
+    // A different conversation: nothing in it has been "seen" yet.
+    lastSeenId.current = null;
     async function load() {
       const el = scrollRef.current;
       if (el) wasAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
       try {
         const { data } = await api.get(`/api/messages/with/${peerId}`);
-        if (!cancelled) setMessages(data?.messages || []);
+        if (cancelled) return;
+        const list = data?.messages || [];
+        const newest = list[list.length - 1];
+        // Ring only for a message from the OTHER person that this thread has not
+        // shown before. Opening the thread sets the marker without ringing, and
+        // your own sends are yours — you know they happened.
+        if (newest && lastSeenId.current !== null && newest.id !== lastSeenId.current) {
+          if (newest.senderId !== user?.id) playMessageChime();
+        }
+        lastSeenId.current = newest ? newest.id : null;
+        setMessages(list);
       } catch {
         /* transient — the next tick retries, and the thread stays as it was */
       }
@@ -116,7 +159,7 @@ export default function Messages() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [peerId]);
+  }, [peerId, user?.id]);
 
   // Stick to the newest message unless the reader has scrolled away from it.
   useEffect(() => {
@@ -134,10 +177,18 @@ export default function Messages() {
       // Append rather than waiting for the next poll: up to 3s of the message
       // not appearing would read as the send having failed.
       setMessages((m) => [...m, data]);
+      lastSeenId.current = data.id;
       wasAtBottom.current = true;
       setDraft('');
+      setBlocked(false);
     } catch (err) {
-      toast.error(errMsg(err));
+      if (err?.response?.data?.code === 'PROFANITY') {
+        // Leave the draft in the box — the sender has to edit it, and clearing
+        // it would make them retype the part that was fine.
+        setBlocked(true);
+      } else {
+        toast.error(errMsg(err));
+      }
     } finally {
       setSending(false);
     }
@@ -154,7 +205,32 @@ export default function Messages() {
 
   return (
     <div>
-      <h2>Messages</h2>
+      <div className="msg-head">
+        <h2>Messages</h2>
+        <div className="msg-head-tools">
+          {policyNote && (
+            <span className="msg-policy" title={retention?.detail || undefined}>
+              <Icon name="info" size={13} strokeWidth={1.9} />
+              {policyNote}
+            </span>
+          )}
+          <button
+            type="button"
+            className="msg-sound-toggle"
+            onClick={() => setSoundOn(!soundOn)}
+            aria-pressed={soundOn}
+            title={
+              soundOn
+                ? 'Notification sound is on for this device. Click to mute.'
+                : 'Notification sound is muted on this device. Click to unmute.'
+            }
+          >
+            <Icon name={soundOn ? 'bell' : 'bell-off'} size={15} strokeWidth={1.9} />
+            {soundOn ? 'Sound on' : 'Sound off'}
+          </button>
+        </div>
+      </div>
+
       <div className="msg-wrap">
         {/* ── Contacts ── */}
         <aside className="msg-contacts">
@@ -251,10 +327,26 @@ export default function Messages() {
                 )}
               </div>
 
+              {blocked && (
+                <div className="msg-blocked" role="alert">
+                  <Icon name="alert-circle" size={15} strokeWidth={1.9} />
+                  <span>
+                    That message contains language this system does not allow. Please reword it and send
+                    again.
+                  </span>
+                </div>
+              )}
+
               <form className="msg-composer" onSubmit={send}>
                 <textarea
+                  className={blocked ? 'is-blocked' : undefined}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    // Clear the warning as soon as they start rewriting, rather
+                    // than leaving it up to accuse text that no longer exists.
+                    if (blocked) setBlocked(false);
+                  }}
                   onKeyDown={onKeyDown}
                   placeholder={`Message ${peer.displayName}…`}
                   rows={2}

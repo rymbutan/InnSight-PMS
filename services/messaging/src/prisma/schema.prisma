@@ -58,3 +58,19 @@ model Message {
   // Counting what is unread for me, per sender, without scanning my whole inbox.
   @@index([recipientId, readAt])
 }
+
+// Generic key/value settings owned by THIS service.
+//
+// The reservation service has an AppSetting table too (theme, add-on surcharge)
+// and the auth service has Setting (sidebar visibility). Message retention could
+// have gone in either, but both would then need a cross-service call on the hot
+// path: the retention cutoff is consulted on every contact-list poll, every
+// thread read and every unread count, i.e. several times per second per signed-in
+// user. A row in this service's own database makes that a local read with a
+// 5-second in-process cache, and keeps the purge job — which deletes rows in
+// THIS database — from depending on another service being up to know what to do.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
