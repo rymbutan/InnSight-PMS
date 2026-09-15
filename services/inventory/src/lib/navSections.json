@@ -88,6 +88,36 @@
             "/api/room-types",
             "/api/reports/room-status"
           ]
+        },
+        {
+          "key": "messages",
+          "to": "/messages",
+          "label": "Messages",
+          "icon": "message-circle",
+          "_rolesComment": [
+            "No `roles` key, so every signed-in role — which is the whole point.",
+            "Messages are addressed to a person, not to a department: restricting",
+            "this by role would be deciding which staff may be contacted, and a",
+            "housekeeper who cannot reply to the manager is not a chat feature.",
+            "",
+            "Not `core` though: an admin may still hide it per role from Sidebar",
+            "Visibility if they do not want a given role messaging at all. Core is",
+            "for the two pages that strand a user when hidden (Dashboard, Settings),",
+            "and this is not one of them."
+          ],
+          "_apiComment": [
+            "/api/users is listed because the contact list reads",
+            "/api/users/directory, which is authenticated-only rather than",
+            "STAFF_ROLES-gated (see services/auth/src/routes/users.routes.js).",
+            "",
+            "This widens nothing: prefixes here are a union that keeps a path open",
+            "while a visible section needs it, and the requireRole guards on the",
+            "other /api/users routes are untouched — an auditor calling GET",
+            "/api/users still gets Forbidden. What it buys is that hiding",
+            "Housekeeping from the front desk (the other section claiming",
+            "/api/users) no longer takes their contact list down with it."
+          ],
+          "api": ["/api/messages", "/api/users"]
         }
       ]
     },

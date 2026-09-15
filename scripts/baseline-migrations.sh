@@ -24,7 +24,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SERVICES=(inventory reservation stay folio guest maintenance auth audit reports)
+SERVICES=(inventory reservation stay folio guest maintenance auth audit reports messaging)
 
 # Pin the CLI major. The services declare `prisma: ^6.0.0`, but most of them have
 # no local node_modules on a dev machine, so a bare `npx prisma` reaches for the

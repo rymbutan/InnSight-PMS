@@ -30,7 +30,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-ALL=(auth inventory guest folio stay reservation maintenance audit reports)
+ALL=(auth inventory guest folio stay reservation maintenance audit reports messaging)
 
 if [ "$#" -gt 0 ]; then
   SERVICES=("$@")

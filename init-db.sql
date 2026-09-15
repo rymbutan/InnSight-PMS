@@ -10,3 +10,4 @@ CREATE DATABASE innsight_auth;          -- Auth / Users / Roles Service
 CREATE DATABASE innsight_reservation;   -- Reservation / Booking Service
 CREATE DATABASE innsight_audit;         -- Night Audit / Business Day Service
 CREATE DATABASE innsight_reports;       -- Reports Service
+CREATE DATABASE innsight_messaging;     -- Staff Direct Messaging Service

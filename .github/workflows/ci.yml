@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [auth, inventory, stay, folio, guest, maintenance, reservation, audit, reports]
+        service: [auth, inventory, stay, folio, guest, maintenance, reservation, audit, reports, messaging]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -130,7 +130,7 @@ jobs:
       # those directly instead of guessing a sleep.
       - name: Wait for backend services healthy
         run: |
-          services="auth-service reservation-service stay-service folio-service guest-service maintenance-service inventory-service audit-service reports-service"
+          services="auth-service reservation-service stay-service folio-service guest-service maintenance-service inventory-service audit-service reports-service messaging-service"
           for i in $(seq 1 90); do
             pending=""
             for svc in $services; do
