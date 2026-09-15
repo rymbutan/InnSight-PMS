@@ -1166,6 +1166,11 @@ router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) 
         reservationId: r.id,
         cancellationNumber,
         reason,
+        // Who and which booking. Without these the notification could only say
+        // "Reservation cancelled", which is true of every cancellation and
+        // therefore identifies none of them.
+        guestName: r.guestName,
+        confirmationNumber: r.confirmationNumber,
         cancellationFeeCents: computedFeeCents,
         // Inventory service should release any active holds tied to this reservation.
         releaseHolds: true,

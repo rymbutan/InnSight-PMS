@@ -3,6 +3,7 @@ const PDFDocument = require('pdfkit');
 const Redis = require('ioredis');
 const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
 const { makeServiceCaller } = require('../lib/serviceCall');
+const { isOverdue } = require('../overdue/sweeper');
 const { qrPngBuffer } = require('../lib/qr');
 const { publicUrl } = require('../lib/publicUrl');
 const { makeInventoryClient, INVENTORY_URL } = require('../lib/inventoryClient');
@@ -343,6 +344,45 @@ router.post('/check-in', requireRole(...STAFF), async (req, res) => {
     } = req.body;
 
     let stay = await prisma.stay.findFirst({ where: { reservationId } });
+
+    // OVERDUE BOOKINGS CANNOT BE CHECKED IN.
+    //
+    // This is the boundary that actually holds. The arrivals list stops
+    // offering the button and the sweep in overdue/sweeper.js cancels the
+    // booking within fifteen minutes, but neither is a rule — the endpoint is
+    // reachable without the page, and there is a window between the check-in
+    // day passing and the next sweep. A guest who was due three days ago and
+    // never appeared does not get a stay opened against a dead booking.
+    //
+    // Only for reservation-backed check-ins. A walk-in has no reservationId and
+    // no check-in date to be late for.
+    if (reservationId) {
+      try {
+        const reservation = await reservationCall.call(
+          `${RESERVATION_URL}/api/reservations/${reservationId}`
+        );
+        if (reservation?.status === 'CANCELLED') {
+          return res.status(409).json({
+            error: 'This booking has been cancelled and cannot be checked in.',
+          });
+        }
+        if (isOverdue(reservation?.checkIn)) {
+          return res.status(409).json({
+            error:
+              'This booking is overdue — its check-in date has already passed, so it is cancelled ' +
+              'automatically and can no longer be checked in. Create a new booking or take the guest ' +
+              'as a walk-in.',
+          });
+        }
+      } catch (err) {
+        // FAIL OPEN, deliberately, and the one place in this change that does.
+        // If the reservation service is unreachable the desk still has a guest
+        // standing at the counter; refusing every check-in until another
+        // service recovers is a worse failure than briefly missing this guard,
+        // which the sweep then corrects.
+        console.error(`[Stay] Check-in: overdue lookup failed, allowing: ${err.message}`);
+      }
+    }
 
     // Verify the room server-side. Previously this route guarded the STAY's
     // status but never checked whether assignedRoomId was already occupied by a

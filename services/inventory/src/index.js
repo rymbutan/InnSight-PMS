@@ -184,6 +184,7 @@ const LIVE_CHANNELS = [
   // see POST /api/housekeeping-calls.
   'housekeeping:call_placed',
   'housekeeping:call_answered',
+  'messaging:message_sent',
 ];
 
 // ── Who may receive which channel ───────────────────────────────────────────
@@ -221,6 +222,11 @@ const CHANNEL_AUDIENCE = {
   // placed it has to see it answered — a caller who gets no answer-back rings
   // again, which is the one failure mode a summons must not have.
   housekeeping: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE'],
+  // Every role, because a direct message is addressed to a PERSON rather than
+  // to a department — the same reasoning as the messaging service's routes. The
+  // role list is not what protects this one: the directed fan-out below sends
+  // each frame to the recipient's stream and to nobody else's.
+  messaging: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING_MAINTENANCE', 'AUDITOR'],
 };
 
 const CHANNEL_DOMAIN = {
@@ -262,6 +268,7 @@ const CHANNEL_DOMAIN = {
   'facility:booked': 'facilities',
   'housekeeping:call_placed': 'housekeeping',
   'housekeeping:call_answered': 'housekeeping',
+  'messaging:message_sent': 'messaging',
 };
 
 // An unmapped channel is CLOSED, not open. Adding a channel to LIVE_CHANNELS and
@@ -348,16 +355,37 @@ liveSub.subscribe(...LIVE_CHANNELS).catch((e) => {
 // The DESK that placed the call is always kept on the recipient list even when
 // the call is directed elsewhere: that is how its own handset learns the call
 // was answered. Filtering that out here would silence the answer-back.
+// A user id no session can ever hold, so a frame aimed at it is delivered to
+// nobody. Used as the fallback for an unparseable direct message.
+const NO_RECIPIENT = '__no_recipient__';
+
 function directedTargetOf(channel, message) {
-  if (channel !== 'housekeeping:call_placed') return null;
-  try {
-    const d = JSON.parse(message);
-    return d.targetUserId ? { targetUserId: d.targetUserId, callerId: d.callerId || null } : null;
-  } catch {
-    // A frame we cannot parse is broadcast rather than dropped: failing to
-    // deliver a summons is worse than delivering it too widely.
-    return null;
+  if (channel === 'housekeeping:call_placed') {
+    try {
+      const d = JSON.parse(message);
+      return d.targetUserId ? { targetUserId: d.targetUserId, callerId: d.callerId || null } : null;
+    } catch {
+      // A frame we cannot parse is broadcast rather than dropped: failing to
+      // deliver a summons is worse than delivering it too widely.
+      return null;
+    }
   }
+
+  // A direct message goes to the RECIPIENT and to nobody else — not even the
+  // sender, who already knows what they typed. Note the opposite default to the
+  // call above: an unparseable message frame is directed at a userId that
+  // cannot match any client, so it reaches no one. Broadcasting a private
+  // message on a parse failure is not a trade-off worth making.
+  if (channel === 'messaging:message_sent') {
+    try {
+      const d = JSON.parse(message);
+      return { targetUserId: d.recipientId || NO_RECIPIENT, callerId: null };
+    } catch {
+      return { targetUserId: NO_RECIPIENT, callerId: null };
+    }
+  }
+
+  return null;
 }
 
 liveSub.on('message', (channel, message) => {

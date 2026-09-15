@@ -5,6 +5,7 @@ import { formatPeso } from '../lib/money';
 import { BarChart } from '../components/Chart';
 import EmptyState from '../components/EmptyState';
 import SectionSwitcher, { REPORTS_SECTIONS } from '../components/SectionSwitcher';
+import { labelize } from '../lib/labels';
 
 const TYPES = [
   { value: 'occupancy', label: 'Occupancy (date range)' },
@@ -147,9 +148,18 @@ function DefaultDashboard() {
     let cancelled = false;
     (async () => {
       const [rooms, inHouse, runs] = await Promise.all([
-        api.get('/api/reports/room-status').then((r) => r.data).catch(() => null),
-        api.get('/api/reports/in-house').then((r) => r.data).catch(() => null),
-        api.get('/api/reports/runs').then((r) => r.data).catch(() => null),
+        api
+          .get('/api/reports/room-status')
+          .then((r) => r.data)
+          .catch(() => null),
+        api
+          .get('/api/reports/in-house')
+          .then((r) => r.data)
+          .catch(() => null),
+        api
+          .get('/api/reports/runs')
+          .then((r) => r.data)
+          .catch(() => null),
       ]);
       if (cancelled) return;
       setState({ loading: false, rooms, inHouse, runs });
@@ -198,10 +208,7 @@ function DefaultDashboard() {
         <div className="metrics">
           <Metric label="Total rooms" value={rooms.total} />
           <Metric label="In-house guests" value={state.inHouse?.count ?? '—'} />
-          <Metric
-            label="Vacant, ready"
-            value={(byStatus.CLEAN || 0) + (byStatus.CLEAN_INSPECTED || 0)}
-          />
+          <Metric label="Vacant, ready" value={(byStatus.CLEAN || 0) + (byStatus.CLEAN_INSPECTED || 0)} />
           <Metric label="Vacant, dirty" value={byStatus.DIRTY || 0} />
           <Metric
             label="Needs attention"
@@ -231,10 +238,10 @@ function DefaultDashboard() {
             <tbody>
               {runs.slice(0, 10).map((r) => (
                 <tr key={r.id}>
-                  <td>{r.type.replace(/_/g, ' ')}</td>
+                  <td>{labelize(r.type)}</td>
                   <td className="t-c">
                     <span className={`badge ${r.status === 'COMPLETED' ? 'confirmed' : 'cancelled'}`}>
-                      {r.status}
+                      {labelize(r.status)}
                     </span>
                   </td>
                   <td className="muted">{r.runBy || '—'}</td>

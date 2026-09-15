@@ -6,7 +6,7 @@ import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import RoleBadge from '../components/RoleBadge';
 import { primaryRole } from '../lib/roles';
-import { playMessageChime, useMessageSound } from '../lib/sound';
+import { useMessageSound } from '../lib/sound';
 
 // Staff direct messages.
 //
@@ -141,12 +141,11 @@ export default function Messages() {
         if (cancelled) return;
         const list = data?.messages || [];
         const newest = list[list.length - 1];
-        // Ring only for a message from the OTHER person that this thread has not
-        // shown before. Opening the thread sets the marker without ringing, and
-        // your own sends are yours — you know they happened.
-        if (newest && lastSeenId.current !== null && newest.id !== lastSeenId.current) {
-          if (newest.senderId !== user?.id) playMessageChime();
-        }
+        // The chime used to ring from here. It now rings once, in Layout, off
+        // the live `messaging:message_sent` event — which arrives immediately
+        // and on every page, not only this one. Two sources meant the same
+        // message could ring twice, a second or two apart, whenever a poll
+        // landed just after the event.
         lastSeenId.current = newest ? newest.id : null;
         setMessages(list);
       } catch {

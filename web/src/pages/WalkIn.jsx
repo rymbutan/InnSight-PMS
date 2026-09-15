@@ -55,7 +55,7 @@ export default function WalkIn() {
       <h2>Walk-in check-in</h2>
       <div className="panel">
         <p className="muted">
-          Unreserved guest walking up to the front desk. Creates a Stay directly in IN_HOUSE status.
+          Unreserved guest walking up to the front desk. Checks them straight in as an in-house stay.
         </p>
         <form onSubmit={submit}>
           <div className="row">

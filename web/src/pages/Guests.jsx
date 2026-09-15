@@ -5,6 +5,8 @@ import EmptyState from '../components/EmptyState';
 import StatusPill from '../components/StatusPill';
 import Icon from '../components/Icon';
 import { labelize } from '../lib/labels';
+import { useAuth } from '../auth';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 
@@ -13,9 +15,16 @@ export default function Guests() {
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [history, setHistory] = useState({ loading: false, stays: [], reservations: [] });
   const [form, setForm] = useState({ firstName: '', lastName: '', nationality: '', vipLevel: 'NONE' });
   const toast = useToast();
+  const confirm = useConfirm();
+  const { hasRole } = useAuth();
+  // Admin and manager only, and the server enforces the same pair on
+  // DELETE /api/guests/:id. Front desk creates and edits profiles; destroying
+  // one is not a correction, it is a decision.
+  const canDelete = hasRole('ADMIN', 'MANAGER');
 
   // What the list is showing. The suggestions ARE the list — there is no
   // floating panel. A dropdown over the table meant two sets of results on
@@ -186,6 +195,41 @@ export default function Guests() {
   // The in-house stay, if any. IN_HOUSE is the only status that means "here
   // now", so anything else counts as history below.
   const currentStay = history.stays.find((s) => s.status === 'IN_HOUSE') || null;
+
+  // Permanently remove a profile. The dialog names what survives and what does
+  // not, and points at Anonymize, because the two are easy to confuse and only
+  // one of them is reversible in any sense: a guest who asked to be forgotten
+  // but whose stays must stay on the books wants Anonymize, not this.
+  async function deleteGuest() {
+    if (!selected) return;
+    const name = selected.displayName || `${selected.firstName} ${selected.lastName}`.trim();
+    const bookings = history.reservations.length + history.stays.length;
+    const ok = await confirm({
+      title: 'Delete guest profile',
+      message: `Permanently delete ${name} (${selected.profileNumber})?`,
+      detail:
+        bookings > 0
+          ? `This profile has ${bookings} booking record${bookings === 1 ? '' : 's'}. Those stay on the ` +
+            'books and keep showing this name, but they will no longer link to a profile. If you need ' +
+            'to clear personal details while keeping the history intact, use Anonymize instead. This ' +
+            'cannot be undone.'
+          : 'Contact details, preferences, consents and any loyalty account go with it. This cannot be undone.',
+      confirmLabel: 'Delete permanently',
+      danger: true,
+    });
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/guests/${selected.id}`);
+      toast.success(`Guest ${selected.profileNumber} deleted.`);
+      clearSearch();
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const pastStays = history.stays.filter((s) => s.status !== 'IN_HOUSE');
 
   async function saveGuest() {
@@ -259,7 +303,9 @@ export default function Guests() {
               <label>VIP level</label>
               <select value={form.vipLevel} onChange={(e) => setForm({ ...form, vipLevel: e.target.value })}>
                 {['NONE', 'SILVER', 'GOLD', 'PLATINUM', 'BLACKLISTED'].map((v) => (
-                  <option key={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {labelize(v)}
+                  </option>
                 ))}
               </select>
             </div>
@@ -335,8 +381,8 @@ export default function Guests() {
             {listMode !== 'browse' && (
               <div className="guest-isolated-bar">
                 <span>
-                  {results.length === 1 ? '1 match' : `${results.length} matches`} for “{q}” — choose
-                  one, or press Enter.
+                  {results.length === 1 ? '1 match' : `${results.length} matches`} for “{q}” — choose one, or
+                  press Enter.
                 </span>
                 <button type="button" className="small secondary" onClick={clearSearch}>
                   Show all guests
@@ -396,11 +442,7 @@ export default function Guests() {
         <div className="panel">
           <div className="panel-head">
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Avatar
-                name={`${selected.firstName} ${selected.lastName}`}
-                size={48}
-                userId={selected.id}
-              />
+              <Avatar name={`${selected.firstName} ${selected.lastName}`} size={48} userId={selected.id} />
               <div>
                 <h3 style={{ margin: 0 }}>
                   {selected.firstName} {selected.lastName}
@@ -418,6 +460,21 @@ export default function Guests() {
               {/* Closing the card puts the list back. `setSelected(null)` alone
                   would leave a search bar with nothing under it at all, since
                   the results are dismissed while a guest is selected. */}
+              {canDelete && (
+                <button
+                  className="small danger"
+                  onClick={deleteGuest}
+                  disabled={deleting || Boolean(currentStay)}
+                  title={
+                    currentStay
+                      ? 'This guest is checked in — check them out first.'
+                      : 'Permanently delete this profile'
+                  }
+                >
+                  <Icon name="trash" size={13} />
+                  {deleting ? 'Deleting…' : 'Delete'}
+                </button>
+              )}
               <button className="small secondary" onClick={clearSearch}>
                 Close
               </button>
@@ -562,7 +619,9 @@ export default function Guests() {
                 onChange={(e) => setSelected({ ...selected, vipLevel: e.target.value })}
               >
                 {['NONE', 'SILVER', 'GOLD', 'PLATINUM', 'BLACKLISTED'].map((v) => (
-                  <option key={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {labelize(v)}
+                  </option>
                 ))}
               </select>
             </div>
