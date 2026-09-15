@@ -1156,10 +1156,9 @@ html[data-theme='dark'] .side-brand-mark {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Unread-message count on its rail row. `margin-left: auto` pushes it to the
-   trailing edge while the row is expanded; when the rail collapses the label
-   is hidden and the pill lands beside the icon, which is the only place left
-   for it and still reads as "this many, here". */
+/* Unread-message count on its rail row, pushed to the trailing edge while the
+   row is expanded. The collapsed rail overrides all of this — see
+   `.side-collapsed .side-badge` below. */
 .side-badge {
   margin-left: auto;
   min-width: 18px;
@@ -1258,6 +1257,28 @@ html[data-theme='dark'] .side-brand-mark {
   justify-content: center;
   gap: 0;
   padding: 0;
+}
+/* The unread pill has no row to sit at the end of once the label is gone —
+   `margin-left: auto` measures against a 52px icon row and jams the pill into
+   (and past) the rail's edge. Overlay it on the icon's corner instead, which is
+   the same treatment .notif-badge already uses on the bell. The ring follows
+   whatever the row is painted with, or it reads as a hole punched in the pill. */
+.side-collapsed .side-link {
+  position: relative;
+}
+.side-collapsed .side-badge {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  margin-left: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 9.5px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.side-collapsed .side-link.active .side-badge {
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .side-collapsed .side-group-label {
   height: 1px;
