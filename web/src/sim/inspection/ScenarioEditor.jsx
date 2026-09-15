@@ -70,11 +70,19 @@ let uid = 0;
 const nextId = () => `o${Date.now().toString(36)}${(uid += 1)}`;
 
 // ── One authored object in the scene ────────────────────────────────────────
-function EditorObject({ item, selected, onSelect, objectRef }) {
+function EditorObject({ item, selected, onSelect, onAttach }) {
   const ref = useRef();
   useEffect(() => {
-    if (selected && ref.current) objectRef.current = ref.current;
-  }, [selected, objectRef]);
+    // Mutating a ref doesn't trigger a re-render, so the gizmo below would
+    // still be reading the PREVIOUS selection's object on the very render
+    // where selection changes (a new object added, or a different object
+    // clicked) — it attached one step late, which read as the move tool
+    // being on the wrong object or "teleporting". Going through state makes
+    // the gizmo pick up the right object on the next render instead.
+    if (!selected) return;
+    onAttach(ref.current);
+    return () => onAttach(null);
+  }, [selected, onAttach]);
 
   const isPrim = !!item.prim;
   const [w, h, d] = item.size || [0.4, 0.4, 0.4];
@@ -255,7 +263,18 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   const { theme, toggle: toggleTheme } = useTheme();
 
   const orbit = useRef();
-  const selObjRef = useRef();
+  const [selObj, setSelObj] = useState(null);
+  const attachSelObj = useCallback((node) => setSelObj(node), []);
+  // A gizmo arrow is deliberately drawn away from the object it moves, so a
+  // drag routinely ends with the mouse over a totally different mesh (or
+  // empty floor) rather than the object just dropped. The browser's native
+  // `click` fires there right after mouseup, which — left unguarded —
+  // reselects whatever's underneath (or clears selection via
+  // onPointerMissed), which is what reads as the move tool "teleporting".
+  // Set true for the whole drag gesture and cleared on a macrotask (after
+  // that trailing click has already been ignored), so onSelect/
+  // onPointerMissed can tell a drag-release click apart from a real one.
+  const draggingRef = useRef(false);
 
   const base = useMemo(() => getRoomPlan(tier), [tier]);
 
@@ -531,7 +550,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
 
   // Read the gizmo's transform back onto the selected object.
   function commitGizmo() {
-    const o = selObjRef.current;
+    const o = selObj;
     if (!o || !sel) return;
     const isPrim = !!sel.prim;
     const h = (sel.size || [0, 0, 0])[1];
@@ -1384,23 +1403,35 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             camera={{ position: [7, 6, 7], fov: 50 }}
             gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
             onCreated={({ gl }) => gl.setClearColor(stageColor())}
-            onPointerMissed={() => setSelId(null)}
+            onPointerMissed={() => {
+              if (draggingRef.current) return;
+              setSelId(null);
+            }}
           >
-            <Bounds fit clip observe margin={1.1}>
+            {/* No `observe`: that made Bounds continuously recompute the scene's
+                bounding box and replay its fit/zoom animation on every geometry
+                change (adding, dragging, or resizing an object) — fighting the
+                user's own OrbitControls zoom and reading as a random zoom-out
+                while scrolling. Fit once on mount instead, like RoomLayoutEditor
+                already does. */}
+            <Bounds fit clip margin={1.1}>
               <RoomShell layout={{ ...base, furniture: [] }} />
               {objects.map((o) => (
                 <EditorObject
                   key={o.id}
                   item={o}
                   selected={o.id === selId}
-                  onSelect={(id) => setSelId(id)}
-                  objectRef={selObjRef}
+                  onSelect={(id) => {
+                    if (draggingRef.current) return;
+                    setSelId(id);
+                  }}
+                  onAttach={attachSelObj}
                 />
               ))}
             </Bounds>
-            {sel && selObjRef.current && (
+            {sel && selObj && (
               <TransformControls
-                object={selObjRef.current}
+                object={selObj}
                 mode={mode}
                 translationSnap={0.1}
                 rotationSnap={Math.PI / 12}
@@ -1424,12 +1455,16 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 // always honoured `y` for models; only the authoring was missing.
                 showY={mode === 'rotate' || mode === 'translate'}
                 onMouseDown={() => {
+                  draggingRef.current = true;
                   snapshot();
                   if (orbit.current) orbit.current.enabled = false;
                 }}
                 onMouseUp={() => {
                   if (orbit.current) orbit.current.enabled = true;
                   commitGizmo();
+                  setTimeout(() => {
+                    draggingRef.current = false;
+                  }, 0);
                 }}
               />
             )}

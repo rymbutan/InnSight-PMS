@@ -6780,7 +6780,18 @@ html[data-theme='dark'] .hk-tooltip {
      Three columns puts the middle group at the real centre regardless of how
      wide its neighbours are. */
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* `minmax(0, 1fr)`, not bare `1fr`: a bare `1fr` track's minimum size is
+     `auto` (its content's min-content width), so the track refuses to shrink
+     below that. With the fault/decoy count text in `.tool-group--end`
+     varying in length as the scenario is authored, the strip's total
+     min-content width could cross the viewport width at almost any window
+     size — and once it did, these two outer columns pushed the grid wider
+     than the container instead of shrinking, shoving `.tool-group--end`
+     (the save chip, fault/decoy count, theme toggle) past the visible edge.
+     That's the "topbar getting cut randomly" bug. `minmax(0, 1fr)` lets the
+     columns actually shrink to fit; the groups themselves scroll internally
+     (below) instead of forcing an overflow. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 2px;
   flex-wrap: nowrap;
   height: 44px;
@@ -6804,6 +6815,17 @@ html[data-theme='dark'] .hk-tooltip {
   align-items: center;
   gap: 2px;
   flex: none;
+  /* Grid items default to `min-width: auto`, which — like the bare `1fr`
+     above — refuses to shrink below the row's own content width. Without
+     this, the outer columns being allowed to shrink (above) didn't help:
+     the flex row inside just kept its min-content width and overflowed its
+     column anyway. Scroll internally instead of overflowing. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tool-group::-webkit-scrollbar {
+  display: none;
 }
 .tool-group--mid {
   justify-self: center;
