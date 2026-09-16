@@ -1,14 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  HEAT_LEGEND,
-  heatFill,
-  heatInk,
-  heatTitle,
-  occupancyOf,
-  outlookOccupancy,
-} from './outlookHeat.js';
+import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf, outlookOccupancy } from './outlookHeat.js';
 
 test('occupancy normalises across room types of different sizes', () => {
   // The whole reason for colouring by occupancy rather than the raw count: 3 of
@@ -174,14 +167,17 @@ test('no room types, no days, or zero inventory yields an empty series', () => {
   // a loading dashboard from drawing a chart of nothing.
   const days = daysFrom('2026-09-16', 14);
   assert.deepEqual(outlookOccupancy({ types: [], days, cells: {} }, key), { pct: 0, series: [] });
-  assert.deepEqual(outlookOccupancy({ types: [{ code: 'X', totalInventory: 5 }], days: [], cells: {} }, key), {
+  assert.deepEqual(
+    outlookOccupancy({ types: [{ code: 'X', totalInventory: 5 }], days: [], cells: {} }, key),
+    {
+      pct: 0,
+      series: [],
+    }
+  );
+  assert.deepEqual(outlookOccupancy({ types: [{ code: 'X', totalInventory: 0 }], days, cells: {} }, key), {
     pct: 0,
     series: [],
   });
-  assert.deepEqual(
-    outlookOccupancy({ types: [{ code: 'X', totalInventory: 0 }], days, cells: {} }, key),
-    { pct: 0, series: [] }
-  );
   assert.deepEqual(outlookOccupancy(undefined, key), { pct: 0, series: [] });
 });
 

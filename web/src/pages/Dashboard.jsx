@@ -9,14 +9,7 @@ import { localDay, nightsBetween } from '../lib/date';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import StatusPill from '../components/StatusPill';
 import { SparkLine, BarChart } from '../components/Chart';
-import {
-  HEAT_LEGEND,
-  heatFill,
-  heatInk,
-  heatTitle,
-  occupancyOf,
-  outlookOccupancy,
-} from '../lib/outlookHeat';
+import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf, outlookOccupancy } from '../lib/outlookHeat';
 import Icon from '../components/Icon';
 import HousekeepingDashboard from './HousekeepingDashboard';
 

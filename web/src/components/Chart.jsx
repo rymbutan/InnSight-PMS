@@ -63,8 +63,7 @@ export function SparkLine({
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {showDots &&
-        data.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r="2" fill={color} />)}
+      {showDots && data.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r="2" fill={color} />)}
     </svg>
   );
 }
