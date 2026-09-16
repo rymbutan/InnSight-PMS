@@ -1,6 +1,22 @@
 // Tiny dependency-free SVG charts. Keep them readable at small sizes.
 
-export function SparkLine({ data, width = 260, height = 60, color = 'var(--accent)', label }) {
+export function SparkLine({
+  data,
+  width = 260,
+  height = 60,
+  color = 'var(--accent)',
+  label,
+  /** Pin the vertical scale instead of letting the data set it. A percentage
+   *  series should be read against 0–100: left to auto-scale, a fortnight
+   *  wobbling between 2% and 4% fills the full height and reads as a crisis.
+   *  Auto-scaling is still the default, because for a currency series there is
+   *  no natural ceiling to pin it to. */
+  min: domainMin,
+  max: domainMax,
+  /** Draw the area under the line. Cheap way to make a 36px-tall spark read as
+   *  a trend rather than as a squiggle. */
+  fill = false,
+}) {
   if (!data || data.length < 2) {
     return (
       <div className="muted" style={{ fontSize: 12 }}>
@@ -8,15 +24,37 @@ export function SparkLine({ data, width = 260, height = 60, color = 'var(--accen
       </div>
     );
   }
-  const max = Math.max(...data);
-  const min = Math.min(...data);
+  // The stroke is 2px wide and is CENTRED on the path, so a point sitting
+  // exactly on an edge of the viewBox loses its outer half to clipping. Every
+  // extreme of the series — the peaks and troughs, the parts being looked at —
+  // was shaved flat on the top and bottom, and the first and last points were
+  // sliced vertically down the middle. Inset by half the stroke plus a hair.
+  const PAD = 2;
+  const max = domainMax ?? Math.max(...data);
+  const min = domainMin ?? Math.min(...data);
   const range = max - min || 1;
-  const step = width / (data.length - 1);
-  const points = data
-    .map((v, i) => `${(i * step).toFixed(1)},${(height - ((v - min) / range) * (height - 8) - 4).toFixed(1)}`)
-    .join(' ');
+  const plotW = Math.max(1, width - PAD * 2);
+  const plotH = Math.max(1, height - PAD * 2);
+  const step = plotW / (data.length - 1);
+  const x = (i) => PAD + i * step;
+  const y = (v) => PAD + plotH - ((Math.min(Math.max(v, min), max) - min) / range) * plotH;
+  const points = data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  // A dot on every reading is information while the readings are far enough
+  // apart to tell apart. Past that the dots merge into a furry band along the
+  // line and the chart looks broken — so they are drawn only when each one has
+  // room to be its own mark.
+  const showDots = step >= 8;
   return (
     <svg width={width} height={height} style={{ display: 'block' }}>
+      {fill && (
+        <polygon
+          points={`${x(0).toFixed(1)},${(height - PAD).toFixed(1)} ${points} ${x(data.length - 1).toFixed(1)},${(
+            height - PAD
+          ).toFixed(1)}`}
+          fill={color}
+          opacity="0.13"
+        />
+      )}
       <polyline
         points={points}
         fill="none"
@@ -25,15 +63,8 @@ export function SparkLine({ data, width = 260, height = 60, color = 'var(--accen
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {data.map((v, i) => (
-        <circle
-          key={i}
-          cx={i * step}
-          cy={height - ((v - min) / range) * (height - 8) - 4}
-          r="2"
-          fill={color}
-        />
-      ))}
+      {showDots &&
+        data.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r="2" fill={color} />)}
     </svg>
   );
 }

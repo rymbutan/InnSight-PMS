@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf } from './outlookHeat.js';
+import {
+  HEAT_LEGEND,
+  heatFill,
+  heatInk,
+  heatTitle,
+  occupancyOf,
+  outlookOccupancy,
+} from './outlookHeat.js';
 
 test('occupancy normalises across room types of different sizes', () => {
   // The whole reason for colouring by occupancy rather than the raw count: 3 of
@@ -87,4 +94,103 @@ test('bad numbers do not produce NaN on screen', () => {
   assert.equal(occupancyOf(undefined, undefined), 0);
   assert.equal(heatFill(NaN), 'var(--heat-0)');
   assert.doesNotMatch(heatTitle('X', new Date(), undefined, undefined), /NaN/);
+});
+
+// ── The 14 Day Outlook panel's headline and graph ───────────────────────────
+// The panel showed three inconsistent things at once: today's in-house
+// occupancy under a "14-DAY OCCUPANCY" label, a graph of up to 400 days of
+// night-audit history, and a fourteen-day availability grid. These pin the
+// headline and the graph to the grid.
+
+// `localDay` equivalent for the fixtures: a stable YYYY-MM-DD key.
+const key = (d) => d.toISOString().slice(0, 10);
+const daysFrom = (iso, n) =>
+  Array.from({ length: n }, (_, i) => new Date(`${iso}T00:00:00.000Z`).getTime() + i * 86400000).map(
+    (t) => new Date(t)
+  );
+
+test('the series has one reading per day in the grid, not one per audited day', () => {
+  const days = daysFrom('2026-09-16', 14);
+  const types = [{ code: 'STD', totalInventory: 32 }];
+  const cells = {};
+  for (const d of days) cells[`STD|${key(d)}`] = 32;
+  const { series } = outlookOccupancy({ types, days, cells }, key);
+  // Fourteen columns in, fourteen points out. This is the whole fix for the
+  // sawtooth: the chart can no longer be fed hundreds of readings.
+  assert.equal(series.length, 14);
+});
+
+test('a fully available fortnight is 0% and a sold-out one is 100%', () => {
+  const days = daysFrom('2026-09-16', 14);
+  const types = [{ code: 'STD', totalInventory: 32 }];
+  const empty = {};
+  const full = {};
+  for (const d of days) {
+    empty[`STD|${key(d)}`] = 32;
+    full[`STD|${key(d)}`] = 0;
+  }
+  assert.equal(outlookOccupancy({ types, days, cells: empty }, key).pct, 0);
+  assert.equal(outlookOccupancy({ types, days, cells: full }, key).pct, 100);
+});
+
+test('occupancy is weighted by inventory, not averaged across room types', () => {
+  // One sold-out suite and a wide-open 30-room standard is NOT 50% occupancy.
+  // Averaging the two types' rates would say it is; room-nights say 3%.
+  const days = daysFrom('2026-09-16', 1);
+  const ds = key(days[0]);
+  const types = [
+    { code: 'STD', totalInventory: 30 },
+    { code: 'SUITE', totalInventory: 1 },
+  ];
+  const cells = { [`STD|${ds}`]: 30, [`SUITE|${ds}`]: 0 };
+  const { pct } = outlookOccupancy({ types, days, cells }, key);
+  assert.equal(pct.toFixed(2), ((1 / 31) * 100).toFixed(2));
+});
+
+test('the headline is the mean of the daily rates, not their sum', () => {
+  // Seven sold-out days and seven empty ones is a half-full fortnight. Summing
+  // the dailies would report 700%.
+  const days = daysFrom('2026-09-16', 14);
+  const types = [{ code: 'STD', totalInventory: 10 }];
+  const cells = {};
+  days.forEach((d, i) => {
+    cells[`STD|${key(d)}`] = i < 7 ? 0 : 10;
+  });
+  assert.equal(outlookOccupancy({ types, days, cells }, key).pct, 50);
+});
+
+test('a missing cell counts as available, never as sold out', () => {
+  // An incomplete payload must not be reported as a full house — overstating
+  // occupancy is the one error on this panel nobody would think to question.
+  const days = daysFrom('2026-09-16', 2);
+  const types = [{ code: 'STD', totalInventory: 20 }];
+  const { pct, series } = outlookOccupancy({ types, days, cells: {} }, key);
+  assert.equal(pct, 0);
+  assert.deepEqual(series, [0, 0]);
+});
+
+test('no room types, no days, or zero inventory yields an empty series', () => {
+  // The panel renders the spark only for a series of 2+, so this is what keeps
+  // a loading dashboard from drawing a chart of nothing.
+  const days = daysFrom('2026-09-16', 14);
+  assert.deepEqual(outlookOccupancy({ types: [], days, cells: {} }, key), { pct: 0, series: [] });
+  assert.deepEqual(outlookOccupancy({ types: [{ code: 'X', totalInventory: 5 }], days: [], cells: {} }, key), {
+    pct: 0,
+    series: [],
+  });
+  assert.deepEqual(
+    outlookOccupancy({ types: [{ code: 'X', totalInventory: 0 }], days, cells: {} }, key),
+    { pct: 0, series: [] }
+  );
+  assert.deepEqual(outlookOccupancy(undefined, key), { pct: 0, series: [] });
+});
+
+test('oversold and negative cells are clamped rather than skewing the rate', () => {
+  // availability > inventory would push occupancy negative; below zero it would
+  // push past 100. Both are clamped to the sellable range.
+  const days = daysFrom('2026-09-16', 1);
+  const ds = key(days[0]);
+  const types = [{ code: 'STD', totalInventory: 10 }];
+  assert.equal(outlookOccupancy({ types, days, cells: { [`STD|${ds}`]: 99 } }, key).pct, 0);
+  assert.equal(outlookOccupancy({ types, days, cells: { [`STD|${ds}`]: -5 } }, key).pct, 100);
 });

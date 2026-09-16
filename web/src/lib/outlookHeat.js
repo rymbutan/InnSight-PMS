@@ -76,3 +76,47 @@ export function heatTitle(typeName, date, available, total) {
   const when = date instanceof Date ? date.toLocaleDateString() : String(date);
   return `${typeName} · ${when}\n${available} of ${total} left · ${sold} sold (${pct}% full)`;
 }
+
+/**
+ * The panel's headline occupancy and its per-day series, over the SAME cells
+ * the grid renders.
+ *
+ * It lives here rather than in Dashboard.jsx because it is arithmetic, and the
+ * arithmetic is what was wrong: the panel used to show today's in-house count
+ * under a "14-DAY OCCUPANCY" label and graph up to 400 days of night-audit
+ * history beside a fourteen-day table. Three numbers, three different
+ * questions. One function, next to `occupancyOf` whose convention it follows,
+ * so the headline and the graph are derived from the grid and tested with it.
+ *
+ * @param {{types: Array, days: Date[], cells: Object}} outlook
+ * @param {(d: Date) => string} dayKey  how a Date becomes a `cells` key
+ * @returns {{pct: number, series: number[]}} percentages, 0..100
+ */
+export function outlookOccupancy(outlook, dayKey) {
+  const types = outlook?.types || [];
+  const days = outlook?.days || [];
+  const cells = outlook?.cells || {};
+  const capacity = types.reduce((s, t) => s + (Number(t.totalInventory) || 0), 0);
+  if (capacity <= 0 || days.length === 0) return { pct: 0, series: [] };
+
+  const series = days.map((d) => {
+    const ds = dayKey(d);
+    // Unsold rooms across every type on this date. A MISSING cell counts as
+    // fully available, not as zero: treating "the outlook has no figure for
+    // this type/day" as nothing-left-to-sell would invent a full house out of
+    // an incomplete payload, and a dashboard that overstates occupancy is the
+    // one error here nobody would question.
+    const avail = types.reduce((s, t) => {
+      const total = Number(t.totalInventory) || 0;
+      const c = cells[`${t.code}|${ds}`];
+      const a = c === undefined || c === null ? total : Number(c) || 0;
+      return s + Math.max(0, Math.min(total, a));
+    }, 0);
+    return ((capacity - avail) / capacity) * 100;
+  });
+
+  // Occupancy over a period is room-nights sold / room-nights available. With
+  // capacity constant across the fortnight that reduces to the mean of the
+  // daily rates — which is what this is, and why it is not a sum.
+  return { pct: series.reduce((a, b) => a + b, 0) / series.length, series };
+}

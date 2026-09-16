@@ -9,7 +9,14 @@ import { localDay, nightsBetween } from '../lib/date';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import StatusPill from '../components/StatusPill';
 import { SparkLine, BarChart } from '../components/Chart';
-import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf } from '../lib/outlookHeat';
+import {
+  HEAT_LEGEND,
+  heatFill,
+  heatInk,
+  heatTitle,
+  occupancyOf,
+  outlookOccupancy,
+} from '../lib/outlookHeat';
 import Icon from '../components/Icon';
 import HousekeepingDashboard from './HousekeepingDashboard';
 
@@ -329,7 +336,24 @@ function FrontOfficeDashboard() {
     };
   }, [actTab, data.reservations, todayBooked, roomNights, outlook]);
 
-  const occupancyTrend = data.history.map((d) => d.occupancyPct || 0);
+  // ── The 14 Day Outlook panel's own numbers ────────────────────────────────
+  // This panel had borrowed both of them from elsewhere, and neither was the
+  // fortnight it is titled after:
+  //
+  //   • The headline read `occPct`, which is TODAY's in-house count over total
+  //     rooms — the same figure as the "Booked" KPI tile at the top of the page.
+  //     Labelled "14-DAY OCCUPANCY" beside a fourteen-column forecast, it was
+  //     simply a different measurement wearing the panel's name.
+  //   • The spark plotted every closed business day the
+  //     night audit has ever produced — /api/audit/days takes no range here and
+  //     caps at 400 rows. So a forward-looking panel was drawing up to thirteen
+  //     months of HISTORY, and once the demo history was seeded those hundreds
+  //     of readings crushed into 200px became the sawtooth on screen.
+  //
+  // Both now come off `outlook`, which is the fortnight the table below renders:
+  // the same cells, the same fourteen days, so the headline, the graph and the
+  // grid can no longer tell three different stories.
+  const outlookOcc = useMemo(() => outlookOccupancy(outlook, localDay), [outlook]);
 
   return (
     <div>
@@ -639,15 +663,35 @@ function FrontOfficeDashboard() {
           <h3 style={{ margin: 0 }}>14 Day Outlook</h3>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
             <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
-              {occPct.toFixed(2)}%
+              {outlookOcc.pct.toFixed(2)}%
             </span>
             <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
               14-Day Occupancy
             </span>
           </div>
-          {occupancyTrend.length >= 2 && (
-            <div style={{ marginLeft: 'auto' }}>
-              <SparkLine data={occupancyTrend} color="var(--accent)" width={200} height={36} />
+          {outlookOcc.series.length >= 2 && (
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="muted" style={{ fontSize: 10 }}>
+                TODAY
+              </span>
+              {/* Fourteen readings across 200px is ~15px a day: wide enough for
+                  the per-day dots to stay separate marks. Pinned to 0–100
+                  because this is a percentage — auto-scaled, a fortnight that
+                  never leaves single digits would be drawn as a full-height
+                  mountain range, which is how the old chart managed to look
+                  alarming at 3% occupancy. */}
+              <SparkLine
+                data={outlookOcc.series}
+                color="var(--accent)"
+                width={200}
+                height={36}
+                min={0}
+                max={100}
+                fill
+              />
+              <span className="muted" style={{ fontSize: 10 }}>
+                +14d
+              </span>
             </div>
           )}
         </div>
