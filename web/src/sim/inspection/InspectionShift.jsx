@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
 
 import { RoomShell, Player } from '../RoomFreeRoam';
+import TouchControls, { makeTouchInput } from '../../components/TouchControls';
+import { useCoarsePointer } from '../../lib/touchInput';
 import { getRoomPlan } from '../roomLayouts';
 import { stageColor } from '../stageColor';
 import Assessment from '../Assessment';
@@ -254,6 +256,11 @@ export default function InspectionShift({
 
   const interactRef = useRef(null);
   const viewRef = useRef(null);
+  // Touch controls replace the mouse-look + WASD path on a coarse pointer. The
+  // query is live, so docking a tablet to a keyboard swaps the controls without
+  // a reload — see useCoarsePointer.
+  const touch = useCoarsePointer();
+  const touchInput = useRef(makeTouchInput());
   // The <group> holding every anchor hitbox, so the crosshair raycast has a
   // single subtree to test instead of the whole room.
   const anchorsGroup = useRef(null);
@@ -268,13 +275,31 @@ export default function InspectionShift({
   // pointer lock there is no cursor for r3f to hit-test with. It is also gated on
   // `locked`: the very first click is what ENTERS look mode (see Player), and
   // that one must not also flag whatever happened to be under the crosshair.
+  // The aim, mirrored into a ref. `act` has to read the CURRENT crosshair
+  // target: TouchControls holds one callback for the life of a drag while the
+  // crosshair moves under it the whole time, so a callback that closed over
+  // `hover` would flag whatever was aimed at when the finger went down.
+  //
+  // A ref rather than reading it inside a `setHover` updater — an updater must
+  // be pure, and this app runs under StrictMode, which calls updaters twice in
+  // development. Opening the flag menu from inside one would fire it twice.
+  const hoverRef = useRef(null);
+  hoverRef.current = hover;
+
+  const act = useCallback(() => {
+    if (paused) return;
+    const h = hoverRef.current;
+    if (h && !resolved[h]) setOpenAnchor(h);
+  }, [paused, resolved]);
+
   useEffect(() => {
     if (paused) return undefined;
-    const act = () => {
-      if (hover && !resolved[hover]) setOpenAnchor(hover);
-    };
     const onDown = (e) => {
       if (e.button !== 0) return;
+      // Gated on the lock because the FIRST click is what enters look mode, and
+      // that one must not also flag whatever sat under the crosshair. On touch
+      // there is no lock and no such first click — the tap comes through
+      // TouchControls instead, which is why this handler is mouse-only.
       if (document.pointerLockElement) act();
     };
     const onKey = (e) => {
@@ -287,7 +312,7 @@ export default function InspectionShift({
       document.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
     };
-  }, [paused, hover, resolved]);
+  }, [paused, act]);
 
   useEffect(() => {
     if (paused) return undefined;
@@ -407,6 +432,8 @@ export default function InspectionShift({
               viewRef={viewRef}
               layout={playerLayout}
               onLockedChange={setLocked}
+              touch={touch}
+              touchRef={touchInput}
             />
           </Canvas>
           <div className="fr-crosshair" />
@@ -419,14 +446,32 @@ export default function InspectionShift({
 
           {/* Until the pointer is locked, nothing about the mouse works, so say
               so plainly in the middle of the view rather than letting someone
-              waggle a dead mouse at the room. */}
-          {!locked && !openAnchor && phase === 'inspect' && !clipboard && (
+              waggle a dead mouse at the room. Never shown on touch: there is no
+              lock to enter, and telling a tablet user to click would be a lie
+              about a control they do not have. */}
+          {!touch && !locked && !openAnchor && phase === 'inspect' && !clipboard && (
             <div className="fr-prompt fr-prompt-enter">Click to look around</div>
           )}
 
+          {touch && (
+            <TouchControls
+              inputRef={touchInput}
+              onInteract={act}
+              disabled={paused}
+              actionLabel="Inspect"
+              actionEnabled={!!nearby && !resolved[nearby?.id]}
+            />
+          )}
+
           <div className="fr-hint">
-            WASD / arrows to move · mouse to look · aim the crosshair and click or press E ·{' '}
-            {locked ? 'Esc to release the pointer' : 'click the room to start'}
+            {touch ? (
+              <>joystick to walk · drag to look · aim the crosshair, then Inspect</>
+            ) : (
+              <>
+                WASD / arrows to move · mouse to look · aim the crosshair and click or press E ·{' '}
+                {locked ? 'Esc to release the pointer' : 'click the room to start'}
+              </>
+            )}
           </div>
         </div>
 

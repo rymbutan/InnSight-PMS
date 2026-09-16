@@ -10030,3 +10030,318 @@ html[data-theme='dark'] .chat-launcher-pop {
     flex-shrink: 0;
   }
 }
+
+/* ==========================================================================
+   TABLET + TOUCH
+   ==========================================================================
+   Two separate questions, deliberately answered by two separate queries.
+
+   WIDTH says how much room there is, so it drives LAYOUT. POINTER says how
+   precisely the user can aim, so it drives TARGET SIZE. They are not the same
+   question and a device can answer them independently: a 1024px iPad in
+   landscape is as wide as a laptop and still needs 44px targets, while a
+   1280px touchscreen laptop with a trackpad needs neither.
+
+   Sniffing the user agent would get both wrong, and iPadOS reports itself as a
+   Mac, so it would get iPads wrong in particular. See wantsTouchControls() in
+   lib/touchInput.js for the same reasoning on the JS side.
+   ========================================================================== */
+
+/* ── The awkward middle: iPad landscape ──────────────────────────────────────
+   The rail switches to a drawer below 1024px, so a 768px iPad in portrait was
+   already handled. Landscape is exactly 1024 - one pixel outside that - so it
+   got the full 264px rail AND the page, leaving about 740px of content on a
+   screen with no mouse. Between 1024 and 1180 the rail starts collapsed to its
+   icon strip instead: everything stays reachable, the content gets its width
+   back, and the toggle still expands it for anyone who wants labels. */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) {
+    width: 76px;
+  }
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link-label,
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-brand,
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-text,
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-out {
+    display: none;
+  }
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link {
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+  }
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-nav {
+    padding-left: 8px;
+    padding-right: 8px;
+    scrollbar-gutter: stable both-edges;
+  }
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-head,
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user {
+    justify-content: center;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-group-label {
+    height: 1px;
+    margin: 0 7px 8px;
+    padding: 0;
+    background: var(--border);
+    color: transparent;
+    overflow: hidden;
+  }
+}
+
+/* ── Tablet layout, portrait and landscape ────────────────────────────────── */
+@media (min-width: 700px) and (max-width: 1180px) {
+  /* Two-up KPI tiles rather than a five-across squeeze. */
+  .kpi-row {
+    grid-auto-columns: minmax(180px, 1fr);
+  }
+  /* The messages page's fixed 320px contact column is a third of an iPad in
+     portrait. Narrower, and the thread keeps the rest. */
+  .msg-wrap {
+    grid-template-columns: minmax(0, 252px) minmax(0, 1fr);
+  }
+  /* Chat windows sit two-up at most on a tablet; three plus the launcher
+     reaches past the screen. */
+  .chat-win {
+    width: 300px;
+  }
+}
+
+/* iPad portrait and smaller tablets: the messages list and thread stop being
+   side-by-side well before the phone breakpoint, because 252px of contacts plus
+   a readable thread does not fit in 768px once the rail is there. */
+@media (max-width: 860px) {
+  .msg-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .msg-contacts {
+    max-height: 264px;
+  }
+  .msg-thread {
+    height: 62vh;
+    min-height: 420px;
+  }
+}
+
+/* ── Coarse pointer: target sizes ─────────────────────────────────────────────
+   A 26px icon button is a comfortable mouse target and a poor thumb one. The
+   WCAG floor is 24px and the practical floor on a touchscreen is about 44px,
+   which is what Apple and Google both publish. These are the controls small
+   enough to matter, raised only where the pointer is actually coarse so the
+   desktop UI keeps its density. */
+@media (pointer: coarse) {
+  .chat-icon-btn,
+  .side-collapse,
+  .msg-search-clear,
+  .notif-popup-x {
+    width: 44px;
+    height: 44px;
+  }
+  /* Three 44px buttons plus the avatar is most of a 300px chat header, so the
+     gap between them goes to zero — the targets are already large enough to
+     separate without it, and the name needs the width more. */
+  .chat-win-tools {
+    gap: 0;
+  }
+  .msg-send,
+  .chat-send {
+    width: 44px;
+    height: 44px;
+  }
+  .side-link {
+    height: 46px;
+  }
+  .msg-contact,
+  .chat-launcher-row {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  /* Rows people tap to open a record. */
+  .hk-action,
+  .tool-btn {
+    min-height: 44px;
+  }
+  /* Hover-only reveals have no equivalent on touch, so the thing they reveal is
+     simply always there. */
+  .hk-room {
+    cursor: default;
+  }
+}
+
+/* ==========================================================================
+   PAN / ZOOM VIEWPORT  (components/PanZoom.jsx)
+   ==========================================================================
+   Only mounted on a coarse pointer; the desktop map keeps its native scroll. */
+.pz-host {
+  position: relative;
+  overflow: hidden;
+  /* Tall enough to be worth panning around in, and capped so the map never
+     pushes the room detail panel off the bottom of a tablet. */
+  height: clamp(320px, 52vh, 560px);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.pz-surface {
+  position: absolute;
+  inset: 0;
+  /* LOAD-BEARING. Without it the browser claims a one-finger drag for page
+     scrolling and pull-to-refresh, pointermove stops arriving mid-gesture, and
+     the map moves a few pixels and then sticks. */
+  touch-action: none;
+}
+.pz-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.pz-tools {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pz-tools button {
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+.pz-tools button:active {
+  background: var(--row-hover);
+}
+
+/* ==========================================================================
+   TOUCH CONTROLS for the first-person room  (components/TouchControls.jsx)
+   ==========================================================================
+   The room walk was WASD + Pointer Lock, neither of which exists on a tablet -
+   the room rendered and could not be moved through. These are the replacement.
+   Absolutely positioned over the canvas, inside `.fr-stage`. */
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  /* The layer is a frame, not a surface: only the look plane and the controls
+     take the pointer, so nothing here blocks the prompts and hints drawn under
+     it. */
+  pointer-events: none;
+}
+
+/* The look plane sits UNDER the controls and over the canvas: a finger anywhere
+   on the room turns the camera. */
+.touch-look {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none; /* same reason as .pz-surface - without it the drag dies */
+}
+
+.touch-stick {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left, 0px));
+  bottom: max(18px, env(safe-area-inset-bottom, 0px));
+  width: 104px; /* 2x STICK_RADIUS in TouchControls.jsx - keep them in step */
+  height: 104px;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.touch-stick-ring {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  background: rgba(15, 23, 42, 0.32);
+  color: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(2px);
+}
+.touch-stick-knob {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  transition: transform 0.08s ease-out;
+}
+/* While a thumb is on it the knob follows the finger with no easing - an 80ms
+   transition on a live drag reads as lag, not smoothing. */
+.touch-stick-knob.is-active {
+  transition: none;
+  background: #fff;
+}
+
+.touch-action {
+  position: absolute;
+  right: max(18px, env(safe-area-inset-right, 0px));
+  bottom: max(26px, env(safe-area-inset-bottom, 0px));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  min-height: 0;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--pill-radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 14px;
+  font-weight: 650;
+  pointer-events: auto;
+  touch-action: manipulation;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+.touch-action:disabled {
+  background: rgba(15, 23, 42, 0.4);
+  color: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+}
+/* Paused (a dialog is open over the room): the controls stay in place so the
+   layout does not jump, but nothing on them responds. */
+.touch-controls[data-disabled] .touch-look,
+.touch-controls[data-disabled] .touch-stick {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+/* The bottom of the stage belongs to the controls now, so the hint moves up out
+   of their way and is allowed to wrap. As a centred `nowrap` pill it ran under
+   the joystick and off both edges of a phone-width stage. */
+@media (pointer: coarse) {
+  .fr-hint {
+    bottom: 136px;
+    max-width: min(92%, 420px);
+    white-space: normal;
+    text-align: center;
+    line-height: 1.35;
+  }
+}
+
+/* The 3D stages are gesture surfaces, not scrollable ones. Without this an
+   orbit drag in either editor scrolls the page behind the canvas instead of
+   turning the camera. */
+.fr-stage,
+.fr-stage canvas,
+.ed-viewport canvas,
+.se-stage canvas {
+  touch-action: none;
+}

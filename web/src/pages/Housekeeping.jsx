@@ -3,6 +3,8 @@ import api from '../api';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import Icon from '../components/Icon';
+import PanZoom from '../components/PanZoom';
+import { useCoarsePointer } from '../lib/touchInput';
 import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso } from '../lib/money';
 import { statusMeta, STATUS_ORDER, ON_FILL_INK, ON_FILL_INK_SOFT } from '../sim/statusMeta';
@@ -15,7 +17,7 @@ import { computeLayout, MARGIN_X, CORRIDOR_H } from '../sim/hotelMap';
 const InspectionShift = lazy(() => import('../sim/inspection/InspectionShift'));
 
 // ── Single room on the SVG map ──────────────────────────────────────────────
-function RoomShape({ slot, selected, flashing, onSelect, onHover }) {
+function RoomShape({ slot, selected, flashing, onSelect, onHover, hoverable = true }) {
   const { room, x, y, w, h, row } = slot;
   const meta = statusMeta(room.status);
   // Door sits on the corridor side: bottom edge for the top row, top edge
@@ -25,9 +27,18 @@ function RoomShape({ slot, selected, flashing, onSelect, onHover }) {
     <g
       className={`hk-room${flashing ? ' hk-room-flash' : ''}`}
       onClick={() => onSelect(room)}
-      onMouseEnter={(e) => onHover(room, e)}
-      onMouseMove={(e) => onHover(room, e)}
-      onMouseLeave={() => onHover(null)}
+      {...(hoverable
+        ? {
+            onMouseEnter: (e) => onHover(room, e),
+            onMouseMove: (e) => onHover(room, e),
+            onMouseLeave: () => onHover(null),
+          }
+        : // No hover handlers at all on touch. A tap fires a synthetic
+          // mouseenter with no matching mouseleave, so the tooltip appeared
+          // under the finger and then stayed there over the map. Tapping
+          // already selects the room, and the detail panel below says
+          // everything the tooltip did and more.
+          {})}
       style={{ cursor: 'pointer' }}
     >
       <rect
@@ -103,8 +114,8 @@ function SignOffLockNotice() {
     <p className="hk-game-lock">
       <Icon name="ban" size={14} strokeWidth={1.9} />
       <span>
-        This room is cleaned and waiting on a <strong>supervisor</strong> to inspect it. Housekeeping
-        does not sign off its own turnover.
+        This room is cleaned and waiting on a <strong>supervisor</strong> to inspect it. Housekeeping does not
+        sign off its own turnover.
       </span>
     </p>
   );
@@ -123,8 +134,8 @@ function panelActions(room, act, launchGame, canClean, canSignOff) {
       return (
         <>
           <p className="muted">
-            The room is only marked clean once it is worked against the booking and every fault is
-            correctly fixed — there is no manual shortcut.
+            The room is only marked clean once it is worked against the booking and every fault is correctly
+            fixed — there is no manual shortcut.
           </p>
           {canClean ? (
             <button className="btn-primary hk-action" onClick={() => launchGame('INSPECTION', room)}>
@@ -440,6 +451,9 @@ export default function Housekeeping() {
     });
     return c;
   }, [rooms]);
+  // Live, so docking a tablet to a keyboard swaps the map's controls back to
+  // the desktop ones without a reload.
+  const touch = useCoarsePointer();
   const occupancy = rooms.length ? Math.round(((counts.OCCUPIED || 0) / rooms.length) * 100) : 0;
 
   return (
@@ -457,10 +471,21 @@ export default function Housekeeping() {
 
       <div className="hk-layout">
         <div className="panel hk-map-panel" data-tour="tour-process-housekeeping">
-          {/* The drawing keeps its rooms at a legible width and grows past the
-              panel when the property is large, so this scrolls rather than
-              squeezing forty-five rooms into one screen-width. */}
-          <div className="hk-map-scroll">
+          {/* On a mouse: the drawing keeps its rooms at a legible width and
+              grows past the panel when the property is large, so this scrolls
+              rather than squeezing forty-five rooms into one screen-width.
+
+              On touch: that scroll is close to unusable — a one-finger drag
+              over an SVG gets claimed by the page, and there is no way to zoom
+              the part that matters. <PanZoom> takes over on a coarse pointer
+              only, and leaves the desktop container exactly as it was. */}
+          <PanZoom
+            enabled={touch}
+            className="hk-map-scroll"
+            contentW={mapW}
+            contentH={mapH || 420}
+            label="Hotel floor map — drag to pan, pinch to zoom"
+          >
             <svg
               viewBox={`0 0 ${mapW} ${mapH || 420}`}
               width={mapW}
@@ -506,12 +531,13 @@ export default function Housekeeping() {
                   flashing={flash.has(slot.room.id)}
                   onSelect={(room) => setSelectedId(room.id === selectedId ? null : room.id)}
                   onHover={(room, e) => setHover(room ? { room, x: e.clientX, y: e.clientY } : null)}
+                  hoverable={!touch}
                 />
               ))}
             </svg>
-          </div>
+          </PanZoom>
 
-          {hover && (
+          {hover && !touch && (
             <div className="hk-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
               <strong>Room {hover.room.number}</strong> — {hover.room.roomType?.name || hover.room.typeCode}
               <div>
