@@ -9,6 +9,7 @@ import { blockersOf, wallBlockers, resolveMove } from './roomCollision';
 // Sizing lives in a plain .js module so scripts/check-room-layouts.mjs can import
 // it too — the validator needs rendered fixture sizes and cannot read .jsx.
 import { MODEL_CFG, MODEL_TF, fitPropsFor } from './modelSizes';
+import { applyLookDelta } from '../lib/touchInput';
 
 // Re-exported for the layout editor, which imports MODEL_CFG from here.
 export { MODEL_CFG, fitPropsFor };
@@ -537,7 +538,23 @@ function Furniture({ item }) {
 // saw into the held-keys map, including ones movement never reads.
 const MOVE_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
 
-export function Player({ paused, onHover, interactRef, viewRef, layout, onLockedChange }) {
+export function Player({
+  paused,
+  onHover,
+  interactRef,
+  viewRef,
+  layout,
+  onLockedChange,
+  /** Touch input, shared with <TouchControls> in the overlay above the canvas:
+   *  `{ move: {x, y}, look: {dx, dy} }`. A ref rather than props because a
+   *  joystick updates at pointer-move rate and routing that through React would
+   *  re-render the scene graph dozens of times a second. Absent on desktop. */
+  touchRef,
+  /** True on a coarse pointer. Pointer lock is then never requested: on iPadOS
+   *  it either rejects or resolves and reports no movementX, so asking for it
+   *  achieved nothing except a permission-looking prompt on some builds. */
+  touch = false,
+}) {
   const { camera, gl } = useThree();
   const yaw = useRef(viewRef.current ? viewRef.current.yaw : 0);
   const pitch = useRef(viewRef.current ? viewRef.current.pitch : 0);
@@ -620,6 +637,13 @@ export function Player({ paused, onHover, interactRef, viewRef, layout, onLocked
   // Yaw is unbounded, so the full 360° is a single continuous motion. Pitch stays
   // clamped short of vertical, or the room ends up upside down.
   useEffect(() => {
+    // The whole mouse path is skipped on a coarse pointer, rather than guarded
+    // inside each handler: there is no mouse to move and no lock to hold, and
+    // <TouchControls> in the overlay owns looking around instead. Requesting
+    // pointer lock on iPadOS either rejects or resolves and then reports no
+    // movementX at all, so asking for it bought nothing.
+    if (touch) return undefined;
+
     const el = gl.domElement;
     const SENS = 0.0023; // rad per px of mouse travel
     const isLocked = () => document.pointerLockElement === el;
@@ -660,16 +684,39 @@ export function Player({ paused, onHover, interactRef, viewRef, layout, onLocked
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerlockchange', onLockChange);
     };
-  }, [gl, paused, onLockedChange]);
+  }, [gl, paused, onLockedChange, touch]);
 
   useFrame((_, dt) => {
+    // Touch look is applied HERE rather than in the pointer handler, and
+    // drained as it is read. Pointer-move can fire several times between two
+    // frames, so the overlay accumulates the deltas and this consumes the whole
+    // sweep once — turning the camera straight from the handler would both
+    // fight this line's `camera.rotation.set` and drop all but the last move of
+    // a fast drag.
+    const ti = touchRef?.current;
+    if (ti && !paused && (ti.look.dx !== 0 || ti.look.dy !== 0)) {
+      const next = applyLookDelta(yaw.current, pitch.current, ti.look.dx, ti.look.dy);
+      yaw.current = next.yaw;
+      pitch.current = next.pitch;
+      ti.look.dx = 0;
+      ti.look.dy = 0;
+    }
+
     camera.rotation.set(pitch.current, yaw.current, 0);
     const hw = layout.w / 2 - 0.45;
     const hl = layout.l / 2 - 0.45;
     if (!paused) {
       const k = keys.current;
-      const fwd = (k.w || k.arrowup ? 1 : 0) - (k.s || k.arrowdown ? 1 : 0);
-      const str = (k.d || k.arrowright ? 1 : 0) - (k.a || k.arrowleft ? 1 : 0);
+      // Keys are on/off; the stick is analogue. Summed and clamped so holding a
+      // key while pushing the stick cannot produce a vector longer than 1 and
+      // walk faster than either input alone.
+      const stick = ti ? ti.move : null;
+      const rawFwd = (k.w || k.arrowup ? 1 : 0) - (k.s || k.arrowdown ? 1 : 0) + (stick ? stick.y : 0);
+      const rawStr = (k.d || k.arrowright ? 1 : 0) - (k.a || k.arrowleft ? 1 : 0) + (stick ? stick.x : 0);
+      const len = Math.hypot(rawFwd, rawStr);
+      const scale = len > 1 ? 1 / len : 1;
+      const fwd = rawFwd * scale;
+      const str = rawStr * scale;
       if (fwd || str) {
         const sin = Math.sin(yaw.current);
         const cos = Math.cos(yaw.current);
