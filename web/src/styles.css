@@ -8893,12 +8893,22 @@ button.danger:disabled:hover {
    the composer off the bottom of the screen exactly when the conversation gets
    long enough to be worth having.
    ========================================================================== */
+.msg-page {
+  /* The page owns its own vertical rhythm rather than inheriting whatever the
+     last element left behind. One scale: 14px between siblings. */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 .msg-wrap {
   display: grid;
-  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
   gap: 14px;
-  height: calc(100vh - 190px);
-  min-height: 420px;
+  /* Measured off the topbar rather than guessed at, so the panes reach the
+     bottom of the viewport and the composer sits ON that edge instead of
+     floating short of it. */
+  height: calc(100vh - var(--topbar-h) - 108px);
+  min-height: 460px;
 }
 .msg-contacts,
 .msg-thread {
@@ -8907,19 +8917,25 @@ button.danger:disabled:hover {
   min-height: 0; /* or the inner scrollers inherit the content height and never scroll */
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
 }
-.msg-pad {
-  padding: 16px;
+/* Every "nothing here" line in the two panes: loading, no staff, no search
+   match, no messages yet. One class, so they cannot drift into three different
+   paddings. */
+.msg-note {
+  margin: 0;
+  padding: 18px 16px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-/* ── Staff list ── */
+/* -- Staff list -- */
 .msg-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 9px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--muted-2);
 }
@@ -8933,20 +8949,45 @@ button.danger:disabled:hover {
   outline: none;
   padding: 0;
 }
+.msg-search-clear {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.msg-search-clear:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
 .msg-contact-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px;
+  /* Reserved, present or not - otherwise every row shifts sideways the moment
+     the list grows long enough to scroll. Same reasoning as .side-nav. */
+  scrollbar-gutter: stable;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .msg-contact {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -8979,12 +9020,17 @@ button.danger:disabled:hover {
 }
 .msg-contact-sub {
   display: block;
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: 11.5px;
+  line-height: 1.35;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.msg-contact.active .msg-contact-sub {
+  color: inherit;
+  opacity: 0.75;
 }
 .msg-unread {
   flex-shrink: 0;
@@ -9001,12 +9047,12 @@ button.danger:disabled:hover {
   font-weight: 700;
 }
 
-/* ── Avatar + presence dot ── */
+/* -- Avatar + presence dot -- */
 .msg-avatar {
   position: relative;
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9014,14 +9060,15 @@ button.danger:disabled:hover {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
 }
 /* Fixed hex rather than --accent: the accent is user-customisable through the
    System Color Changer, and a presence light that changes colour when somebody
    recolours the product stops reading as a status. Same reasoning as the role
    palette in lib/roles.js. */
-.msg-dot {
+.msg-dot,
+.chat-dot {
   position: absolute;
   right: -1px;
   bottom: -1px;
@@ -9031,58 +9078,215 @@ button.danger:disabled:hover {
   background: var(--muted-2);
   box-shadow: 0 0 0 2px var(--panel);
 }
-.msg-dot.is-online {
+.msg-dot.is-online,
+.chat-dot.is-online {
   background: #16a34a;
 }
 
-/* ── Conversation ── */
+/* -- Conversation -- */
 .msg-thread-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
+.msg-thread-id {
+  min-width: 0;
+}
 .msg-thread-name {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.3;
 }
 .msg-thread-sub {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 11.5px;
+}
+/* Presence as a word, in the same green the dot uses when it is live. Plain
+   muted text otherwise - being offline is not a warning. */
+.msg-presence {
+  color: var(--muted);
+}
+.msg-presence.is-online {
+  color: #16a34a;
+  font-weight: 600;
 }
 .msg-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  scrollbar-gutter: stable;
+  /* Bottom padding is larger than the top: the newest message sits here, right
+     above the composer, and a bubble touching that divider reads as cramped. */
+  padding: 16px 18px 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
-.msg-row {
+
+/* -- Composer --
+   A pill holding an auto-growing textarea, plus a round send button. The old
+   version was a fixed two-row box with a text button beside it: it wasted half
+   its height on a one-word reply, hid the top of a long one, and the button
+   changed width as its label went from "Send" to "Sending...", which nudged the
+   whole field every time anyone sent anything. */
+.msg-composer {
   display: flex;
-  justify-content: flex-start;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
 }
-.msg-row.mine {
+.msg-composer-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 14px;
+  transition: border-color 0.14s ease;
+}
+.msg-composer-field:focus-within {
+  border-color: var(--accent);
+}
+.msg-composer-field.is-blocked {
+  border-color: var(--danger);
+}
+.msg-composer-field textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  padding: 0;
+  max-height: 132px;
+}
+.msg-send {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.msg-send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.msg-send:disabled {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted-2);
+  cursor: default;
+}
+
+/* ==========================================================================
+   TRANSCRIPT - shared by the Messages page and the docked chat windows
+   ==========================================================================
+   Rendered by <Transcript> in components/ChatDock.jsx from the groups
+   lib/messageGroups.js builds. One stylesheet for both surfaces, because two
+   views of one conversation disagreeing about where a day starts or what a turn
+   looks like is the kind of difference people notice and cannot explain.
+   ========================================================================== */
+
+/* A day separator: a centred label on a hairline. This is the thing that was
+   missing - a fortnight of conversation used to run together with nothing
+   marking where one day ended and the next began. */
+.chat-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 6px;
+}
+.chat-day:first-child {
+  margin-top: 0;
+}
+.chat-day::before,
+.chat-day::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.chat-day span {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* One person's turn. The gap BETWEEN turns is larger than the gap between
+   bubbles inside one, which is what makes a burst of three quick replies read
+   as one person talking instead of three separate events. */
+.chat-group {
+  display: flex;
+  margin-top: 10px;
+}
+.chat-group.mine {
   justify-content: flex-end;
 }
-.msg-bubble {
-  max-width: min(68%, 520px);
-  padding: 8px 11px;
-  border-radius: 12px;
+.chat-day + .chat-group {
+  margin-top: 4px;
+}
+.chat-group-bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  align-items: flex-start;
+}
+.chat-group.mine .chat-group-bubbles {
+  align-items: flex-end;
+}
+.chat-bubble {
+  max-width: 100%;
+  padding: 8px 13px;
+  border-radius: 18px;
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
-.msg-row.mine .msg-bubble {
-  background: var(--accent-soft);
+.chat-group.mine .chat-bubble {
+  background: var(--accent);
   border-color: transparent;
-  color: var(--on-accent-soft);
+  color: var(--on-accent);
 }
-.msg-body {
+/* The tail. Corners facing INTO the turn tighten, so consecutive bubbles read
+   as one stack while the first and last keep the full round. `of-type` and not
+   `child` on purpose: the timestamp is a <span> sibling inside the same box, so
+   :last-child would match the stamp and no bubble would ever be treated as the
+   last one. */
+.chat-group:not(.mine) .chat-bubble:not(:first-of-type) {
+  border-top-left-radius: 6px;
+}
+.chat-group:not(.mine) .chat-bubble:not(:last-of-type) {
+  border-bottom-left-radius: 6px;
+}
+.chat-group.mine .chat-bubble:not(:first-of-type) {
+  border-top-right-radius: 6px;
+}
+.chat-group.mine .chat-bubble:not(:last-of-type) {
+  border-bottom-right-radius: 6px;
+}
+.chat-bubble-body {
+  display: block;
   font-size: 13.5px;
   line-height: 1.45;
   /* Staff paste room numbers and long task notes; without this a single
@@ -9090,39 +9294,49 @@ button.danger:disabled:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.msg-time {
-  margin-top: 3px;
-  font-size: 10.5px;
-  opacity: 0.7;
-  text-align: right;
-}
-.msg-composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--border);
-}
-.msg-composer textarea {
-  flex: 1;
-  min-width: 0;
-  resize: none;
-  font: inherit;
-  font-size: 13.5px;
-  line-height: 1.4;
-  padding: 8px 10px;
+/* ONE stamp per turn, under its last bubble. A clock time on every line of a
+   burst sent seconds apart was the noise that made the old thread hard to
+   scan. */
+.chat-group-time {
+  margin-top: 4px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
+/* Full-width pane: a bubble stops well short of the far edge, so which side it
+   is on stays obvious at a glance even for a long message. */
+.msg-scroll .chat-group-bubbles {
+  max-width: min(68%, 560px);
+}
+/* A 320px window has no width to give away. */
+.chat-scroll .chat-group-bubbles {
+  max-width: 86%;
+}
+.chat-scroll .chat-bubble {
+  padding: 7px 11px;
+}
+.chat-scroll .chat-bubble-body {
+  font-size: 13px;
+}
+
+
 /* ── On-screen notification pop-ups ──
-   Bottom-right, above the page but below any modal. Fixed rather than absolute
-   so they stay put while the page behind them scrolls. */
+   TOP-right, under the topbar. They used to be bottom-right, which is now the
+   chat dock's corner: an open chat window is ~420px tall and the cards stacked
+   straight through it, so whichever was on top hid the other. Moving the
+   transient thing rather than the persistent one is the right way round — a
+   card is gone in six seconds, a conversation stays until it is closed — and a
+   notification under the bell that raised it is where the eye already goes.
+   Fixed rather than absolute so they stay put while the page scrolls. */
 .notif-pop-stack {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  top: calc(var(--topbar-h) + 12px);
   z-index: 60;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 8px;
   width: min(340px, calc(100vw - 36px));
   pointer-events: none;
@@ -9383,5 +9597,415 @@ button.danger:disabled:hover {
   }
   .msg-thread {
     height: 60vh;
+  }
+}
+
+
+/* ==========================================================================
+   CHAT DOCK - the Facebook-style docked conversations, bottom-right
+   ==========================================================================
+   components/ChatDock.jsx. Mounted once in the shell, so the windows survive
+   navigation; /messages suppresses it, because that page is the same
+   conversation at full size.
+
+   Anchored to the bottom edge with no gap beneath: a docked window reads as
+   attached to the chrome. The launcher sits at the right-hand end of the bar,
+   which is where the row starts (row-reverse), so the windows grow leftwards
+   away from it and it never moves as they open and close.
+   ========================================================================== */
+.chat-dock {
+  position: fixed;
+  right: 18px;
+  bottom: 0;
+  z-index: 90; /* over the page, under the sidebar (110) and every modal */
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: flex-end;
+  gap: 12px;
+  /* The bar itself is not a surface - only its children take the pointer, so
+     the strip of empty space beside them does not swallow clicks meant for the
+     page underneath. */
+  pointer-events: none;
+}
+.chat-dock > * {
+  pointer-events: auto;
+}
+
+/* ── One window ── */
+.chat-win {
+  width: 328px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+html[data-theme='dark'] .chat-win {
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+}
+.chat-win-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 8px 7px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+/* Collapsed, the header IS the window - so it loses its divider and rounds off
+   as a standalone bar. */
+.chat-win.is-min .chat-win-head {
+  border-bottom: 0;
+}
+/* The whole title block is the collapse control, which is the gesture this
+   pattern has everywhere it appears. */
+.chat-win-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  min-height: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.chat-win-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-win-tools {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.chat-icon-btn {
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.chat-icon-btn:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.chat-win-body {
+  display: flex;
+  flex-direction: column;
+  /* Tall enough for a real exchange, short enough to leave the page visible
+     behind it. */
+  height: 336px;
+}
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 12px 12px 14px;
+  display: flex;
+  flex-direction: column;
+}
+.chat-empty {
+  margin: auto 0;
+  padding: 0 6px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ── The window's composer ── */
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+.chat-composer textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  outline: none;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 7px 12px;
+  max-height: 96px;
+}
+.chat-composer textarea:focus {
+  border-color: var(--accent);
+}
+.chat-composer textarea.is-blocked {
+  border-color: var(--danger);
+}
+.chat-send {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.chat-send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.chat-send:disabled {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted-2);
+  cursor: default;
+}
+.chat-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 10px;
+  background: var(--danger-soft, var(--surface-2));
+  color: var(--danger);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.chat-blocked svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Avatar, shared by the windows and the launcher rows ── */
+.chat-avatar {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 700;
+}
+/* The presence dot's ring is painted with whatever it sits on, or it reads as a
+   hole punched through the avatar. The header is --surface, the launcher rows
+   are --panel. */
+.chat-win-head .chat-dot {
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.chat-launcher-row .chat-dot {
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+/* ── Unread pill ── */
+.chat-pill {
+  flex-shrink: 0;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--pill-radius);
+  background: var(--danger);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.chat-pill-on-btn {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ── Launcher ── */
+.chat-launcher-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+}
+.chat-launcher-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  min-height: 0;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+}
+.chat-launcher-btn:hover,
+.chat-launcher-btn.is-open {
+  filter: brightness(1.06);
+}
+
+/* The contact picker. Opens UPWARD from the button, because the button is
+   already at the bottom of the screen. */
+.chat-launcher-pop {
+  position: absolute;
+  right: 0;
+  bottom: 46px;
+  width: min(300px, calc(100vw - 36px));
+  max-height: min(60vh, 440px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+}
+html[data-theme='dark'] .chat-launcher-pop {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+.chat-launcher-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 8px 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 700;
+}
+.chat-launcher-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-2);
+}
+.chat-launcher-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 0;
+}
+.chat-launcher-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.chat-launcher-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.chat-launcher-row:hover {
+  background: var(--row-hover);
+}
+.chat-launcher-text {
+  flex: 1;
+  min-width: 0;
+}
+.chat-launcher-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-launcher-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-launcher-empty {
+  padding: 16px 14px;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* ── Narrow screens ──
+   One window, as wide as the screen. Three 328px windows side by side do not
+   fit on a phone, and a window narrower than the text in it is worse than no
+   window - ChatDock.jsx shows only the most recent open one below 700px. */
+@media (max-width: 699px) {
+  .chat-dock {
+    right: 0;
+    left: 0;
+    padding: 0 8px;
+    gap: 8px;
+  }
+  /* Take the row, but LET the launcher keep its size. `width: 100%` here would
+     make the window and the launcher both flex-shrink against each other and
+     squash the pair; the window flexes, the launcher does not. */
+  .chat-win {
+    flex: 1 1 auto;
+    width: auto;
+  }
+  .chat-win-body {
+    height: min(58vh, 380px);
+  }
+  /* The label goes; the icon and its badge are enough, and the bar has to leave
+     room for a collapsed window beside it. */
+  .chat-launcher-label {
+    display: none;
+  }
+  .chat-launcher-btn {
+    padding: 0 12px;
+  }
+  .chat-launcher-wrap {
+    flex-shrink: 0;
   }
 }
