@@ -38,6 +38,84 @@ const NAV_SECTIONS = CATALOGUE.sections;
 
 const COLLAPSE_KEY = 'innsight_sidebar_collapsed';
 
+// ── The "click the background" collapse gesture ──────────────────────────────
+// Both the rail and the content pane collapse the rail when you click their
+// empty space. They used to carry two DIFFERENT hand-written guard selectors,
+// and the rail's was the shorter one: it listed `a, button, input, select,
+// label` and omitted textarea, [role=button] and [contenteditable]. One list,
+// used by both, so the two gestures cannot drift apart again.
+const INTERACTIVE =
+  'a, button, input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [contenteditable]';
+
+function hitInteractive(target) {
+  // `closest` is what makes this safe: a click on the <svg> inside a nav link,
+  // or on the unread pill, has that element as its target, so walking up finds
+  // the link and the background never claims the click.
+  return !(target instanceof Element) || !!target.closest(INTERACTIVE);
+}
+
+// A click that landed on a scroll container's SCROLLBAR, not on its content.
+//
+// This is the bug that made the rail collapse while you were trying to scroll
+// it. `.side-nav` scrolls, and styling `::-webkit-scrollbar` at all opts
+// Chromium out of overlay scrollbars — so the bar is a real 9px strip INSIDE
+// the element, and a mousedown on the thumb reports the nav itself as the
+// event target. With no interactive ancestor to find, the guard above waved it
+// through and the rail collapsed under the pointer mid-drag.
+//
+// Comparing against clientWidth is the check: clientWidth excludes the
+// scrollbar, so anything at or past it is the bar.
+function hitScrollbar(e) {
+  for (let el = e.target; el instanceof Element; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) {
+      const r = el.getBoundingClientRect();
+      // Border-box → padding-box, since clientWidth/Height are measured from
+      // the padding edge.
+      const bw = parseFloat(getComputedStyle(el).borderLeftWidth) || 0;
+      const bh = parseFloat(getComputedStyle(el).borderTopWidth) || 0;
+      if (e.clientX - r.left - bw >= el.clientWidth) return true;
+      if (e.clientY - r.top - bh >= el.clientHeight) return true;
+    }
+  }
+  return false;
+}
+
+// Beyond this much pointer travel between press and release, the gesture was a
+// drag — a scrollbar grab, or a text selection swept across the group headings
+// — and a drag must not toggle anything. A few pixels of slop because a plain
+// click on a trackpad rarely lands on exactly one coordinate.
+const DRAG_SLOP = 5;
+
+// The press/release bookkeeping behind the background-click gesture, as one
+// hook so the rail and the content pane share it rather than each growing their
+// own copy. `onClick` fires the callback only for a real click on real empty
+// space: primary button, no drag, no live text selection, not the scrollbar,
+// and nothing interactive underneath.
+function useBackgroundClick(onEmptyClick) {
+  const down = useRef(null);
+  return {
+    onPointerDown: (e) => {
+      down.current =
+        e.button === 0 && !hitInteractive(e.target) && !hitScrollbar(e)
+          ? { x: e.clientX, y: e.clientY }
+          : null;
+    },
+    onClick: (e) => {
+      const start = down.current;
+      down.current = null;
+      if (!start) return;
+      if (Math.abs(e.clientX - start.x) > DRAG_SLOP || Math.abs(e.clientY - start.y) > DRAG_SLOP) return;
+      // A click that merely ends a selection is not a click on the background.
+      const sel = typeof window !== 'undefined' && window.getSelection?.();
+      if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+      // Re-checked on release: the guard above ran against the press target,
+      // and a click's target can differ from it.
+      if (hitInteractive(e.target)) return;
+      onEmptyClick(e);
+    },
+  };
+}
+
 export default function Layout() {
   const { user, logout, hasRole, hasSection, refreshSections, setUser } = useAuth();
   // The desk roles. Drives both the top-bar "create" menu and the calendar
@@ -58,6 +136,17 @@ export default function Layout() {
     }
   });
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  // Clicking the rail's own background toggles it; clicking the page collapses
+  // an expanded rail but never re-expands it — reopening stays a deliberate act
+  // on the toggle or on the rail itself.
+  const railToggle = useBackgroundClick(() => {
+    if (drawerOpen) return;
+    setCollapsed((c) => !c);
+  });
+  const contentToggle = useBackgroundClick(() => {
+    if (drawerOpen || collapsed) return;
+    setCollapsed(true);
+  });
 
   // ── Notifications: ONE subscription, two surfaces ───────────────────────
   // The bell (a place you go and look) and the pop-ups (which come to you) show
@@ -369,22 +458,7 @@ export default function Layout() {
         </button>
       </div>
 
-      {/* Clicking the rail's empty space collapses it. `closest` is what makes
-          this safe: a click that landed on a link, button, input or the account
-          block is that control's click, not the background's, so it is ignored
-          here. Only genuinely empty space gets through. Keyboard users are
-          unaffected — the labelled toggle in the header is still the primary
-          control, and this div is not focusable. */}
-      <nav
-        className="side-nav"
-        data-tour="tour-sidebar"
-        aria-label="Main navigation"
-        onClick={(e) => {
-          if (drawerOpen) return;
-          if (e.target.closest('a, button, input, select, label')) return;
-          setCollapsed((c) => !c);
-        }}
-      >
+      <nav className="side-nav" data-tour="tour-sidebar" aria-label="Main navigation">
         {sections.map((s) => (
           <div className="side-group" key={s.label}>
             {/* Hidden from sight when collapsed but kept for screen readers, so
@@ -463,7 +537,24 @@ export default function Layout() {
           below — which renders the same markup — is never narrowed by it. The
           drawer is always the full-width version even while the desktop rail is
           collapsed. */}
-      <aside className={`cb-sidebar${collapsed ? ' side-collapsed' : ''}`}>{sidebar}</aside>
+      {/* Clicking the rail's empty space toggles it, and the listener sits on
+          the RAIL rather than on .side-nav — which is what made the gesture
+          unreliable. .side-nav is `flex: 1`, so its empty space is whatever the
+          nav list does not fill: plenty for a housekeeper with six rows, and
+          NONE for an admin whose list overflows and scrolls. For those roles
+          every click in the rail landed on a link, and the gesture simply did
+          not exist. On the aside, the head's empty space beside the brand, the
+          strip beside the account block and the gap under the last row all
+          count, at every role and window height.
+
+          Keyboard users are unaffected: the labelled toggle in the head is
+          still the primary control and the aside is not focusable. */}
+      <aside
+        className={`cb-sidebar${collapsed ? ' side-collapsed' : ''}`}
+        {...railToggle}
+      >
+        {sidebar}
+      </aside>
 
       {drawerOpen && (
         <>
@@ -473,25 +564,14 @@ export default function Layout() {
       )}
 
       {/* Clicking the page collapses an expanded rail, the same gesture as
-          clicking the rail's own whitespace. Guarded three ways so it never
-          fires on work: only while the rail is expanded (it never re-expands —
-          that stays a deliberate act on the toggle), never while the mobile
-          drawer is up (the backdrop owns that dismissal), and never when the
-          click landed on something interactive. `closest` is what makes the
-          last one hold: a click on a button INSIDE a panel has that button as
-          its target, so the panel never sees an "empty space" click that was
-          really someone pressing Save. */}
-      <div
-        className="cb-content"
-        onClick={(e) => {
-          if (
-            !collapsed &&
-            !drawerOpen &&
-            !e.target.closest('a, button, input, select, textarea, label, [role="button"], [contenteditable]')
-          )
-            setCollapsed(true);
-        }}
-      >
+          clicking the rail's own whitespace — and now literally the same code
+          path, so the two cannot disagree about what "empty space" means. It
+          never fires on work: only while the rail is expanded (it never
+          re-expands from here — that stays a deliberate act on the rail or its
+          toggle), never while the mobile drawer is up (the backdrop owns that
+          dismissal), never on a drag, a text selection or a scrollbar, and
+          never when the click landed on something interactive. */}
+      <div className="cb-content" {...contentToggle}>
         <header className="cb-topbar">
           <button
             type="button"

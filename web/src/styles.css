@@ -1100,6 +1100,14 @@ html[data-theme='dark'] .side-brand-mark {
   /* Generous top padding so the first section label sits clear of the divider
      under the brand rather than crowding it. */
   padding: 22px 12px 18px;
+  /* Space for the scrollbar is RESERVED, present or not.
+     Styling ::-webkit-scrollbar at all opts Chromium out of overlay scrollbars,
+     so the bar is a real 9px strip taken out of this element's content box. The
+     nav overflows or not depending on the signed-in role's section count and
+     the window height, so without this the rows shifted 9px sideways between
+     one user and the next, and jumped as the viewport crossed the threshold.
+     Unsupported on Safari < 17, where the old behaviour returns. */
+  scrollbar-gutter: stable;
 }
 
 .side-group + .side-group {
@@ -1253,6 +1261,19 @@ html[data-theme='dark'] .side-brand-mark {
 .side-collapsed .side-user-out {
   display: none;
 }
+/* The icon rail centres its glyphs on the RAIL, which needs the scroll gutter
+   reserved on BOTH edges rather than only the trailing one.
+   `stable` alone reserves 9px on the right, so the content box it leaves is
+   off-centre within the rail by half that — and the icons with it. Every glyph
+   in the collapsed rail sat 4.5px left of centre, but only for the roles whose
+   nav list is long enough to scroll, which is why it looked arbitrary.
+   The arithmetic, at the 76px collapsed width: 76 − 8 − 8 (padding) − 9 − 9
+   (gutters) = a 42px row, whose centre is 8 + 9 + 21 = 38px = half of 76. */
+.side-collapsed .side-nav {
+  padding-left: 8px;
+  padding-right: 8px;
+  scrollbar-gutter: stable both-edges;
+}
 .side-collapsed .side-link {
   justify-content: center;
   gap: 0;
@@ -1269,7 +1290,11 @@ html[data-theme='dark'] .side-brand-mark {
 .side-collapsed .side-badge {
   position: absolute;
   top: 3px;
-  right: 7px;
+  /* Measured from the 42px row, so the pill still lands on the icon's top-right
+     corner: the 18px glyph ends 12px in from the row's right edge, and a 16px
+     pill inset by 4 straddles it. At the old 7px it floated in the gap beside
+     the icon instead of sitting on it. */
+  right: 4px;
   margin-left: 0;
   min-width: 16px;
   height: 16px;
@@ -1282,7 +1307,9 @@ html[data-theme='dark'] .side-brand-mark {
 }
 .side-collapsed .side-group-label {
   height: 1px;
-  margin: 0 10px 8px;
+  /* Inset from the 42px row above, not from the old 52px one, so the hairline
+     stays symmetric with the icons it separates. */
+  margin: 0 7px 8px;
   padding: 0;
   background: var(--border);
   color: transparent;
