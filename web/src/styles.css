@@ -160,6 +160,21 @@
 * {
   box-sizing: border-box;
 }
+
+/* The `hidden` attribute actually hides things.
+   `[hidden] { display: none }` is a UA-stylesheet rule, and EVERY author rule
+   outranks the UA stylesheet regardless of specificity — so any element with a
+   `display` of its own silently ignores `hidden` and stays on screen. That is
+   what broke the chat window's collapse button: `.chat-win-body` sets
+   `display: flex`, so `hidden={minimized}` did nothing at all and the window
+   stayed open while its icon flipped to "expand".
+   `!important` is the point of this rule rather than a shortcut around one:
+   `hidden` is meant to win against the element's own display, and this is the
+   one place in the stylesheet that can say so. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #root {
@@ -8868,7 +8883,9 @@ button.danger:disabled:hover {
   cursor: pointer;
   text-align: left;
   font: inherit;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
 }
 .hkd-status-cell:hover {
   transform: translateY(-1px);
@@ -9321,7 +9338,6 @@ button.danger:disabled:hover {
   font-size: 13px;
 }
 
-
 /* ── On-screen notification pop-ups ──
    TOP-right, under the topbar. They used to be bottom-right, which is now the
    chat dock's corner: an open chat window is ~420px tall and the cards stacked
@@ -9600,7 +9616,6 @@ button.danger:disabled:hover {
   }
 }
 
-
 /* ==========================================================================
    CHAT DOCK - the Facebook-style docked conversations, bottom-right
    ==========================================================================
@@ -9656,7 +9671,13 @@ html[data-theme='dark'] .chat-win {
   border-bottom: 1px solid var(--border);
 }
 /* Collapsed, the header IS the window - so it loses its divider and rounds off
-   as a standalone bar. */
+   as a standalone bar, and narrows: three 328px bars plus the launcher come to
+   over 1000px and would push the oldest off the left of the screen. At 232px
+   three collapsed conversations and the launcher sit comfortably beside a
+   264px rail at 1280px. */
+.chat-win.is-min {
+  width: 232px;
+}
 .chat-win.is-min .chat-win-head {
   border-bottom: 0;
 }
