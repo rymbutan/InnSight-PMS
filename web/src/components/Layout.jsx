@@ -549,10 +549,7 @@ export default function Layout() {
 
           Keyboard users are unaffected: the labelled toggle in the head is
           still the primary control and the aside is not focusable. */}
-      <aside
-        className={`cb-sidebar${collapsed ? ' side-collapsed' : ''}`}
-        {...railToggle}
-      >
+      <aside className={`cb-sidebar${collapsed ? ' side-collapsed' : ''}`} {...railToggle}>
         {sidebar}
       </aside>
 
