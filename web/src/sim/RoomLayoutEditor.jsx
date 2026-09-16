@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, ContactShadows, RoundedBox, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
+import { TOUCH } from 'three';
 import { getRoomPlan, FOOTPRINTS, storedLayoutFor } from './roomLayouts';
 import { hydrateRoomLayouts } from './layoutSync';
 import api from '../api';
@@ -1100,6 +1101,7 @@ export default function RoomLayoutEditor({
           otherwise set this column's floor and push the far panel off the edge
           of the screen. With the floor at 0 the column yields instead. */}
         <div
+          className="ed-viewport"
           style={{
             flex: '1 1 auto',
             minWidth: 0,
@@ -1266,7 +1268,23 @@ export default function RoomLayoutEditor({
                   />
                 );
               })()}
-            <OrbitControls ref={orbit} makeDefault target={[0, 0.8, 0]} maxPolarAngle={Math.PI / 2.05} />
+            <OrbitControls
+              ref={orbit}
+              makeDefault
+              target={[0, 0.8, 0]}
+              maxPolarAngle={Math.PI / 2.05}
+              // Spelled out rather than left to the default, because the
+              // default for two fingers is DOLLY_PAN and the pan half of that
+              // fights the drag-to-move gesture on a selected fixture: a
+              // two-finger adjust would slide the camera at the same time. One
+              // finger orbits (look around the room), two fingers zoom and pan
+              // the view itself.
+              touches={{ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN }}
+              // A tablet's orbit is a coarse gesture; the mouse default
+              // overshoots badly when the whole travel is a thumb-sweep.
+              rotateSpeed={0.55}
+              zoomSpeed={0.8}
+            />
           </Canvas>
         </div>
 

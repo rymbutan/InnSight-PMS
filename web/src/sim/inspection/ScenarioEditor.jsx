@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
+import { TOUCH } from 'three';
 
 import api from '../../api';
 import { useToast, errMsg } from '../../components/Toast';
@@ -1468,7 +1469,15 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 }}
               />
             )}
-            <OrbitControls ref={orbit} makeDefault />
+            <OrbitControls
+              ref={orbit}
+              makeDefault
+              // Same touch mapping as RoomLayoutEditor - the two editors must
+              // not need different fingers for the same job.
+              touches={{ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN }}
+              rotateSpeed={0.55}
+              zoomSpeed={0.8}
+            />
           </Canvas>
           {/* The emoji is gone; the swatch is the same red the halo is drawn in,
             so the key matches what is on screen instead of approximating it
