@@ -1,83 +1,69 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import api from '../api';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import RoleBadge from '../components/RoleBadge';
+import Transcript from '../components/Transcript';
 import { primaryRole } from '../lib/roles';
 import { useMessageSound } from '../lib/sound';
+import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
+import { useContacts, useConversation, useRetentionPolicy } from '../lib/useMessaging';
 
-// Staff direct messages.
+// Staff direct messages, full-screen.
 //
-// Polling rather than SSE, which is what the rest of the product uses for live
-// data. The SSE bus (lib/useLiveEvents.js) carries business events to every
-// signed-in browser; a conversation is addressed to one person, so putting it on
-// a broadcast channel would mean every browser receiving every message and
-// filtering out the ones that are not theirs. Two intervals are cheaper and
-// leak nothing.
-//
-// The two cadences differ on purpose: an open thread is being watched and polls
-// fast, the contact list is peripheral and polls slower.
-const THREAD_POLL_MS = 3000;
-const CONTACTS_POLL_MS = 4000;
-
-function initials(name = '') {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0][0].toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-// Clock time for a message in today's conversation, date for anything older —
-// "14:05" is useless on a message from last week and a full date is noise on one
-// from a minute ago.
-function stamp(iso) {
-  const d = new Date(iso);
-  const today = new Date();
-  const sameDay =
-    d.getDate() === today.getDate() &&
-    d.getMonth() === today.getMonth() &&
-    d.getFullYear() === today.getFullYear();
-  return sameDay
-    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
+// The polling, the send path and the transcript grouping all moved out of this
+// file: lib/useMessaging.js and lib/messageGroups.js, shared with the docked
+// chat windows in components/ChatDock.jsx. There are two surfaces onto one
+// conversation now, and the parts that must not disagree between them — where a
+// day starts, what counts as one person's turn, what happens when the server
+// refuses a message — belong in one place. What is left here is this page's own
+// layout.
 
 export default function Messages() {
   const { user } = useAuth();
   const toast = useToast();
-  const [contacts, setContacts] = useState([]);
-  const [loadingContacts, setLoadingContacts] = useState(true);
-  const [peerId, setPeerId] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
+  const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState('');
-  const [retention, setRetention] = useState(null);
-  // Set when the server refuses a message on moderation grounds. Kept as state
-  // rather than raised as a toast because the sender has to act on it: the toast
-  // would fade while the rejected draft sat there looking sent.
-  const [blocked, setBlocked] = useState(false);
+  const [draft, setDraft] = useState('');
   const [soundOn, setSoundOn] = useMessageSound();
+  const taRef = useRef(null);
 
-  const scrollRef = useRef(null);
-  // Whether the thread was pinned to the bottom before the latest poll landed.
-  // Re-scrolling unconditionally would yank someone out of older messages they
-  // scrolled up to read, every three seconds.
-  const wasAtBottom = useRef(true);
-  // The last message id this thread has already shown. `null` means the thread
-  // has not loaded yet — opening a conversation with unread replies in it must
-  // not chime, because nothing arrived, we just looked.
-  const lastSeenId = useRef(null);
+  // ?peer=<id> is how the notification bell, the pop-up cards and the chat
+  // dock's "open in Messages" button all hand a conversation to this page.
+  //
+  // Reading it is new. lib/notifications.js has been generating
+  // `/messages?peer=<senderId>` links since messaging shipped and this page
+  // never looked at the query string, so every one of those links landed on the
+  // Messages page with NO conversation open — the reader arrived at a contact
+  // list and had to find the person who had just messaged them.
+  const peerId = params.get('peer');
+
+  const { contacts, loading: loadingContacts, error: contactsError } = useContacts();
+  const { messages, sending, blocked, clearBlocked, send, scrollRef } = useConversation(peerId, user?.id);
+  const retention = useRetentionPolicy();
+
+  // Only the FIRST contact-list failure is worth a toast. One every four
+  // seconds while the service is down would bury the screen it is complaining
+  // about.
+  const toldAboutError = useRef(false);
+  useEffect(() => {
+    if (contactsError && !toldAboutError.current) {
+      toldAboutError.current = true;
+      toast.error(errMsg(contactsError));
+    }
+    if (!contactsError) toldAboutError.current = false;
+  }, [contactsError, toast]);
 
   const peer = useMemo(() => contacts.find((c) => c.id === peerId) || null, [contacts, peerId]);
+  const rows = useMemo(() => groupMessages(messages, user?.id), [messages, user?.id]);
 
   const visibleContacts = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return contacts;
     return contacts.filter(
-      (c) => c.displayName.toLowerCase().includes(q) || c.username.toLowerCase().includes(q)
+      (c) => (c.displayName || '').toLowerCase().includes(q) || (c.username || '').toLowerCase().includes(q)
     );
   }, [contacts, filter]);
 
@@ -89,108 +75,38 @@ export default function Messages() {
     return retention.label.replace(/^Clear\b/, 'Cleared');
   }, [retention]);
 
-  // ── Retention policy ────────────────────────────────────────────────────
-  // Read once. It is hotel configuration that changes on the order of never, so
-  // polling it alongside the conversation would be pure noise.
+  // Switching conversation empties the box rather than carrying a half-written
+  // line to the next person — which is how a draft gets sent to the wrong one.
   useEffect(() => {
-    api
-      .get('/api/messages/settings/retention')
-      .then(({ data }) => setRetention(data))
-      .catch(() => {
-        /* the notice is informational; the server enforces the policy either way */
-      });
-  }, []);
+    setDraft('');
+  }, [peerId]);
 
-  // ── Contact list ────────────────────────────────────────────────────────
+  // Grow the composer with its content up to a few lines, then scroll inside
+  // it. The old fixed two-row box wasted half its height on a one-word reply
+  // and hid the beginning of a long one.
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const { data } = await api.get('/api/messages/contacts');
-        if (!cancelled) setContacts(Array.isArray(data) ? data : []);
-      } catch (e) {
-        // Only surface the first failure. A toast every 4s while the service is
-        // down would bury the screen it is complaining about.
-        if (!cancelled && loadingContacts) toast.error(errMsg(e));
-      } finally {
-        if (!cancelled) setLoadingContacts(false);
-      }
-    }
-    load();
-    const t = setInterval(load, CONTACTS_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, []);
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  }, [draft, peerId]);
 
-  // ── Open conversation ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (!peerId) {
-      setMessages([]);
-      return;
-    }
-    let cancelled = false;
-    // A different conversation: nothing in it has been "seen" yet.
-    lastSeenId.current = null;
-    async function load() {
-      const el = scrollRef.current;
-      if (el) wasAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-      try {
-        const { data } = await api.get(`/api/messages/with/${peerId}`);
-        if (cancelled) return;
-        const list = data?.messages || [];
-        const newest = list[list.length - 1];
-        // The chime used to ring from here. It now rings once, in Layout, off
-        // the live `messaging:message_sent` event — which arrives immediately
-        // and on every page, not only this one. Two sources meant the same
-        // message could ring twice, a second or two apart, whenever a poll
-        // landed just after the event.
-        lastSeenId.current = newest ? newest.id : null;
-        setMessages(list);
-      } catch {
-        /* transient — the next tick retries, and the thread stays as it was */
-      }
-    }
-    load();
-    const t = setInterval(load, THREAD_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [peerId, user?.id]);
+  function openPeer(id) {
+    // `replace` so the back button leaves the Messages page rather than walking
+    // back through every conversation opened while here.
+    setParams(id ? { peer: id } : {}, { replace: true });
+  }
 
-  // Stick to the newest message unless the reader has scrolled away from it.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && wasAtBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
-
-  async function send(e) {
-    e.preventDefault();
+  async function submit(e) {
+    e?.preventDefault?.();
     const body = draft.trim();
-    if (!body || !peerId || sending) return;
-    setSending(true);
-    try {
-      const { data } = await api.post('/api/messages', { recipientId: peerId, body });
-      // Append rather than waiting for the next poll: up to 3s of the message
-      // not appearing would read as the send having failed.
-      setMessages((m) => [...m, data]);
-      lastSeenId.current = data.id;
-      wasAtBottom.current = true;
-      setDraft('');
-      setBlocked(false);
-    } catch (err) {
-      if (err?.response?.data?.code === 'PROFANITY') {
-        // Leave the draft in the box — the sender has to edit it, and clearing
-        // it would make them retype the part that was fine.
-        setBlocked(true);
-      } else {
-        toast.error(errMsg(err));
-      }
-    } finally {
-      setSending(false);
-    }
+    if (!body) return;
+    const res = await send(body);
+    if (res.ok) setDraft('');
+    // A refusal leaves the draft alone on purpose — the sender edits the part
+    // that offended instead of retyping the part that was fine. `blocked` from
+    // the hook renders the notice.
+    else if (res.error) toast.error(errMsg(res.error));
   }
 
   // Enter sends, Shift+Enter breaks the line — the convention every chat client
@@ -198,12 +114,12 @@ export default function Messages() {
   function onKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      send(e);
+      submit();
     }
   }
 
   return (
-    <div>
+    <div className="msg-page">
       <div className="msg-head">
         <h2>Messages</h2>
         <div className="msg-head-tools">
@@ -231,7 +147,7 @@ export default function Messages() {
       </div>
 
       <div className="msg-wrap">
-        {/* ── Contacts ── */}
+        {/* ── Staff list ── */}
         <aside className="msg-contacts">
           <div className="msg-search">
             <Icon name="search" size={15} strokeWidth={1.9} />
@@ -241,17 +157,27 @@ export default function Messages() {
               placeholder="Search staff"
               aria-label="Search staff"
             />
+            {filter && (
+              <button
+                type="button"
+                className="msg-search-clear"
+                onClick={() => setFilter('')}
+                aria-label="Clear search"
+              >
+                <Icon name="x" size={13} strokeWidth={2.2} />
+              </button>
+            )}
           </div>
 
           <div className="msg-contact-list">
-            {loadingContacts && contacts.length === 0 && <div className="muted msg-pad">Loading…</div>}
+            {loadingContacts && contacts.length === 0 && <p className="msg-note muted">Loading…</p>}
 
             {!loadingContacts && contacts.length === 0 && (
-              <div className="muted msg-pad">No other staff accounts yet.</div>
+              <p className="msg-note muted">No other staff accounts yet.</p>
             )}
 
             {contacts.length > 0 && visibleContacts.length === 0 && (
-              <div className="muted msg-pad">No one matches “{filter}”.</div>
+              <p className="msg-note muted">No one matches “{filter}”.</p>
             )}
 
             {visibleContacts.map((c) => (
@@ -259,10 +185,11 @@ export default function Messages() {
                 key={c.id}
                 type="button"
                 className={`msg-contact${c.id === peerId ? ' active' : ''}`}
-                onClick={() => setPeerId(c.id)}
+                onClick={() => openPeer(c.id)}
+                aria-current={c.id === peerId ? 'true' : undefined}
               >
-                <span className="msg-avatar">
-                  {initials(c.displayName)}
+                <span className="msg-avatar" aria-hidden="true">
+                  {initialsOf(c.displayName)}
                   <span
                     className={`msg-dot${c.online ? ' is-online' : ''}`}
                     title={c.online ? 'Online' : 'Offline'}
@@ -274,7 +201,11 @@ export default function Messages() {
                     {c.unreadCount > 0 && <span className="msg-unread">{c.unreadCount}</span>}
                   </span>
                   <span className="msg-contact-sub">
-                    {c.lastMessagePreview || <RoleBadge code={primaryRole(c.roles)} />}
+                    {c.lastMessagePreview ? (
+                      previewOf(c.lastMessagePreview, 46)
+                    ) : (
+                      <RoleBadge code={primaryRole(c.roles)} />
+                    )}
                   </span>
                 </span>
               </button>
@@ -282,7 +213,7 @@ export default function Messages() {
           </div>
         </aside>
 
-        {/* ── Thread ── */}
+        {/* ── Conversation ── */}
         <section className="msg-thread">
           {!peer ? (
             <EmptyState
@@ -293,36 +224,28 @@ export default function Messages() {
           ) : (
             <>
               <header className="msg-thread-head">
-                <span className="msg-avatar">
-                  {initials(peer.displayName)}
+                <span className="msg-avatar" aria-hidden="true">
+                  {initialsOf(peer.displayName)}
                   <span className={`msg-dot${peer.online ? ' is-online' : ''}`} />
                 </span>
-                <div>
+                <div className="msg-thread-id">
                   <div className="msg-thread-name">{peer.displayName}</div>
                   <div className="msg-thread-sub">
                     <RoleBadge code={primaryRole(peer.roles)} />
-                    <span className="muted">{peer.online ? 'Online' : 'Offline'}</span>
+                    <span className={`msg-presence${peer.online ? ' is-online' : ''}`}>
+                      {peer.online ? 'Online' : 'Offline'}
+                    </span>
                   </div>
                 </div>
               </header>
 
               <div className="msg-scroll" ref={scrollRef}>
-                {messages.length === 0 ? (
-                  <div className="muted msg-pad">
+                {rows.length === 0 ? (
+                  <p className="msg-note muted">
                     No messages yet — say hello to {peer.displayName.split(' ')[0]}.
-                  </div>
+                  </p>
                 ) : (
-                  messages.map((m) => {
-                    const mine = m.senderId === user?.id;
-                    return (
-                      <div key={m.id} className={`msg-row${mine ? ' mine' : ''}`}>
-                        <div className="msg-bubble">
-                          <div className="msg-body">{m.body}</div>
-                          <div className="msg-time">{stamp(m.createdAt)}</div>
-                        </div>
-                      </div>
-                    );
-                  })
+                  <Transcript rows={rows} />
                 )}
               </div>
 
@@ -336,24 +259,33 @@ export default function Messages() {
                 </div>
               )}
 
-              <form className="msg-composer" onSubmit={send}>
-                <textarea
-                  className={blocked ? 'is-blocked' : undefined}
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    // Clear the warning as soon as they start rewriting, rather
-                    // than leaving it up to accuse text that no longer exists.
-                    if (blocked) setBlocked(false);
-                  }}
-                  onKeyDown={onKeyDown}
-                  placeholder={`Message ${peer.displayName}…`}
-                  rows={2}
-                  maxLength={4000}
-                  aria-label={`Message ${peer.displayName}`}
-                />
-                <button type="submit" disabled={!draft.trim() || sending}>
-                  {sending ? 'Sending…' : 'Send'}
+              <form className="msg-composer" onSubmit={submit}>
+                <div className={`msg-composer-field${blocked ? ' is-blocked' : ''}`}>
+                  <textarea
+                    ref={taRef}
+                    value={draft}
+                    onChange={(e) => {
+                      setDraft(e.target.value);
+                      // Clear the warning as soon as they start rewriting,
+                      // rather than leaving it up to accuse text that no longer
+                      // exists.
+                      if (blocked) clearBlocked();
+                    }}
+                    onKeyDown={onKeyDown}
+                    placeholder={`Message ${peer.displayName.split(' ')[0]}…`}
+                    rows={1}
+                    maxLength={4000}
+                    aria-label={`Message ${peer.displayName}`}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="msg-send"
+                  disabled={!draft.trim() || sending}
+                  aria-label="Send message"
+                  title="Send  ·  Shift+Enter for a new line"
+                >
+                  <Icon name="send" size={16} strokeWidth={2} />
                 </button>
               </form>
             </>

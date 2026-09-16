@@ -10,6 +10,7 @@ import NotificationBell from './NotificationBell';
 import NotificationPopups from './NotificationPopups';
 import IncomingCall from './IncomingCall';
 import TutorialTour from './TutorialTour';
+import ChatDock, { openChat } from './ChatDock';
 import { applyAccent } from '../lib/accent';
 import { playMessageChime } from '../lib/sound';
 import { useNotificationFeed } from '../lib/notifications';
@@ -165,10 +166,24 @@ export default function Layout() {
       // fires the moment the message is sent, and the poll can be twenty
       // seconds behind it.
       playMessageChime();
-      // No pop-up over the Messages page itself — the message is already
-      // arriving in the thread the reader is looking at, and a card announcing
-      // what is visibly on screen is just something else to dismiss.
+      // Nothing to announce over the Messages page itself — the message is
+      // already arriving in the thread the reader is looking at.
       if (pathRef.current === '/messages') return;
+      // A message opens a CHAT WINDOW, not a notification card.
+      //
+      // The card was a dead end for the one channel where the useful response
+      // is a reply: it said "Message from Maria Santos", and acting on it meant
+      // clicking through to a full-page conversation and losing whatever you
+      // had open. The docked window is the announcement AND the reply box, so
+      // the interruption costs the reader nothing but the corner of the screen.
+      // The row is still in the bell either way — this only decides which
+      // surface comes to you.
+      if (item.peerId) {
+        openChat(item.peerId);
+        return;
+      }
+      // No sender id in the payload (an older event shape): fall through to the
+      // card, which at least still says a message arrived.
     }
     setPopups((p) => [item, ...p].slice(0, 6));
   }, []);
@@ -847,6 +862,15 @@ export default function Layout() {
           housekeeper happens to be, which is the difference between a call and
           a notification. */}
       <IncomingCall />
+      {/* Docked chat windows, bottom-right. In the SHELL so a conversation
+          survives navigation — a window that closed every time you changed page
+          would be useless for the thing it exists for, which is replying to
+          somebody without abandoning the screen you were working on.
+
+          Suppressed on /messages: that page IS the conversation at full size,
+          and a second live view of the same thread would double the poll rate
+          for something already on screen. */}
+      <ChatDock suppressed={location.pathname === '/messages'} />
       <TutorialTour open={tourOpen} onFinish={finishTour} />
     </div>
   );

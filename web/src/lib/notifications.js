@@ -115,6 +115,17 @@ const EVENT_LINK = {
   'messaging:message_sent': (d) => (d?.senderId ? `/messages?peer=${d.senderId}` : '/messages'),
 };
 
+// ── Who the other party is, for channels addressed to a PERSON ───────────────
+// Most events are about a record — a room, a folio, a reservation — and the
+// place to go is that record's page, which EVENT_LINK above gives. A direct
+// message is about a person, and the useful response is not to navigate at all
+// but to open a chat window on them where you already are. A separate map, in
+// the same shape as EVENT_LINK, so `describeEvent` stays generic rather than
+// growing a special case for one channel.
+const EVENT_PEER = {
+  'messaging:message_sent': (d) => d?.senderId || null,
+};
+
 // ── Turning a payload into a sentence ────────────────────────────────────────
 //
 // Every row used to read "Payment received" and nothing else, which is true of
@@ -240,6 +251,7 @@ export function describeEvent(channel, data) {
     text,
     subject: subject || subjectOf(d),
     to: EVENT_LINK[channel]?.(d) || null,
+    peerId: EVENT_PEER[channel]?.(d) || null,
   };
 }
 
