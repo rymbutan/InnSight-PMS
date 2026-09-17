@@ -1,5 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DEFAULT-DENY GUARD.
@@ -97,4 +99,32 @@ test('OPEN lists exactly the routes that exist — no stale or blanket entries',
   // a route added elsewhere gets waved through by a copy-pasted line. Pin the
   // two lists to each other so adding a route is a deliberate edit to BOTH.
   assert.deepEqual(listRoutes(router).sort(), [...OPEN].sort());
+});
+
+// ── Activity log ────────────────────────────────────────────────────────────
+
+const ROUTE_SRC = readFileSync(join(__dirname, 'messages.routes.js'), 'utf8');
+
+test('the presence heartbeat opts out of the activity log', () => {
+  // The heartbeat fires every 25 seconds per open browser (web/src/components/
+  // Layout.jsx beats against the 45s TTL), so without this opt-out one route
+  // writes thousands of rows a day and buries every real action an admin came to
+  // the Activity Log to find. It shipped that way once and was caught only by
+  // reading the deployed table after the deploy — hence a test.
+  const route = ROUTE_SRC.slice(ROUTE_SRC.indexOf("router.post('/messages/presence/ping'"));
+  const body = route.slice(0, route.indexOf('\n});'));
+  assert.match(
+    body,
+    /res\.locals\.activity\s*=\s*false/,
+    'the presence ping must set res.locals.activity = false, or it floods the Activity Log'
+  );
+});
+
+test('sending a message is still recorded', () => {
+  // Guards the guard: applying the opt-out to the whole router, or to the send
+  // handler, would keep the test above green while the log quietly stopped
+  // recording the one messaging action that matters.
+  const send = ROUTE_SRC.slice(ROUTE_SRC.indexOf("router.post('/messages',"));
+  const body = send.slice(0, send.indexOf('\nrouter.'));
+  assert.doesNotMatch(body, /res\.locals\.activity\s*=\s*false/, 'sending a message must stay logged');
 });
