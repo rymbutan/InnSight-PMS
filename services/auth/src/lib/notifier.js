@@ -80,6 +80,25 @@ const { publicUrl } = require('./publicUrl');
 // body line starting with one must be doubled or the message is truncated there
 // and the remainder is fed to the server as commands. Applies to attachment
 // base64 too — unlikely to start with a dot, but not worth reasoning about.
+// The SMTP ENVELOPE address, extracted from a header value that may carry a
+// display name.
+//
+// `From:` may read `InnSight PMS (do not reply) <innsight@example.com>` — that
+// is RFC 5322, the header grammar. `MAIL FROM:` may not: RFC 5321 wants a bare
+// addr-spec in angle brackets and nothing else. Passing the display name
+// through produced
+//     MAIL FROM:<InnSight PMS (do not reply) <innsight@example.com>>
+// which Gmail rejects with `555 5.5.2 Syntax error, cannot decode response`.
+//
+// Mailhog accepts it, and so does any fake server in a test that answers 250 to
+// everything — which is exactly why this shipped as far as a live send before
+// anything noticed. The regression test asserts the envelope, not the header.
+function envelopeAddress(value) {
+  const s = String(value || '').trim();
+  const angled = s.match(/<([^<>]+)>\s*$/);
+  return (angled ? angled[1] : s).trim();
+}
+
 function dotStuff(text) {
   return text.replace(/(^|\r\n)\./g, '$1..');
 }
@@ -249,8 +268,9 @@ function send({ to, subject, body, from = FROM_ADDR, attachment, replyTo = REPLY
     // Everything from MAIL FROM onwards is the same in every mode.
     function envelopeSteps() {
       return [
-        { label: 'MAIL FROM', send: `MAIL FROM:<${from}>`, codes: [250] },
-        { label: 'RCPT TO', send: `RCPT TO:<${to}>`, codes: [250, 251] },
+        // Envelope addresses, never the header forms — see envelopeAddress.
+        { label: 'MAIL FROM', send: `MAIL FROM:<${envelopeAddress(from)}>`, codes: [250] },
+        { label: 'RCPT TO', send: `RCPT TO:<${envelopeAddress(to)}>`, codes: [250, 251] },
         { label: 'DATA', send: 'DATA', codes: [354] },
         {
           label: 'message body',
@@ -406,4 +426,4 @@ const TEMPLATES = {
   }),
 };
 
-module.exports = { send, buildMessage, TEMPLATES };
+module.exports = { send, buildMessage, envelopeAddress, TEMPLATES };
