@@ -279,3 +279,66 @@ test('the notice is appended to the body, never to the headers', async () => {
     server.close();
   }
 });
+
+// ── Envelope vs header addresses ────────────────────────────────────────────
+// A display name is legal in the From HEADER (RFC 5322) and illegal in the
+// MAIL FROM ENVELOPE (RFC 5321). Sending the header form as the envelope
+// produced `MAIL FROM:<InnSight PMS (do not reply) <a@b>>`, which Mailhog and
+// every 250-to-everything fake accepts and Gmail rejects with 555 5.5.2. It got
+// as far as a live send before anything noticed, so these assert the WIRE.
+
+test('a display name is stripped from the envelope but kept in the header', async () => {
+  const { server, received } = fakeSmtp();
+  const port = await listen(server);
+  try {
+    const { send } = loadNotifier({
+      ...BASE,
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: port,
+      NOTIFY_FROM: 'InnSight PMS (do not reply) <innsight.local.pms@gmail.com>',
+    });
+    await send({ to: 'fsalvanera@slsu.edu.ph', subject: 'S', body: 'B' });
+
+    assert.ok(
+      received.includes('MAIL FROM:<innsight.local.pms@gmail.com>'),
+      `envelope must be a bare address, got: ${received.find((l) => l.startsWith('MAIL FROM'))}`
+    );
+    assert.ok(received.includes('RCPT TO:<fsalvanera@slsu.edu.ph>'));
+    // The header keeps the name — that is the whole point of setting one.
+    assert.match(
+      received.join('\n'),
+      /^From: InnSight PMS \(do not reply\) <innsight\.local\.pms@gmail\.com>$/m
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test('a nested angle bracket never reaches the envelope', async () => {
+  // The precise shape Gmail refused.
+  const { server, received } = fakeSmtp();
+  const port = await listen(server);
+  try {
+    const { send } = loadNotifier({
+      ...BASE,
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: port,
+      NOTIFY_FROM: 'Name <a@b.test>',
+    });
+    await send({ to: 'Someone <c@d.test>', subject: 'S', body: 'B' });
+    for (const line of received.filter((l) => /^(MAIL FROM|RCPT TO)/.test(l))) {
+      assert.ok(!/<[^>]*</.test(line), `nested angle brackets in the envelope: ${line}`);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test('envelopeAddress handles the forms that actually occur', () => {
+  const { envelopeAddress } = loadNotifier({ ...BASE });
+  assert.equal(envelopeAddress('a@b.com'), 'a@b.com');
+  assert.equal(envelopeAddress('Name <a@b.com>'), 'a@b.com');
+  assert.equal(envelopeAddress('InnSight PMS (do not reply) <a@b.com>'), 'a@b.com');
+  assert.equal(envelopeAddress('  <a@b.com>  '), 'a@b.com');
+  assert.equal(envelopeAddress(''), '');
+});
