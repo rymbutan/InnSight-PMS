@@ -41,6 +41,35 @@ const SMTP_AUTH = Boolean(SMTP_USER && SMTP_PASS);
 // silently not arriving, since the caller logs and swallows.
 const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || (SMTP_AUTH ? 20000 : 5000));
 const FROM_ADDR = process.env.NOTIFY_FROM || 'no-reply@innsight.local';
+
+// WHERE REPLIES GO, AND WHY THIS IS NOT "NO REPLY"
+// ------------------------------------------------
+// A mailbox cannot refuse replies. There is no header and no Gmail setting that
+// makes an address un-repliable — anyone can hit Reply on anything, and the
+// message lands in whatever inbox the From address belongs to. The familiar
+// "no-reply@" convention is not a mechanism, it is a LABEL on an address nobody
+// reads.
+//
+// So this system does the two things that are actually possible:
+//
+//   1. Say so, in the From display name and at the foot of every message, so a
+//      person does not write a reply that will never be read.
+//   2. Point replies somewhere real when there IS somewhere real. Set
+//      NOTIFY_REPLY_TO to a monitored address and every outbound message
+//      carries it; most clients then send the reply there instead of to the
+//      sending mailbox.
+//
+// Unset, replies go to the sending account — which for Gmail means somebody has
+// to remember to look at it, or set a filter that archives them.
+const REPLY_TO = process.env.NOTIFY_REPLY_TO || '';
+
+// Appended to every outbound message. One line, at the foot, after the content —
+// a person who reads to the end has already got what they came for, and this is
+// housekeeping rather than part of the message.
+const NO_REPLY_NOTICE = REPLY_TO
+  ? `\n\n—\nThis message was sent automatically. Replies go to ${REPLY_TO}.\n`
+  : '\n\n—\nThis message was sent automatically from an unmonitored mailbox. ' +
+    'Please do not reply to it.\n';
 // Guest-facing links come from the shared publicUrl helper so there is one answer
 // to "what address can the guest actually reach?" rather than a per-module guess.
 // The old default here was port 5180 — the gateway's second published port — which
@@ -73,8 +102,15 @@ function wrapBase64(buf) {
  *
  * @param {object} [attachment] { filename, contentType, content: Buffer }
  */
-function buildMessage({ to, subject, body, from = FROM_ADDR, attachment }) {
+function buildMessage({ to, subject, body, from = FROM_ADDR, attachment, replyTo = REPLY_TO }) {
   const headers = [`From: ${from}`, `To: ${to}`, `Subject: ${subject}`, 'MIME-Version: 1.0'];
+  // Reply-To only when configured. An empty one is worse than none: some clients
+  // render it as a blank recipient and others treat the header as malformed.
+  if (replyTo) headers.splice(1, 0, `Reply-To: ${replyTo}`);
+  // Tells well-behaved clients and list software that this is transactional mail
+  // rather than a conversation. It does not stop a reply either — nothing does —
+  // but it is what the convention expects and costs a line.
+  if (!replyTo) headers.push('Auto-Submitted: auto-generated');
 
   if (!attachment) {
     return `${headers.join('\r\n')}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${dotStuff(body)}`;
@@ -114,7 +150,14 @@ function buildMessage({ to, subject, body, from = FROM_ADDR, attachment }) {
  * so a refusal names the stage it happened at instead of surfacing as a generic
  * failure three commands later.
  */
-function send({ to, subject, body, from = FROM_ADDR, attachment }) {
+function send({ to, subject, body, from = FROM_ADDR, attachment, replyTo = REPLY_TO }) {
+  // The notice is appended HERE rather than inside each template, because send()
+  // is the one place every outbound message passes through and a per-template
+  // footer is a footer that three templates will eventually be missing.
+  // buildMessage is left untouched so its existing format tests still describe
+  // exactly what it does — this is about the body handed TO it.
+  const bodyWithNotice = `${body}${NO_REPLY_NOTICE}`;
+
   return new Promise((resolve, reject) => {
     let socket = SMTP_IMPLICIT_TLS
       ? tls.connect({ host: SMTP_HOST, port: SMTP_PORT, servername: SMTP_HOST })
@@ -211,7 +254,7 @@ function send({ to, subject, body, from = FROM_ADDR, attachment }) {
         { label: 'DATA', send: 'DATA', codes: [354] },
         {
           label: 'message body',
-          send: `${buildMessage({ to, subject, body, from, attachment })}\r\n.`,
+          send: `${buildMessage({ to, subject, body: bodyWithNotice, from, attachment, replyTo })}\r\n.`,
           codes: [250],
         },
         { label: 'QUIT', send: 'QUIT', codes: [221], then: () => done() },
