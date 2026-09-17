@@ -203,6 +203,24 @@ services:
       # What guest-facing links and QR codes point at. localhost is right for an
       # offline laptop demo; set it to the public origin once deployed and the same
       # image starts printing phone-scannable codes with no rebuild.
+      # ── Outbound mail ────────────────────────────────────────────────────
+      # Unset SMTP_USER/SMTP_PASS and this talks to Mailhog: everything captured
+      # at :8025, nothing delivered. That is the default and the right one for
+      # development.
+      #
+      # Set them and the notifier upgrades the session with STARTTLS and
+      # authenticates — see services/_shared/notifier.js. For Gmail that is
+      # smtp.gmail.com:587 with an APP PASSWORD, and NOTIFY_FROM must name the
+      # same mailbox as SMTP_USER or Gmail rewrites the From header.
+      #
+      # SMTP_PASS is a real secret: it belongs in .env on the host, which is
+      # gitignored, and never in this file.
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       GUEST_URL: http://guest-service:3008
@@ -291,12 +309,26 @@ services:
       # sign-in. It is never logged. The previous code hardcoded `admin12345` and
       # printed it to stdout on every container start.
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
-      # Forgot-password mail. Mailhog catches everything in this stack, so a
-      # reset link is read at :8025 rather than actually delivered. PUBLIC_BASE_URL
-      # is what the link in that email points at — it must be an address the
-      # RECIPIENT can open, which is why it is configured rather than guessed.
+      # Forgot-password mail. PUBLIC_BASE_URL is what the link in that email
+      # points at — it must be an address the RECIPIENT can open, which is why
+      # it is configured rather than guessed.
+      # ── Outbound mail ────────────────────────────────────────────────────
+      # Unset SMTP_USER/SMTP_PASS and this talks to Mailhog: everything captured
+      # at :8025, nothing delivered. That is the default and the right one for
+      # development.
+      #
+      # Set them and the notifier upgrades the session with STARTTLS and
+      # authenticates — see services/_shared/notifier.js. For Gmail that is
+      # smtp.gmail.com:587 with an APP PASSWORD, and NOTIFY_FROM must name the
+      # same mailbox as SMTP_USER or Gmail rewrites the From header.
+      #
+      # SMTP_PASS is a real secret: it belongs in .env on the host, which is
+      # gitignored, and never in this file.
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
       NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       # University sign-in. An OAuth *client* id is not a secret — it is handed to
@@ -327,6 +359,24 @@ services:
       # What guest-facing links and QR codes point at. localhost is right for an
       # offline laptop demo; set it to the public origin once deployed and the same
       # image starts printing phone-scannable codes with no rebuild.
+      # ── Outbound mail ────────────────────────────────────────────────────
+      # Unset SMTP_USER/SMTP_PASS and this talks to Mailhog: everything captured
+      # at :8025, nothing delivered. That is the default and the right one for
+      # development.
+      #
+      # Set them and the notifier upgrades the session with STARTTLS and
+      # authenticates — see services/_shared/notifier.js. For Gmail that is
+      # smtp.gmail.com:587 with an APP PASSWORD, and NOTIFY_FROM must name the
+      # same mailbox as SMTP_USER or Gmail rewrites the From header.
+      #
+      # SMTP_PASS is a real secret: it belongs in .env on the host, which is
+      # gitignored, and never in this file.
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
