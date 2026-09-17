@@ -121,6 +121,38 @@ TZ=Asia/Manila
 #     PUBLIC_BASE_URL=https://innsight.example
 # Nothing needs rebuilding — the services read it at start.
 PUBLIC_BASE_URL=http://localhost:8080
+
+# ── Outbound mail ───────────────────────────────────────────────────────────
+# Left blank, the stack sends to Mailhog: every email is captured at :8025 and
+# NOTHING is delivered. That is what you want for development, and it is what a
+# fresh .env gives you.
+#
+# To send real mail, fill these in. For Gmail:
+#
+#     SMTP_HOST=smtp.gmail.com
+#     SMTP_PORT=587
+#     SMTP_USER=innsight.local.pms@gmail.com
+#     SMTP_PASS=<16-character app password, no spaces>
+#     NOTIFY_FROM=InnSight PMS <innsight.local.pms@gmail.com>
+#
+# SMTP_PASS is an APP PASSWORD, not the account password: Google stopped
+# accepting the account password over SMTP in May 2022. Generate one at
+# Google Account → Security → 2-Step Verification → App passwords. 2-Step
+# Verification has to be ON before that option appears.
+#
+# NOTIFY_FROM must name the same mailbox as SMTP_USER. Gmail rewrites a From
+# header it does not own, so a mismatch does not fail loudly — it just sends
+# as somebody else.
+#
+# Leave SMTP_USER and SMTP_PASS empty and nothing changes: the notifier only
+# reaches for STARTTLS and AUTH when both are set, and it REFUSES to send a
+# password to a server that will not encrypt the session.
+SMTP_HOST=mailhog
+SMTP_PORT=1025
+SMTP_USER=
+SMTP_PASS=
+SMTP_SECURE=
+NOTIFY_FROM=no-reply@innsight.local
 EOF
 
 chmod 600 .env
