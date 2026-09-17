@@ -235,7 +235,16 @@ router.post('/messages', async (req, res) => {
         // `code` so the composer can show this inline and keep the draft, rather
         // than flashing it as one more transient toast the sender may miss.
         code: 'PROFANITY',
-        error: 'That message contains language this system does not allow. Please reword it and try again.',
+        // The second sentence exists because the filter now blocks sexual
+        // propositions, and the words in a proposition are the same words
+        // somebody uses to REPORT one. Refusing that report with nothing but
+        // "reword it" leaves the person who most needs to be heard guessing at
+        // what the machine will accept, so the refusal says which way out
+        // works: describe it rather than quote it.
+        error:
+          'That message contains language this system does not allow. Please reword it and try again. ' +
+          'If you are reporting something that was said to you, describe what happened rather than ' +
+          'quoting it, and tell your supervisor.',
       });
     }
 

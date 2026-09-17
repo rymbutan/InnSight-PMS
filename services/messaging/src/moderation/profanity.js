@@ -103,6 +103,18 @@ const WORDS = [
   'handjob',
   'jerkoff',
   'cumshot',
+  'horny',
+  'nudes',
+  'orgasm',
+  'masturbate',
+  'masturbating',
+  'masturbation',
+  'boobs',
+  'sexting',
+  'creampie',
+  'deepthroat',
+  'gangbang',
+  'threesome',
 
   // ── English: slurs. Not merely "strong language" — targeted abuse, and the
   // reason this is a moderation filter rather than a politeness setting. ──
@@ -205,13 +217,53 @@ const WORDS = [
   'buang',
   'iyot',
   'lintik',
+  // Lewd rather than merely rude. 'libog'/'malibog' is explicitly sexual; the
+  // 'landi' family is the promiscuity insult. 'hubad' (naked) is deliberately
+  // ABSENT for the same reason 'paki' is: housekeeping reporting what they
+  // walked in on is the exact sentence it would block.
+  'libog',
+  'malibog',
+  'malandi',
+  'kalandian',
 ];
 
 // Expressions whose insult lives in the whole phrase. Written with real spaces;
 // each space matches one run of separators, while the letters inside each word
 // still have to be adjacent. This is how "putang ina" is caught without putting
 // bare "tang" or bare "ina" — both ordinary — anywhere near the word list.
-const PHRASES = ['putang ina', 'tang ina', 'hayop ka', 'leche ka', 'pesteng yawa', 'son of a bitch'];
+const PHRASES = [
+  'putang ina',
+  'tang ina',
+  'hayop ka',
+  'leche ka',
+  'pesteng yawa',
+  'son of a bitch',
+
+  // ── Sexual propositions and solicitation ──
+  // The category the single-word list cannot reach: every word in "let's have
+  // sex" is ordinary, and the whole expression is what makes it a proposition.
+  // Staff messaging each other is the one place this needs catching — a
+  // colleague cannot mute or block another colleague the way a guest can be
+  // escalated, so the filter is the only thing standing between a shift worker
+  // and a proposition from someone they have to keep working beside.
+  //
+  // Scoped to expressions that are propositions in ANY context. Deliberately
+  // absent: 'come to my room' (the most ordinary sentence in a hotel), 'hook
+  // up' (projectors, guests to shuttles), 'take off your' (shoes, gloves, the
+  // linen) and 'touch me' — that last one is how someone reports being touched,
+  // and blocking the report is worse than the word.
+  'have sex',
+  'sex with me',
+  'sex with you',
+  'sleep with me',
+  'make love',
+  'suck my',
+  'lick my',
+  'send nudes',
+  'get naked',
+  'sit on my',
+  'in bed with me',
+];
 
 // Common inflections, so the list can hold roots rather than every form. Kept
 // short, because each entry is another route by which an innocent word can be
