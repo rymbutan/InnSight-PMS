@@ -66,10 +66,16 @@ function loadNotifier(env) {
   return require('./notifier');
 }
 
+// Every variable the module reads is listed here, INCLUDING the ones a given
+// test does not care about. loadNotifier sets process.env, so anything omitted
+// leaks from whichever test ran last — which is how the notice test started
+// seeing the previous test's NOTIFY_REPLY_TO and asserting against the wrong
+// branch.
 const BASE = {
   SMTP_USER: undefined,
   SMTP_PASS: undefined,
   SMTP_SECURE: undefined,
+  NOTIFY_REPLY_TO: undefined,
   SMTP_TIMEOUT_MS: 3000,
   NOTIFY_FROM: 'no-reply@innsight.local',
 };
@@ -195,6 +201,80 @@ test('multi-line capability replies are parsed, not mistaken for several replies
     // One EHLO, one MAIL FROM — not one per capability line.
     assert.equal(received.filter((l) => /^EHLO/i.test(l)).length, 1);
     assert.equal(received.filter((l) => /^MAIL FROM/i.test(l)).length, 1);
+  } finally {
+    server.close();
+  }
+});
+
+// ── No-reply handling ───────────────────────────────────────────────────────
+// A mailbox cannot refuse replies — there is no header and no Gmail setting for
+// it. What the system can do is SAY so and, where there is a monitored address,
+// point replies at it. These pin both halves.
+
+test('with no Reply-To configured, messages are marked auto-generated and say so', async () => {
+  const { server, received } = fakeSmtp();
+  const port = await listen(server);
+  try {
+    const { send } = loadNotifier({
+      ...BASE,
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: port,
+      NOTIFY_REPLY_TO: undefined,
+      NOTIFY_FROM: 'InnSight PMS (do not reply) <innsight.local.pms@gmail.com>',
+    });
+    await send({ to: 'a@b.test', subject: 'Reset your password', body: 'Open this link.' });
+
+    const wire = received.join('\n');
+    assert.match(wire, /^From: InnSight PMS \(do not reply\) <innsight\.local\.pms@gmail\.com>$/m);
+    assert.match(wire, /^Auto-Submitted: auto-generated$/m);
+    assert.doesNotMatch(wire, /^Reply-To:/m, 'an empty Reply-To is worse than none');
+    assert.match(wire, /do not reply to it/i, 'the body must tell the reader not to reply');
+  } finally {
+    server.close();
+  }
+});
+
+test('with a Reply-To configured, replies are pointed at it instead', async () => {
+  const { server, received } = fakeSmtp();
+  const port = await listen(server);
+  try {
+    const { send } = loadNotifier({
+      ...BASE,
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: port,
+      NOTIFY_REPLY_TO: 'frontdesk@slsu.edu.ph',
+    });
+    await send({ to: 'a@b.test', subject: 'Reset your password', body: 'Open this link.' });
+
+    const wire = received.join('\n');
+    assert.match(wire, /^Reply-To: frontdesk@slsu\.edu\.ph$/m);
+    // Auto-Submitted is for mail nobody reads. With a monitored reply address
+    // this IS a conversation, and marking it auto-generated tells list software
+    // to discard the reply.
+    assert.doesNotMatch(wire, /^Auto-Submitted:/m);
+    assert.match(wire, /Replies go to frontdesk@slsu\.edu\.ph/);
+    assert.doesNotMatch(wire, /do not reply to it/i);
+  } finally {
+    server.close();
+  }
+});
+
+test('the notice is appended to the body, never to the headers', async () => {
+  // A footer that lands above the blank line separating headers from body would
+  // corrupt the message rather than annotate it.
+  const { server, received } = fakeSmtp();
+  const port = await listen(server);
+  try {
+    const { send } = loadNotifier({ ...BASE, SMTP_HOST: '127.0.0.1', SMTP_PORT: port });
+    await send({ to: 'a@b.test', subject: 'S', body: 'THE-BODY' });
+    const wire = received.join('\n');
+    const blankLine = wire.indexOf('\n\n');
+    assert.ok(blankLine > 0, 'message must have a header/body separator');
+    assert.ok(
+      wire.indexOf('do not reply to it') > blankLine,
+      'the notice must sit in the body, after the headers'
+    );
+    assert.ok(wire.indexOf('THE-BODY') < wire.indexOf('do not reply to it'), 'notice goes last');
   } finally {
     server.close();
   }

@@ -221,6 +221,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
       NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
+      NOTIFY_REPLY_TO: ${NOTIFY_REPLY_TO:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       GUEST_URL: http://guest-service:3008
@@ -330,6 +331,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
       NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
+      NOTIFY_REPLY_TO: ${NOTIFY_REPLY_TO:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       # University sign-in. An OAuth *client* id is not a secret — it is handed to
       # every browser that loads the sign-in page. Leave it empty and Google
@@ -377,6 +379,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
       NOTIFY_FROM: ${NOTIFY_FROM:-no-reply@innsight.local}
+      NOTIFY_REPLY_TO: ${NOTIFY_REPLY_TO:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
