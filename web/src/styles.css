@@ -2709,6 +2709,15 @@ tr.active td {
   font-weight: 600;
   text-transform: uppercase;
 }
+/* The base `.badge` sets only shape and type — every background lives on a
+   modifier, so a bare `.badge` renders as unstyled text rather than a capsule.
+   This is the modifier for a label that classifies rather than reports status:
+   the Activity Log's service/area column has no good/bad reading, and borrowing
+   `.closed` for it would mean the colour said something the value does not. */
+.badge.neutral {
+  background: var(--neutral-soft);
+  color: var(--on-neutral-soft);
+}
 .badge.clean {
   background: var(--green-soft);
   color: var(--on-green-soft);

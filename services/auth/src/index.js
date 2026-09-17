@@ -17,6 +17,7 @@ const {
 } = require('./lib/observability');
 const { buildSpec, mountDocs } = require('./lib/openapi');
 
+const { activityLog } = require('./lib/activityLog');
 const logger = makeLogger('auth');
 const app = express();
 const PORT = process.env.PORT || 3010;
@@ -153,6 +154,12 @@ app.get('/api/health/services', verifyToken, requireRole('ADMIN'), async (req, r
   res.json({ overall: allUp ? 'up' : 'degraded', services: checks, checkedAt: new Date().toISOString() });
 });
 
+// Mounted ABOVE the routers because auth's routes apply verifyToken
+// themselves (POST /api/auth/login is public by necessity). activityLog
+// reads req.user on 'finish', so the claims are there by the time it
+// records — and a login, which starts with no session at all, is still
+// captured.
+app.use(activityLog({ service: 'auth' }));
 app.use('/api/auth', authRoutes);
 app.use('/api', trainingRoutes);
 app.use('/api', usersRoutes);

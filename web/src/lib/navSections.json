@@ -284,6 +284,25 @@
           "api": ["/api/health"]
         },
         {
+          "key": "activity",
+          "to": "/activity",
+          "label": "Activity Log",
+          "icon": "history",
+          "_rolesComment": [
+            "ADMIN only, and narrower than the Night Audit page on purpose. This",
+            "is the record of what every member of staff did, MANAGER included —",
+            "a manager who can review (and be seen reviewing) their own",
+            "department's actions is a separation-of-duties problem, not a",
+            "convenience. Same reasoning as Service Health above, which withholds",
+            "operational data from MANAGER for the same reason.",
+            "",
+            "ADMIN is absent from configurableRoles, so this cannot be hidden from",
+            "the only role that can reach it."
+          ],
+          "api": ["/api/activity"],
+          "roles": ["ADMIN"]
+        },
+        {
           "key": "settings",
           "to": "/settings",
           "label": "Settings",

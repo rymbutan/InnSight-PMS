@@ -16,6 +16,7 @@ const logger = makeLogger('messaging');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
 const { startSweeper } = require('./retention/policy');
 
+const { activityLog } = require('./lib/activityLog');
 const app = express();
 const PORT = process.env.PORT || 3014;
 
@@ -49,7 +50,14 @@ app.get('/health', (req, res) => {
 //
 // Settings is first so the fixed path /messages/settings/retention is matched
 // before anything with a wildcard segment could grow to cover it.
-app.use('/api', verifyToken, idempotency, settingsRoutes, messagesRoutes);
+app.use(
+  '/api',
+  verifyToken,
+  idempotency,
+  activityLog({ service: 'messaging' }),
+  settingsRoutes,
+  messagesRoutes
+);
 
 const subscriber = startSubscriber();
 
