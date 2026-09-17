@@ -740,43 +740,60 @@ export default function Layout() {
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              className="cb-icon-btn"
-              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-              onClick={toggleTheme}
-            >
-              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
-            </button>
-            {/* A standalone topbar icon rather than another line in the account
+            {/* THREE CLUSTERS, not one undifferentiated row of icons: create,
+                then the utilities you reach for occasionally, then the two
+                controls that carry unread counts. Grouping is what makes six
+                icons scan as three things instead of six — the gap INSIDE a
+                cluster is deliberately tighter than the gap between clusters,
+                so the eye gets the grouping without needing a border round
+                each one. */}
+            <div className="cb-util-group">
+              <button
+                type="button"
+                className="cb-icon-btn"
+                title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+                onClick={toggleTheme}
+              >
+                <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
+              </button>
+              {/* A standalone topbar icon rather than another line in the account
                 menu — replaying the tour is something people reach for in the
                 moment ("wait, how do I..."), not something they go looking for
                 inside Settings-adjacent account chrome. graduation-cap, not
                 sparkles — sparkles is already Amenities & Facilities' icon in
                 the sidebar, and reusing it here read as the same feature. */}
-            <button
-              type="button"
-              className="cb-icon-btn"
-              title="Replay tutorial"
-              onClick={() => setTourOpen(true)}
-            >
-              <Icon name="graduation-cap" size={18} />
-            </button>
-            {/* Gated to the roles that can actually open /calendar. This button
-                is the only route to that page, so leaving it unguarded handed
-                Housekeeping a shortcut straight into a "not authorised" screen —
-                the guard has to be here, not only on the route. */}
-            {hasRole('ADMIN', 'MANAGER', 'FRONT_DESK') && (
               <button
                 type="button"
                 className="cb-icon-btn"
-                title="Calendar"
-                onClick={() => navigate('/calendar')}
+                title="Replay tutorial"
+                onClick={() => setTourOpen(true)}
               >
-                <Icon name="calendar" size={18} />
+                <Icon name="graduation-cap" size={18} />
               </button>
-            )}
-            <span data-tour="tour-notifications">
+              {/* Gated to the roles that can actually open /calendar. This button
+                is the only route to that page, so leaving it unguarded handed
+                Housekeeping a shortcut straight into a "not authorised" screen —
+                the guard has to be here, not only on the route. */}
+              {hasRole('ADMIN', 'MANAGER', 'FRONT_DESK') && (
+                <button
+                  type="button"
+                  className="cb-icon-btn"
+                  title="Calendar"
+                  onClick={() => navigate('/calendar')}
+                >
+                  <Icon name="calendar" size={18} />
+                </button>
+              )}
+            </div>
+
+            {/* Messages and the bell are the only two controls here that carry a
+                count, so they belong together — and they were previously wrapped
+                in a bare <span> for the tour, which made the PAIR a single flex
+                item: the strip's gap applied around them but not between them,
+                and the two buttons sat flush while every other pair was spaced.
+                A real flex row fixes the spacing and still gives the tour one
+                element to point at. */}
+            <div className="cb-comms" data-tour="tour-notifications">
               {/* Messages lives here rather than in the rail. The badge is the
                   same unread count the sidebar row used to carry, so nothing is
                   lost by the move — and on a tablet the topbar stays visible
@@ -798,7 +815,14 @@ export default function Layout() {
                 </button>
               )}
               <NotificationBell feed={notifications} />
-            </span>
+            </div>
+
+            {/* Hairline between the app's controls and "who am I". One separator,
+                not one per cluster: the account pill is the only item here that
+                is not an icon button, and marking that one boundary is enough to
+                give the strip a shape without turning it into a toolbar of
+                boxes. */}
+            <span className="cb-sep" aria-hidden="true" />
 
             {/* The role, spelled out, in place of an avatar initial — a circle
                 with "A" in it identifies nobody and says nothing about what the
