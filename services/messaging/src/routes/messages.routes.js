@@ -34,6 +34,21 @@ const MAX_BODY = 4000;
 const PRESENCE_TTL_SEC = 45;
 const presenceKey = (userId) => `presence:${userId}`;
 
+// "Someone is typing to you right now." DIRECTED, unlike presence: the key names
+// both ends, so typing to one colleague never shows you as typing to another.
+//
+// Redis rather than a column, for the same reason presence is: this is worth
+// nothing a few seconds from now, and writing a row per keystroke-burst to
+// Postgres would be the heaviest write in the service for the most disposable
+// fact in it. The TTL is the whole expiry mechanism — nothing has to clean up
+// after a browser that was closed mid-sentence.
+//
+// 6s against the client's 2.5s repeat (web/src/lib/useMessaging.js) tolerates one
+// dropped request without the indicator flickering, and means it fades about two
+// thread polls after someone stops.
+const TYPING_TTL_SEC = 6;
+const typingKey = (from, to) => `typing:${from}:${to}`;
+
 // The stable conversation key: the same unordered pair in both directions.
 const pairOf = (a, b) => (a < b ? { userLo: a, userHi: b } : { userLo: b, userHi: a });
 
@@ -174,7 +189,17 @@ router.get('/messages/with/:userId', async (req, res) => {
       data: { readAt: new Date() },
     });
 
-    res.json({ messages, hasMore });
+    // Piggy-backed on the thread poll rather than given its own interval: this
+    // is already fetched every 3s while a conversation is open, and a second
+    // timer would double the request rate for one boolean.
+    let peerTyping = false;
+    try {
+      peerTyping = (await redis.exists(typingKey(peer, me))) === 1;
+    } catch {
+      /* Redis down — the transcript still loads, the indicator just never shows */
+    }
+
+    res.json({ messages, hasMore, peerTyping });
   } catch (err) {
     console.error('[Messaging] Thread error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -248,10 +273,49 @@ router.post('/messages', async (req, res) => {
       )
       .catch(() => {});
 
+    // The message IS the end of typing. Without this the recipient keeps seeing
+    // "typing…" underneath the message that just arrived, for the rest of the
+    // TTL — which reads as a second message coming that never does.
+    redis.del(typingKey(me, recipientId)).catch(() => {});
+
     res.status(201).json(message);
   } catch (err) {
     console.error('[Messaging] Send error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/messages/typing — "I am writing to this person right now."
+//
+// The sender is always req.user.sub and never a body parameter, so this cannot
+// be used to make someone else appear to be typing.
+router.post('/messages/typing', async (req, res) => {
+  // Not an activity-log entry, for the same reason the presence ping is not:
+  // the browser repeats this every 2.5 seconds for as long as someone is
+  // writing a sentence. See services/_shared/activityLog.js.
+  res.locals.activity = false;
+  try {
+    const me = req.user.sub;
+    const { recipientId, typing = true } = req.body || {};
+    if (!recipientId || typeof recipientId !== 'string') {
+      return res.status(400).json({ error: 'recipientId is required.' });
+    }
+    if (recipientId === me) return res.status(400).json({ error: 'Cannot type to yourself.' });
+
+    // `typing: false` is the explicit stop — sent when the box is cleared or the
+    // message goes. Without it the indicator would hang on for the whole TTL
+    // after someone deletes what they were writing, which reads as a message
+    // that never arrives.
+    if (typing) await redis.set(typingKey(me, recipientId), '1', 'EX', TYPING_TTL_SEC);
+    else await redis.del(typingKey(me, recipientId));
+
+    res.json({ ok: true, ttlSec: TYPING_TTL_SEC });
+  } catch (err) {
+    // Never 500 into a keystroke handler: a typing indicator is the least
+    // important thing on the screen and must not surface an error over the
+    // message someone is actually writing.
+    console.error('[Messaging] Typing signal failed:', err.message);
+    res.json({ ok: false });
   }
 });
 

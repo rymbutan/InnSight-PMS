@@ -444,10 +444,23 @@ export default function Layout() {
   // Two filters, not one: the role check is the permanent boundary and the
   // section check is the configurable one, and only the second can be turned off
   // by somebody clicking a checkbox. `core` entries skip the second entirely.
+  //
+  // `chrome: 'topbar'` entries are drawn beside the notification bell instead of
+  // in the rail (Messages). They are filtered out HERE, after both permission
+  // checks rather than before, so the topbar control inherits exactly the same
+  // answer — hiding Messages from a role in Sidebar Visibility must remove the
+  // topbar icon too, not just a rail row that is no longer there.
+  const reachable = (n) => (!n.roles || hasRole(...n.roles)) && (n.core || hasSection(n.key));
   const sections = NAV_SECTIONS.map((s) => ({
     ...s,
-    items: s.items.filter((n) => (!n.roles || hasRole(...n.roles)) && (n.core || hasSection(n.key))),
+    items: s.items.filter((n) => reachable(n) && n.chrome !== 'topbar'),
   })).filter((s) => s.items.length > 0);
+
+  // The catalogue entry behind the topbar Messages control, or undefined when
+  // this role cannot reach it.
+  const messagesEntry = NAV_SECTIONS.flatMap((s) => s.items).find(
+    (n) => n.key === 'messages' && n.chrome === 'topbar' && reachable(n)
+  );
 
   const initial = (user?.displayName || '?').slice(0, 1).toUpperCase();
 
@@ -764,6 +777,26 @@ export default function Layout() {
               </button>
             )}
             <span data-tour="tour-notifications">
+              {/* Messages lives here rather than in the rail. The badge is the
+                  same unread count the sidebar row used to carry, so nothing is
+                  lost by the move — and on a tablet the topbar stays visible
+                  while the rail is a drawer you have to open. */}
+              {messagesEntry && (
+                <button
+                  type="button"
+                  className="cb-icon-btn cb-icon-messages"
+                  title={unreadMessages > 0 ? `Messages — ${unreadMessages} unread` : 'Messages'}
+                  aria-label={unreadMessages > 0 ? `Messages, ${unreadMessages} unread` : 'Messages'}
+                  onClick={() => navigate('/messages')}
+                >
+                  <Icon name="message-circle" size={18} />
+                  {unreadMessages > 0 && (
+                    <span className="notif-badge" aria-hidden="true">
+                      {unreadMessages > 9 ? '9+' : unreadMessages}
+                    </span>
+                  )}
+                </button>
+              )}
               <NotificationBell feed={notifications} />
             </span>
 

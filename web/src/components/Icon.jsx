@@ -580,6 +580,18 @@ const PATHS = {
     </>
   ),
   // Scale/resize: a box with a diagonal drag handle at one corner.
+  /* The counterpart to `maximize` below — arrows pulling IN, for "pop this out
+     of the full page and into the floating dock". Icon renders an invisible
+     empty span for an unknown name, so a missing glyph here would be a silent
+     blank button rather than an error. */
+  minimize: (
+    <>
+      <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+      <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+      <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+      <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+    </>
+  ),
   maximize: (
     <>
       <path d="M15 3h6v6" />
