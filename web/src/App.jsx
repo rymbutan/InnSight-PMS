@@ -19,6 +19,7 @@ import Users from './pages/Users';
 import Calendar from './pages/Calendar';
 import ChangePassword from './pages/ChangePassword';
 import Health from './pages/Health';
+import ActivityLog from './pages/ActivityLog';
 import ReservationDetail from './pages/ReservationDetail';
 import NewReservation from './pages/NewReservation';
 import PublicBooking from './pages/PublicBooking';
@@ -220,6 +221,20 @@ export default function App() {
             // MANAGER; see the matching guard on GET /api/health/services.
             <ProtectedRoute section="health" roles={['ADMIN']}>
               <Health />
+            </ProtectedRoute>
+          }
+        />
+        {/* ADMIN only, and narrower than Night Audit on purpose: this is the
+            record of what every member of staff did, MANAGER included. See the
+            matching guard on GET /api/activity and the _rolesComment on the
+            "activity" entry in navSections.json — the three are the same fact
+            written in three places, and a mismatch shows up as a visible link
+            that dead-ends. */}
+        <Route
+          path="/activity"
+          element={
+            <ProtectedRoute section="activity" roles={['ADMIN']}>
+              <ActivityLog />
             </ProtectedRoute>
           }
         />

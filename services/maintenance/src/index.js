@@ -14,6 +14,7 @@ const { buildSpec, mountDocs } = require('./lib/openapi');
 const logger = makeLogger('maintenance');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
 
+const { activityLog } = require('./lib/activityLog');
 const app = express();
 const PORT = process.env.PORT || 3009;
 
@@ -32,7 +33,7 @@ app.get('/health', (req, res) => {
   res.json({ service: 'maintenance', status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-app.use('/api', verifyToken, idempotency, maintenanceRoutes);
+app.use('/api', verifyToken, idempotency, activityLog({ service: 'maintenance' }), maintenanceRoutes);
 
 const subscriber = startSubscriber();
 
