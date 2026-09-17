@@ -3917,6 +3917,17 @@ tr.active td {
   line-height: 1.5;
 }
 /* "Don't have an account? Sign Up" — the foot of the card. */
+/* Secondary guidance inside an auth card — the "nothing arrived?" paragraph on
+   Forgot password. Smaller and left-aligned against .login-alt's centred link
+   line, because it is a few sentences to READ rather than one thing to click,
+   and centred body copy in a narrow column is hard work. */
+.login-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  text-align: left;
+}
 .login-alt {
   margin: 26px 0 0;
   text-align: center;
