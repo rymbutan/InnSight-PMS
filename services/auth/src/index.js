@@ -151,7 +151,48 @@ app.get('/api/health/services', verifyToken, requireRole('ADMIN'), async (req, r
     })
   );
   const allUp = checks.every((c) => c.status === 'up');
-  res.json({ overall: allUp ? 'up' : 'degraded', services: checks, checkedAt: new Date().toISOString() });
+
+  // OUTBOUND MAIL, reported alongside the services.
+  //
+  // This exists because the forgot-password flow fails INVISIBLY when mail is
+  // not configured. The route cannot say so — it answers an identical 202
+  // whatever happens, deliberately, or it becomes an account-existence oracle —
+  // and a send failure is logged and swallowed. So the whole system can sit
+  // there telling people "a reset link is on its way" while every message goes
+  // into a catcher, and the only way to find out is to read a container log.
+  //
+  // Reported, not fixed: an admin cannot type a Gmail app password into a web
+  // page, and should not. What this changes is that the state is VISIBLE on the
+  // one screen an admin already opens to ask whether the system is healthy.
+  //
+  // No credential is exposed — the presence of SMTP_PASS is reported, never its
+  // value, and the host is already in the compose file.
+  const smtpHost = process.env.SMTP_HOST || 'mailhog';
+  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+  // Mailhog is the giveaway: it accepts everything and delivers nothing.
+  const isCatcher = /^mailhog$/i.test(smtpHost) || /(^|\.)mailhog(\.|$)/i.test(smtpHost);
+  const mail = {
+    host: smtpHost,
+    from: process.env.NOTIFY_FROM || 'no-reply@innsight.local',
+    authenticated: smtpConfigured,
+    // 'delivering'  — credentials set and not pointed at a catcher.
+    // 'capture-only'— reaching a catcher; nothing leaves this host.
+    // 'unconfigured'— a real host with no credentials, which most providers
+    //                 refuse; mail will fail and only the log will say so.
+    status: isCatcher ? 'capture-only' : smtpConfigured ? 'delivering' : 'unconfigured',
+    detail: isCatcher
+      ? 'Email is captured by Mailhog and never delivered. Password-reset links will not reach anyone. Set SMTP_USER and SMTP_PASS to send real mail.'
+      : smtpConfigured
+        ? null
+        : `SMTP_HOST is ${smtpHost} but no credentials are set; most providers will refuse to relay.`,
+  };
+
+  res.json({
+    overall: allUp ? 'up' : 'degraded',
+    services: checks,
+    mail,
+    checkedAt: new Date().toISOString(),
+  });
 });
 
 // Mounted ABOVE the routers because auth's routes apply verifyToken
