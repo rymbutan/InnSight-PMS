@@ -649,6 +649,13 @@ html[data-theme='dark'] .side-brand-mark {
 .notif-btn {
   position: relative;
 }
+/* The topbar Messages control carries the same unread count as the bell, so it
+   reuses .notif-badge rather than growing a second capsule that would drift out
+   of step with it. All it needs of its own is the positioning context the badge
+   is absolutely positioned against. */
+.cb-icon-messages {
+  position: relative;
+}
 /* Sits on the bell's upper-right. Non-interactive, so pointer events pass
    through to the button underneath it. */
 .notif-badge {
@@ -10144,7 +10151,12 @@ html[data-theme='dark'] .chat-launcher-pop {
   .chat-icon-btn,
   .side-collapse,
   .msg-search-clear,
-  .notif-popup-x {
+  .notif-popup-x,
+  /* The topbar row — Messages, notifications, theme, calendar, tutorial. It was
+     the one control strip this block missed, and the Messages button moving out
+     of the sidebar made it the primary way into a conversation on a tablet, so
+     a 36px circle in a 60px bar was the worst remaining target in the app. */
+  .cb-icon-btn {
     width: 44px;
     height: 44px;
   }
@@ -10353,4 +10365,63 @@ html[data-theme='dark'] .chat-launcher-pop {
 .ed-viewport canvas,
 .se-stage canvas {
   touch-action: none;
+}
+
+/* ── Typing indicator ──────────────────────────────────────────────────────
+   Shown at the bottom of a transcript while the other person is writing. The
+   bubble deliberately borrows .chat-bubble's shape and surface so it reads as a
+   message that has not arrived yet rather than as a piece of page chrome. */
+.typing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+.typing-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 13px;
+  border-radius: 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted, currentColor);
+  opacity: 0.45;
+  animation: typing-bounce 1.25s infinite ease-in-out;
+}
+/* Staggered so the three read as a wave rather than a pulse. */
+.typing-dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+.typing-label {
+  font-size: 11.5px;
+}
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 0.9;
+  }
+}
+/* A looping animation is exactly what this setting exists to stop. The dots stay
+   visible and evenly weighted, so the indicator still reads — it just holds
+   still, and the text label beside it carries the meaning regardless. */
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: none;
+    opacity: 0.6;
+  }
 }
