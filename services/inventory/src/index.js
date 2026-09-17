@@ -125,6 +125,7 @@ const jwt = require('jsonwebtoken');
 const Redis = require('ioredis');
 const { JWT_SECRET } = require('./middleware/auth');
 
+const { activityLog } = require('./lib/activityLog');
 // Separate from the pub/sub subscriber: a client in subscriber mode cannot run
 // ordinary commands like SET/GETDEL.
 const ticketRedis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
@@ -522,7 +523,7 @@ app.get('/api/rooms/events', sseStream(['room:status_changed']));
 app.get('/api/events', sseStream(LIVE_CHANNELS));
 
 // Routes
-app.use('/api', verifyToken, idempotency, inventoryRoutes);
+app.use('/api', verifyToken, idempotency, activityLog({ service: 'inventory' }), inventoryRoutes);
 
 // Start Redis subscriber for inter-service events
 const subscriber = startSubscriber();

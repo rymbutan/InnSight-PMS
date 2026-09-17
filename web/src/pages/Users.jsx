@@ -286,7 +286,10 @@ export default function Users() {
       {requests.length > 0 && (
         <div className="panel">
           <h3>
-            Access requests <span className="badge">{requests.length}</span>
+            Access requests{' '}
+            {/* `neutral`, not a bare `badge`: the base class sets shape and type
+                but no background, so this count rendered as plain text. */}
+            <span className="badge neutral">{requests.length}</span>
           </h3>
           <table>
             <thead>

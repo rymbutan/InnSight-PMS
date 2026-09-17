@@ -14,6 +14,7 @@ const { buildSpec, mountDocs } = require('./lib/openapi');
 const logger = makeLogger('folio');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
 
+const { activityLog } = require('./lib/activityLog');
 const app = express();
 const PORT = process.env.PORT || 3007;
 
@@ -42,7 +43,7 @@ BigInt.prototype.toJSON = function () {
 // exposes, rather than splitting some of them out here.
 app.use('/api/public', folioRoutes.publicRouter);
 
-app.use('/api', verifyToken, idempotency, folioRoutes);
+app.use('/api', verifyToken, idempotency, activityLog({ service: 'folio' }), folioRoutes);
 
 const subscriber = startSubscriber();
 
