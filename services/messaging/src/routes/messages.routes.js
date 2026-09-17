@@ -260,6 +260,18 @@ router.post('/messages', async (req, res) => {
 // The caller is always req.user.sub and never a body parameter, so this cannot
 // be used to make someone else look online.
 router.post('/messages/presence/ping', async (req, res) => {
+  // Not an activity-log entry, and this is the one route where that has to be
+  // said explicitly. The browser beats every 25 seconds for as long as the app
+  // is open (web/src/components/Layout.jsx), so left alone this single endpoint
+  // writes thousands of rows per signed-in user per day and buries every real
+  // action in the admin's Activity Log. It is a liveness heartbeat, not
+  // something a person did — the same reasoning that excludes /metrics in
+  // lib/activityLog.js, which is also driven by a timer.
+  //
+  // `false` here rather than a path filter in the shared middleware: only this
+  // route knows it is a heartbeat, and encoding one service's route paths into a
+  // file vendored into all ten of them is how that file starts to drift.
+  res.locals.activity = false;
   try {
     await redis.set(presenceKey(req.user.sub), '1', 'EX', PRESENCE_TTL_SEC);
     res.json({ online: true, expiresInSec: PRESENCE_TTL_SEC });
