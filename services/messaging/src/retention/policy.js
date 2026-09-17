@@ -63,9 +63,11 @@ const MODES = [
     mode: 'logout',
     label: 'Clear when a participant signs out',
     detail:
-      'Conversations are deleted when a user signs out, and again when they next sign in — so a ' +
-      'session always starts empty even if the browser was simply closed. Both sides of a ' +
-      'conversation are cleared, because a message is one record shared by two people.',
+      'Messages you have already read are deleted when you sign out, and again when you next ' +
+      'sign in — so a session starts with nothing you have seen before, even if the browser ' +
+      'was simply closed. Unread messages are kept until they have been read, so writing to ' +
+      'someone who is offline still reaches them. Both sides of a conversation are cleared, ' +
+      'because a message is one record shared by two people.',
     ms: null,
   },
 ];
@@ -140,12 +142,37 @@ async function purgeExpired() {
   return count;
 }
 
-// Delete every message a user is party to. Only reached in 'logout' mode; the
-// mode check lives at the call site (the subscriber) so this stays a plain,
-// testable "forget this person's conversations".
+// Forget this person's conversations — but only the parts that have been READ.
+// Only reached in 'logout' mode; the mode check lives at the call site (the
+// subscriber) so this stays a plain, testable operation.
+//
+// WHY UNREAD MESSAGES SURVIVE
+// ---------------------------
+// This used to delete every message the user was party to, in both directions.
+// That made the mode destroy messages nobody had ever seen: the purge runs on
+// sign-IN as well as sign-out, so writing to a colleague who was offline meant
+// the message was deleted the moment they signed in — before it was ever on
+// their screen. The sender got no indication; the message simply never arrived.
+// A messaging feature that silently drops messages to anyone not currently
+// signed in is not doing the one thing it exists to do.
+//
+// `readAt` is the honest boundary. A message that has been read has served its
+// purpose and clearing it is exactly what the mode promises. A message that has
+// not been read yet has not — so it stays until it has been, and is cleared at
+// the reader's next session boundary instead. "A session starts empty" becomes
+// "a session starts with nothing you have already read", which is what someone
+// choosing this setting actually wants: history off the shared terminal, not
+// mail destroyed in transit.
+//
+// Both directions are filtered on the same rule, and deliberately so. Purging
+// the messages this user SENT but the other side has not opened would lose the
+// message just as completely — it would simply be the sender's own sign-in that
+// destroyed it rather than the recipient's.
 async function purgeForUser(userId) {
   const { count } = await prisma.message.deleteMany({
-    where: { OR: [{ senderId: userId }, { recipientId: userId }] },
+    where: {
+      AND: [{ OR: [{ senderId: userId }, { recipientId: userId }] }, { readAt: { not: null } }],
+    },
   });
   return count;
 }

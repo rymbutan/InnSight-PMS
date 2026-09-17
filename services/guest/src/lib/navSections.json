@@ -105,6 +105,21 @@
             "for the two pages that strand a user when hidden (Dashboard, Settings),",
             "and this is not one of them."
           ],
+          "_chromeComment": [
+            "RENDERED IN THE TOPBAR, NOT THE SIDEBAR. `chrome` moves where the",
+            "entry is DRAWN and changes nothing else: the row still scopes its",
+            "API prefixes, still respects `roles`, and an admin can still hide it",
+            "per role from Sidebar Visibility (which then hides the topbar",
+            "control too). Layout.jsx skips chrome:'topbar' entries when it",
+            "builds the rail and renders this one beside the notification bell.",
+            "",
+            "Deleting the entry instead would have been wrong twice over: it",
+            "would un-scope /api/messages entirely (navScope leaves unclaimed",
+            "prefixes alone), and it would drop this row's /api/users claim —",
+            "which is the only thing keeping the contact list working for a role",
+            "that has the Users section hidden. See _apiComment below."
+          ],
+          "chrome": "topbar",
           "_apiComment": [
             "/api/users is listed because the contact list reads",
             "/api/users/directory, which is authenticated-only rather than",

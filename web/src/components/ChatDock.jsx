@@ -5,6 +5,7 @@ import RoleBadge from './RoleBadge';
 import { useAuth } from '../auth';
 import { primaryRole } from '../lib/roles';
 import Transcript from './Transcript';
+import TypingIndicator from './TypingIndicator';
 import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
 import { useContacts, useConversation } from '../lib/useMessaging';
 
@@ -39,7 +40,30 @@ const MAX_WINDOWS = 3;
 // Below this the windows are as wide as the screen, so only one can be shown.
 const NARROW_PX = 700;
 
-const OPEN_KEY = 'innsight_chat_dock';
+// Keyed PER USER, for the same reason lib/notifications.js keys its feed that
+// way: a shared front-desk browser would otherwise restore the PREVIOUS user's
+// open conversations for whoever signs in next, showing one person's contacts —
+// and, on open, one person's threads — to another. The machines most likely to
+// be shared are exactly the ones this runs on.
+const storeKey = (userId) => `innsight_chat_dock_${userId || 'anon'}`;
+
+// The un-scoped key this used to write. Removed on mount so terminals that
+// already have one stop handing it around; without this the leak survives the
+// fix on every browser that was signed into before today.
+const LEGACY_OPEN_KEY = 'innsight_chat_dock';
+
+function readStoredWindows(userId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(storeKey(userId)) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((w) => w && typeof w.peerId === 'string')
+      .slice(0, MAX_WINDOWS)
+      .map((w) => ({ peerId: w.peerId, minimized: true }));
+  } catch {
+    return [];
+  }
+}
 
 // ── Imperative open, as a module-level channel ───────────────────────────────
 // Layout receives the live `messaging:message_sent` event and needs to say
@@ -95,18 +119,13 @@ export default function ChatDock({ suppressed = false }) {
   // conversations someone was holding. Minimised on restore whatever they were
   // before: reappearing as three open windows over the page after a refresh is
   // startling, and un-minimising is one click.
-  const [windows, setWindows] = useState(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(OPEN_KEY) || '[]');
-      if (!Array.isArray(raw)) return [];
-      return raw
-        .filter((w) => w && typeof w.peerId === 'string')
-        .slice(0, MAX_WINDOWS)
-        .map((w) => ({ peerId: w.peerId, minimized: true }));
-    } catch {
-      return [];
-    }
-  });
+  const meId = user?.id || null;
+  const [windows, setWindows] = useState(() => readStoredWindows(meId));
+  // Which account `windows` currently belongs to. Signing out unmounts this
+  // component today, so the common path is a fresh mount — but if that ever
+  // stops being true, this stops one account's open windows being written into
+  // another's key in the render between the id changing and the reload below.
+  const owner = useRef(meId);
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [launcherFilter, setLauncherFilter] = useState('');
   const launcherRef = useRef(null);
@@ -117,12 +136,27 @@ export default function ChatDock({ suppressed = false }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(OPEN_KEY, JSON.stringify(windows.map((w) => ({ peerId: w.peerId }))));
+      localStorage.removeItem(LEGACY_OPEN_KEY);
+    } catch {
+      /* nothing to clean up, or site data blocked */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (owner.current === meId) return;
+    owner.current = meId;
+    setWindows(readStoredWindows(meId));
+  }, [meId]);
+
+  useEffect(() => {
+    if (owner.current !== meId) return; // mid-switch; the reload above lands next
+    try {
+      localStorage.setItem(storeKey(meId), JSON.stringify(windows.map((w) => ({ peerId: w.peerId }))));
     } catch {
       /* private mode, or site data blocked — the dock works, it just will not
          be restored next time */
     }
-  }, [windows]);
+  }, [windows, meId]);
 
   const open = useCallback(
     (peerId) => {
@@ -328,9 +362,8 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
   // Minimised means NOT polling — see useConversation's `active`. A collapsed
   // window shows no transcript, so fetching one every three seconds is cost for
   // nothing; the header's unread count comes off the contact list.
-  const { messages, sending, blocked, clearBlocked, send, scrollRef } = useConversation(peerId, meId, {
-    active: !minimized,
-  });
+  const { messages, sending, blocked, peerTyping, notifyTyping, clearBlocked, send, scrollRef } =
+    useConversation(peerId, meId, { active: !minimized });
 
   const rows = useMemo(() => groupMessages(messages, meId), [messages, meId]);
   const name = peer?.displayName || 'Conversation';
@@ -354,6 +387,7 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
     e?.preventDefault?.();
     const body = draft.trim();
     if (!body) return;
+    notifyTyping(false);
     const res = await send(body);
     // The draft survives a refusal on purpose: the sender has to edit the part
     // that offended, and clearing it would make them retype the part that was fine.
@@ -431,6 +465,10 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
           ) : (
             <Transcript rows={rows} />
           )}
+          {/* Inside the scroller, after the transcript, so it appears under the
+              last message and the existing stick-to-bottom carries it into view
+              instead of it being hidden below the fold. */}
+          {peerTyping && <TypingIndicator name={name.split(' ')[0]} />}
         </div>
 
         {blocked && (
@@ -446,8 +484,13 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
             className={blocked ? 'is-blocked' : undefined}
             value={draft}
             onChange={(e) => {
-              setDraft(e.target.value);
+              const next = e.target.value;
+              setDraft(next);
               if (blocked) clearBlocked();
+              // Throttled inside the hook, so calling it per keystroke is fine.
+              // Emptying the box sends the explicit stop rather than letting the
+              // indicator hang on for the rest of its TTL.
+              notifyTyping(next.trim().length > 0);
             }}
             onKeyDown={onKeyDown}
             placeholder="Aa"
