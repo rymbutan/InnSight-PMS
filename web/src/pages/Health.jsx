@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
+import Icon from '../components/Icon';
 import { useToast, errMsg } from '../components/Toast';
 
 export default function Health() {
@@ -27,6 +28,51 @@ export default function Health() {
   return (
     <div>
       <h2>Service Health</h2>
+
+      {/* Outbound mail, above the service table rather than inside it: it is not
+          a container that is up or down, and burying it in a row of nine would
+          make the one state an admin most needs to notice the easiest to skim
+          past. A forgot-password link that silently never arrives is the defect
+          this panel exists to make visible — the API answers an identical 202
+          either way, by design, so nothing else on the screen can say it. */}
+      {data?.mail && data.mail.status !== 'delivering' && (
+        <div className="panel" role="status">
+          <div className="row" style={{ alignItems: 'flex-start', gap: 10, marginBottom: 0 }}>
+            <Icon name="alert-circle" size={18} strokeWidth={1.9} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 650, marginBottom: 2 }}>
+                {data.mail.status === 'capture-only'
+                  ? 'Email is not being delivered'
+                  : 'Email is not configured'}
+              </div>
+              <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                {data.mail.detail}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                Sending via <strong>{data.mail.host}</strong> as <strong>{data.mail.from}</strong>
+                {' · '}
+                authenticated: <strong>{data.mail.authenticated ? 'yes' : 'no'}</strong>
+              </div>
+            </div>
+            <span className="badge dirty">{data.mail.status}</span>
+          </div>
+        </div>
+      )}
+
+      {data?.mail?.status === 'delivering' && (
+        <div className="panel">
+          <div className="row" style={{ alignItems: 'center', gap: 10, marginBottom: 0 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="muted">Outbound email</div>
+              <div style={{ fontSize: 13 }}>
+                Sending via <strong>{data.mail.host}</strong> as <strong>{data.mail.from}</strong>
+              </div>
+            </div>
+            <span className="badge clean">delivering</span>
+          </div>
+        </div>
+      )}
+
       <div className="panel">
         <div className="row" style={{ alignItems: 'center', marginBottom: 12 }}>
           <div>
