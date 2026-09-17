@@ -4817,13 +4817,24 @@ html[data-theme='dark'] .skel {
     min-height: 0;
     overflow-y: auto;
   }
-  /* The rail does not scroll. Everything below tightens it until promo codes
-     and four room types fit the frame on their own — a rail whose whole job is
-     to stay put should not have a scrollbar of its own. */
+  /* The rail is tightened below until promo codes and a handful of room types
+     fit the frame on their own, and for a property that size it shows no
+     scrollbar at all.
+
+     It is `overflow-y: auto` rather than `visible`, though, and that is the
+     fix for a real defect: `.rooms-fixed` pins the page to the viewport
+     height, so a rail taller than the frame had its overflow CLIPPED — a
+     property with more room types than the tightening was sized for lost the
+     last ones off the bottom with nothing on screen to say they existed. A
+     scrollbar that appears only when it is needed is the correct trade; losing
+     content silently is not. This used to be granted only below 820px of
+     viewport height, which guessed at the wrong variable: what overflows is
+     decided by how many room types the property has, not by how tall the
+     screen is. */
   .rooms-fixed .rooms-aside {
     position: static;
     max-height: 100%;
-    overflow: visible;
+    overflow-y: auto;
   }
 
   /* ── Compact rail ──────────────────────────────────────────────────────
@@ -4887,14 +4898,10 @@ html[data-theme='dark'] .skel {
     margin-top: 6px;
   }
 }
-/* The one case the tightening cannot solve: a genuinely short window. Rather
-   than clip the last room type out of reach, the rail gets a scrollbar back
-   below 820px of viewport height. */
-@media (min-width: 1100px) and (max-height: 820px) {
-  .rooms-fixed .rooms-aside {
-    overflow-y: auto;
-  }
-}
+/* The short-window special case that used to live here is gone: the rail now
+   scrolls whenever its content exceeds the frame, at any viewport height, which
+   covers the short window and the tall-window-with-many-room-types case the
+   height query could never see. */
 /* The header row stays visible while the body scrolls under it — a status
    column you cannot name is a column of unlabelled dropdowns. */
 .rooms-table-scroll thead th {
@@ -5418,6 +5425,9 @@ html[data-theme='dark'] .skel {
    lives in its own card in the right-hand column (.hk-side), at the same
    ~290px width as the room detail card below it, so a horizontal wrap of
    six items no longer fits. */
+/* A column beside the map, where the rail is 290px and vertical room is what it
+   has. It stops being a column the moment the layout stacks — see the tablet
+   rules further down. */
 .hk-legend {
   display: flex;
   flex-direction: column;
@@ -5591,9 +5601,49 @@ html[data-theme='dark'] .skel {
   cursor: not-allowed;
 }
 
+/* ── Tablet: the map is the page ──────────────────────────────────────────
+   On an iPad in landscape the layout is still two columns, but a 290px rail out
+   of 1024px minus the sidebar leaves the map about 470px — less than half the
+   screen for the thing the page is named after. The rail gives ground first,
+   because everything in it is reference material and the map is the work. */
+@media (min-width: 901px) and (max-width: 1200px) {
+  .hk-side {
+    width: 232px;
+  }
+  /* Six status rows at 12.5px do not fit 232px with their counts, and the
+     wrapping that results is worse than a slightly smaller type. */
+  .hk-legend {
+    font-size: 12px;
+    gap: 7px;
+  }
+}
+
 @media (max-width: 900px) {
   .hk-layout {
     flex-direction: column;
+  }
+  /* Stacked, the legend is full width and a vertical list of six statuses is a
+     tall ribbon of mostly empty space pushing the room detail — the thing you
+     actually act on — below the fold. As a wrapping row it takes one or two
+     lines and gets out of the way.
+
+     `flex: 1 1 auto` with a sensible basis rather than fixed columns: the
+     status labels differ in length, and a grid would size every cell to the
+     longest one and leave the short ones padded. */
+  .hk-legend {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .hk-legend-item {
+    flex: 0 1 auto;
+  }
+  /* In a column the label takes the slack so the counts line up on the right.
+     In a wrapping row that same `flex: 1` stretches one item to fill whatever
+     is left on its line, which pushes its count away from its own label and
+     reads as a mis-aligned row. */
+  .hk-legend-text {
+    flex: 0 1 auto;
   }
   /* Stacked, the column sits BELOW the map rather than beside it, so there is
      no "stay in view while the map scrolls past" to preserve — sticking here
@@ -7962,6 +8012,17 @@ html[data-theme='dark'] .hk-tooltip {
 /* Chart marks. Hover lifts the bar under the cursor rather than dimming the
    rest — the hit target is the mark itself, and its native <title> carries the
    value. */
+/* Charts size themselves to their data now (see MIN_BAR_W in Chart.jsx) and
+   scroll here rather than squeezing labels together. `max-width: 100%` is what
+   makes the overflow scroll instead of stretching the panel — without it the
+   wider drawing simply pushes the card out. */
+.chart-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Room for the scrollbar so it never sits on top of the date labels. */
+  padding-bottom: 2px;
+}
 .chart-bar path {
   transition: filter 0.12s ease;
 }
