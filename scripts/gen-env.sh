@@ -152,7 +152,16 @@ SMTP_PORT=1025
 SMTP_USER=
 SMTP_PASS=
 SMTP_SECURE=
+# A display name here is worth setting: it is the only part of "no reply" a
+# recipient sees before they open the message. A mailbox cannot actually refuse
+# replies — see services/_shared/notifier.js — so this, plus the footer the
+# notifier appends, is the whole of it.
+#     NOTIFY_FROM=InnSight PMS (do not reply) <innsight.local.pms@gmail.com>
 NOTIFY_FROM=no-reply@innsight.local
+# Optional. Set it to a mailbox somebody actually reads and every message
+# carries Reply-To, so a reply lands there instead of in the sending account.
+# Left empty, messages are marked auto-generated and say not to reply.
+NOTIFY_REPLY_TO=
 EOF
 
 chmod 600 .env
