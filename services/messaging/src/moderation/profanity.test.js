@@ -122,3 +122,60 @@ test('a long body is checked in reasonable time', () => {
   check(body);
   assert.ok(Date.now() - started < 500, 'profanity check took too long on a max-length body');
 });
+
+// ── Sexual propositions ─────────────────────────────────────────────────────
+// The category single words cannot reach: every word in "let's have sex" is
+// ordinary on its own. Staff messaging is where this matters most — a colleague
+// cannot be escalated the way a guest can, so the filter is what stands between
+// a shift worker and a proposition from someone they keep working beside.
+
+test('blocks a sexual proposition made of otherwise ordinary words', () => {
+  for (const text of [
+    "let's have sex",
+    'Lets have sex tonight',
+    'do you want to have sex',
+    'i want to sleep with me later', // awkward, but the phrase is the trigger
+    'can we make love',
+    'send nudes',
+    'suck my',
+    'sit on my lap',
+  ]) {
+    assert.equal(check(text).clean, false, `should have been blocked: ${text}`);
+  }
+});
+
+test('blocks the single-word lewd terms, English and Tagalog', () => {
+  for (const text of ['you look horny', 'ang libog mo', 'malandi ka', 'that was an orgasm']) {
+    assert.equal(check(text).clean, false, `should have been blocked: ${text}`);
+  }
+});
+
+test('ordinary hotel sentences containing those words still get through', () => {
+  // The precision rule, applied to the new category. Every one of these is a
+  // sentence somebody on shift will actually type, and each contains a word or
+  // near-miss from the additions above.
+  for (const text of [
+    'come to my room when you can', // deliberately NOT a phrase — see profanity.js
+    'please take off your shoes before entering',
+    'can you hook up the projector in the function hall',
+    'the guest in 412 tried to touch me, i am reporting it', // must not be blocked
+    'housekeeping found the guest naked, sending a supervisor', // 'hubad'/'naked' alone is a report
+    'we need to make the beds on 3rd floor',
+    'the sexton of the chapel called about the wedding', // 'sex' as a substring
+    'essex road pickup at 4pm',
+    'middlesex tour group arriving',
+    'i will sleep after my shift',
+    'the love seat in the lobby needs cleaning',
+  ]) {
+    assert.ok(check(text).clean, `false positive — this must get through: ${text}`);
+  }
+});
+
+test('the reporting sentence is the one false positive that matters most', () => {
+  // A filter that blocks "a guest said let's have sex to me" stops the report
+  // and protects nobody. This documents the CURRENT behaviour rather than
+  // claiming it is solved — quoting the words is blocked, describing them is
+  // not, and the refusal copy in messages.routes.js says so.
+  assert.equal(check('a guest said lets have sex to me').clean, false);
+  assert.ok(check('a guest propositioned me, please escalate').clean);
+});

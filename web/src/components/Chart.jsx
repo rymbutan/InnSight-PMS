@@ -68,6 +68,17 @@ export function SparkLine({
   );
 }
 
+// The narrowest a bar may get before its label stops being readable. A date
+// label ("09/17") is about 25px at font-size 10, so anything under ~32px puts
+// adjacent labels shoulder to shoulder — which is exactly how the Revenue page's
+// 14-day charts ended up with a crumpled line of text under them: 14 bars into a
+// fixed 420px SVG is 29px each.
+//
+// Below this the chart stops shrinking and SCROLLS instead. A chart you have to
+// drag sideways is a minor inconvenience; a row of overlapping numbers is not
+// data at all.
+const MIN_BAR_W = 34;
+
 export function BarChart({
   data,
   width = 320,
@@ -90,7 +101,10 @@ export function BarChart({
     );
   const max = Math.max(...data, 1);
   const plotH = height - (showValues ? 16 : 8);
-  const barW = (width - 8) / data.length;
+  // `width` is now a MINIMUM, not a fixed size: a series with more points than
+  // that width can label grows the drawing and lets the wrapper scroll it.
+  const drawnWidth = Math.max(width, data.length * MIN_BAR_W + 8);
+  const barW = (drawnWidth - 8) / data.length;
   const gap = Math.min(6, barW * 0.25);
   const w = Math.max(1, barW - gap);
   // 4px rounded data-end, anchored square to the baseline. A plain `rx` rounds
@@ -99,43 +113,48 @@ export function BarChart({
   const r = Math.min(4, w / 2);
 
   return (
-    <svg width={width} height={height + 24} style={{ display: 'block' }} role="img">
-      {/* Baseline. Recessive: it orients the eye, it is not data. */}
-      <line x1={0} y1={height} x2={width} y2={height} stroke="var(--border)" strokeWidth="1" />
-      {data.map((v, i) => {
-        const h = v > 0 ? Math.max(r, (v / max) * plotH) : 2;
-        const x = i * barW + gap / 2;
-        const y = height - h;
-        const rr = Math.min(r, h);
-        return (
-          <g key={i} className="chart-bar">
-            <path
-              d={`M${x},${height} L${x},${y + rr} Q${x},${y} ${x + rr},${y} L${x + w - rr},${y} Q${x + w},${y} ${x + w},${y + rr} L${x + w},${height} Z`}
-              fill={v > 0 ? color : emptyColor}
-            >
-              <title>{labels ? `${labels[i]}: ${format(v)}` : format(v)}</title>
-            </path>
-            {showValues && v > 0 && (
-              <text
-                x={x + w / 2}
-                y={y - 4}
-                fontSize="10"
-                fontWeight="600"
-                textAnchor="middle"
-                fill="var(--muted)"
+    // The scroller belongs to the chart, not to each call site: every caller
+    // passing a fixed `width` had the same overflow, and a wrapper they each
+    // have to remember is a wrapper three of them will forget.
+    <div className="chart-scroll">
+      <svg width={drawnWidth} height={height + 24} style={{ display: 'block' }} role="img">
+        {/* Baseline. Recessive: it orients the eye, it is not data. */}
+        <line x1={0} y1={height} x2={drawnWidth} y2={height} stroke="var(--border)" strokeWidth="1" />
+        {data.map((v, i) => {
+          const h = v > 0 ? Math.max(r, (v / max) * plotH) : 2;
+          const x = i * barW + gap / 2;
+          const y = height - h;
+          const rr = Math.min(r, h);
+          return (
+            <g key={i} className="chart-bar">
+              <path
+                d={`M${x},${height} L${x},${y + rr} Q${x},${y} ${x + rr},${y} L${x + w - rr},${y} Q${x + w},${y} ${x + w},${y + rr} L${x + w},${height} Z`}
+                fill={v > 0 ? color : emptyColor}
               >
-                {format(v)}
-              </text>
-            )}
-            {labels && (
-              <text x={x + w / 2} y={height + 14} fontSize="10" textAnchor="middle" fill="var(--muted)">
-                {labels[i]}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+                <title>{labels ? `${labels[i]}: ${format(v)}` : format(v)}</title>
+              </path>
+              {showValues && v > 0 && (
+                <text
+                  x={x + w / 2}
+                  y={y - 4}
+                  fontSize="10"
+                  fontWeight="600"
+                  textAnchor="middle"
+                  fill="var(--muted)"
+                >
+                  {format(v)}
+                </text>
+              )}
+              {labels && (
+                <text x={x + w / 2} y={height + 14} fontSize="10" textAnchor="middle" fill="var(--muted)">
+                  {labels[i]}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
