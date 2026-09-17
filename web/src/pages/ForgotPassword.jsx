@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import AuthShell from '../components/AuthShell';
 
 // Ask for a reset link.
 //
@@ -8,6 +9,10 @@ import api from '../api';
 // see POST /api/auth/forgot-password — so this page must not imply otherwise.
 // "If that email matches an account" is doing real work: phrasing it as "sent"
 // would tell whoever typed it that the address is registered here.
+//
+// Frame is AuthShell, the same one Login draws. This page used `.login-wrap`,
+// `.login-title` and `.login-sub`, two of which are not in the stylesheet, so
+// its heading and body copy rendered unstyled beside an empty half-frame.
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
@@ -30,55 +35,56 @@ export default function ForgotPassword() {
     }
   }
 
+  if (sent) {
+    return (
+      <AuthShell
+        title="Check your email"
+        lede="If that email matches an account, a reset link is on its way. It expires in 30 minutes and works once."
+      >
+        <p className="login-note">
+          Nothing arrived? Check your spam folder first, then confirm you used the address your account was
+          created with. An administrator can also set a new password for you directly.
+        </p>
+        <p className="login-alt">
+          <Link to="/login">Back to sign in</Link>
+        </p>
+      </AuthShell>
+    );
+  }
+
   return (
-    <div className="login-wrap">
-      <div className="login-form-side">
-        <div className="login-card">
-          <h1 className="login-title">Forgot password</h1>
-          {sent ? (
-            <>
-              <p className="login-sub">
-                If that email matches an account, a reset link is on its way. It expires in 30 minutes and
-                works once.
-              </p>
-              <p className="muted" style={{ fontSize: 12 }}>
-                Nothing arrived? Check that you used the address your account was created with, or ask an
-                administrator to reset it for you.
-              </p>
-              <p className="login-alt">
-                <Link to="/login">Back to sign in</Link>
-              </p>
-            </>
-          ) : (
-            <form onSubmit={onSubmit}>
-              <p className="login-sub">
-                Enter the email on your account and we&rsquo;ll send you a link to choose a new password.
-              </p>
-              <label htmlFor="fp-email">Email</label>
-              <input
-                id="fp-email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-              />
-              {error && (
-                <div className="error" role="alert">
-                  {error}
-                </div>
-              )}
-              <button className="btn-primary" disabled={loading || !email}>
-                {loading ? 'Sending…' : 'Send reset link'}
-              </button>
-              <p className="login-alt">
-                <Link to="/login">Back to sign in</Link>
-              </p>
-            </form>
-          )}
+    <AuthShell
+      title="Forgot password"
+      lede="Enter the email on your account and we’ll send you a link to choose a new password."
+      onSubmit={onSubmit}
+    >
+      <label className="login-label" htmlFor="fp-email">
+        Email
+      </label>
+      <input
+        id="fp-email"
+        className="login-input"
+        type="email"
+        required
+        autoComplete="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="you@slsu.edu.ph"
+      />
+
+      {error && (
+        <div className="error" role="alert">
+          {error}
         </div>
-      </div>
-    </div>
+      )}
+
+      <button className="login-submit" disabled={loading || !email}>
+        {loading ? 'Sending…' : 'Send reset link'}
+      </button>
+
+      <p className="login-alt">
+        <Link to="/login">Back to sign in</Link>
+      </p>
+    </AuthShell>
   );
 }
