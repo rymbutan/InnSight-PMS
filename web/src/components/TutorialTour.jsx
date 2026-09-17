@@ -40,8 +40,11 @@ const CHROME_STEPS = [
   },
   {
     target: '[data-tour="tour-notifications"]',
-    title: 'Notifications',
-    body: 'Alerts and updates that need your attention show up here.',
+    title: 'Messages & notifications',
+    body:
+      'Messages from colleagues, and alerts that need your attention. Both show ' +
+      'an unread count here — Messages moved up from the sidebar so it stays in ' +
+      'reach on a tablet, where the sidebar is a drawer.',
   },
   {
     target: '[data-tour="tour-account"]',
@@ -124,7 +127,7 @@ const PAGES = [
     process: {
       target: '[data-tour="tour-process-arrivals"]',
       title: 'Check-in and check-out',
-      body: "Every reservation due to arrive shows up here on its check-in date. Checking a guest in verifies their ID and hands over the room; checking out settles the folio balance and releases the room to Housekeeping as dirty — no need to open the full reservation for either.",
+      body: 'Every reservation due to arrive shows up here on its check-in date. Checking a guest in verifies their ID and hands over the room; checking out settles the folio balance and releases the room to Housekeeping as dirty — no need to open the full reservation for either.',
     },
   },
   {
@@ -144,7 +147,7 @@ const PAGES = [
     to: '/rooms',
     roles: ['ADMIN', 'MANAGER'],
     title: 'Hotel Rooms',
-    body: "Property configuration, not day-to-day operations: room types, individual rooms, and promo codes are defined here. A change here — a new room, a retired room type, a discontinued promo code — affects availability and pricing everywhere else in the app, from the Calendar to a brand-new booking.",
+    body: 'Property configuration, not day-to-day operations: room types, individual rooms, and promo codes are defined here. A change here — a new room, a retired room type, a discontinued promo code — affects availability and pricing everywhere else in the app, from the Calendar to a brand-new booking.',
   },
   {
     key: 'amenities',
@@ -165,7 +168,7 @@ const PAGES = [
     to: '/audit',
     roles: ['ADMIN', 'MANAGER', 'AUDITOR'],
     title: 'Night Audit',
-    body: "Closes out the current business day. Run it once, after every arrival and departure due today has been processed.",
+    body: 'Closes out the current business day. Run it once, after every arrival and departure due today has been processed.',
     process: {
       target: '[data-tour="tour-process-audit"]',
       title: 'Running the audit',
@@ -177,7 +180,7 @@ const PAGES = [
     to: '/room-layouts',
     roles: ['ADMIN'],
     title: 'Room & Scenario Editor',
-    body: "Design the 3D room layouts and grading scenarios used in staff training — what trainees walk through and get scored against, not a guest-facing feature.",
+    body: 'Design the 3D room layouts and grading scenarios used in staff training — what trainees walk through and get scored against, not a guest-facing feature.',
   },
   {
     key: 'users',
@@ -287,7 +290,10 @@ export default function TutorialTour({ open, onFinish }) {
       // it's a second thing to look at on a page we're already on, not a
       // second destination.
       if (!p.process) return [overview];
-      return [overview, { path: p.to, target: p.process.target, title: p.process.title, body: p.process.body }];
+      return [
+        overview,
+        { path: p.to, target: p.process.target, title: p.process.title, body: p.process.body },
+      ];
     });
     return [INTRO_STEP, ...chrome, ...pages, OUTRO_STEP];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,10 +373,7 @@ export default function TutorialTour({ open, onFinish }) {
             className="tour-mask"
             style={{ top: 0, left: 0, right: 0, height: Math.max(0, rect.top - HOLE_PAD) }}
           />
-          <div
-            className="tour-mask"
-            style={{ top: rect.bottom + HOLE_PAD, left: 0, right: 0, bottom: 0 }}
-          />
+          <div className="tour-mask" style={{ top: rect.bottom + HOLE_PAD, left: 0, right: 0, bottom: 0 }} />
           <div
             className="tour-mask"
             style={{

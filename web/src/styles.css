@@ -537,11 +537,46 @@ html[data-theme='dark'] .side-brand-mark {
   font-size: 11px;
 }
 
+/* The top bar's right-hand strip. Three clusters of icon buttons plus the
+   account pill, and the rhythm is what makes them legible: 4px INSIDE a cluster
+   so its buttons read as one control group, 10px BETWEEN clusters so the groups
+   separate. Six evenly-spaced icons read as six unrelated things; three groups
+   read as three.
+
+   4px rather than 0-2: these are 36px circles that grow a filled background on
+   hover, and at 2px two adjacent hover states very nearly touch, which reads as
+   a rendering fault rather than as grouping. 4-against-10 keeps the 2.5x
+   contrast that carries the grouping while leaving the hover shapes distinct. */
 .cb-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   margin-left: auto;
+}
+.cb-util-group,
+.cb-comms {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Hairline before the account pill. `flex: none` so it never absorbs slack, and
+   a height short of the bar's so it reads as a divider rather than a border. */
+.cb-sep {
+  width: 1px;
+  height: 22px;
+  flex: none;
+  background: var(--border);
+  /* The 8px strip gap already sits on both sides; a little more air stops the
+     rule from crowding the pill it is separating. */
+  margin: 0 2px;
+}
+/* Below the width where the greeting is dropped the strip is tight enough that
+   the separator is one more thing competing for room, and the account pill is
+   visually distinct from the icon buttons anyway. */
+@media (max-width: 900px) {
+  .cb-sep {
+    display: none;
+  }
 }
 .cb-icon-wrap {
   position: relative;
@@ -9126,6 +9161,36 @@ button.danger:disabled:hover {
 }
 .msg-thread-id {
   min-width: 0;
+  /* Takes the slack so the action beside it lands on the right edge, and lets a
+     long name truncate instead of shoving the button off the header. */
+  flex: 1;
+}
+/* "Open in dock" — the header's one action. It sat immediately after the
+   contact's name, which read as part of the identity block rather than as
+   something you do; a header action belongs at the far edge. */
+.msg-dock-btn {
+  flex: none;
+  gap: 6px;
+  /* Smaller than a form button on purpose: this is secondary to the
+     conversation, and a full-height control here competes with the send button
+     directly below it. */
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+/* Under ~640px the thread header is carrying an avatar, a name, a role badge and
+   a presence line already. The label goes and the icon stays — the tooltip and
+   the aria-label still say what it does, and a 32px square beside a truncating
+   name is the difference between a tidy header and a wrapped one. */
+@media (max-width: 640px) {
+  .msg-dock-btn {
+    padding: 0;
+    width: 32px;
+    justify-content: center;
+  }
+  .msg-dock-btn span {
+    display: none;
+  }
 }
 .msg-thread-name {
   font-size: 14.5px;
