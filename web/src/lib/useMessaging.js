@@ -24,6 +24,14 @@ import api from '../api';
 export const THREAD_POLL_MS = 3000;
 export const CONTACTS_POLL_MS = 4000;
 
+// How often a continuously-typing composer re-asserts the signal. The server
+// key lives 6s (routes/messages.routes.js), so repeating at 2.5s survives one
+// dropped request without the indicator blinking off mid-sentence. Sending one
+// request per KEYSTROKE would be the heaviest traffic in the service for its
+// least important fact — hence a floor rather than a debounce, so the first
+// keystroke is instant and the rest are throttled.
+export const TYPING_PING_MS = 2500;
+
 /**
  * The staff list with presence and per-person unread counts.
  *
@@ -98,6 +106,8 @@ export function useContacts({ enabled = true } = {}) {
  */
 export function useConversation(peerId, meId, { active = true } = {}) {
   const [messages, setMessages] = useState([]);
+  // Whether the other person is writing right now, as of the last poll.
+  const [peerTyping, setPeerTyping] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   // Set when the server refuses a message on moderation grounds. State rather
@@ -110,6 +120,10 @@ export function useConversation(peerId, meId, { active = true } = {}) {
   // Re-scrolling unconditionally would yank someone out of older messages they
   // scrolled up to read, every three seconds.
   const wasAtBottom = useRef(true);
+  // When the outbound typing signal was last sent. 0 means "send the next one
+  // immediately", which is what a fresh conversation and a just-sent message
+  // both want.
+  const lastTypingPing = useRef(0);
 
   useEffect(() => {
     if (!peerId || !active) {
@@ -125,6 +139,7 @@ export function useConversation(peerId, meId, { active = true } = {}) {
         const { data } = await api.get(`/api/messages/with/${peerId}`);
         if (cancelled) return;
         setMessages(data?.messages || []);
+        setPeerTyping(!!data?.peerTyping);
       } catch {
         /* transient — the next tick retries and the thread stays as it was */
       } finally {
@@ -144,7 +159,15 @@ export function useConversation(peerId, meId, { active = true } = {}) {
   useEffect(() => {
     wasAtBottom.current = true;
     setBlocked(false);
+    setPeerTyping(false);
   }, [peerId]);
+
+  // Polling stops when a window is minimised, so the last value read would
+  // otherwise freeze on screen — a window collapsed mid-sentence would still be
+  // claiming the other person is typing when it is re-opened minutes later.
+  useEffect(() => {
+    if (!active) setPeerTyping(false);
+  }, [active]);
 
   // Stick to the newest message unless the reader has scrolled away from it.
   useEffect(() => {
@@ -163,6 +186,9 @@ export function useConversation(peerId, meId, { active = true } = {}) {
         // not appearing reads as the send having failed.
         setMessages((m) => [...m, data]);
         wasAtBottom.current = true;
+        // The server clears the typing key on send; reset the throttle so the
+        // next thing they write signals immediately rather than up to 2.5s late.
+        lastTypingPing.current = 0;
         setBlocked(false);
         // The contact row's preview and its position in the list are now stale.
         refreshContacts();
@@ -183,11 +209,43 @@ export function useConversation(peerId, meId, { active = true } = {}) {
     [peerId, sending]
   );
 
+  // Outbound typing signal. The composer calls notifyTyping() on EVERY keystroke
+  // and the throttle lives here, so no caller has to remember to rate-limit it.
+  const notifyTyping = useCallback(
+    (isTyping) => {
+      if (!peerId) return;
+      // A stop is always sent: it is what clears the indicator when someone
+      // deletes their draft, and it is one request, not a stream.
+      if (!isTyping) {
+        lastTypingPing.current = 0;
+        api.post('/api/messages/typing', { recipientId: peerId, typing: false }).catch(() => {});
+        return;
+      }
+      const now = Date.now();
+      if (now - lastTypingPing.current < TYPING_PING_MS) return;
+      lastTypingPing.current = now;
+      // Deliberately unawaited and error-swallowed: a failed typing signal must
+      // never interfere with the message being written.
+      api.post('/api/messages/typing', { recipientId: peerId, typing: true }).catch(() => {});
+    },
+    [peerId]
+  );
+
+  // Leaving a conversation stops the indicator on the other side. Without this
+  // it hangs on for the rest of the TTL after someone closes the window.
+  useEffect(() => {
+    return () => {
+      lastTypingPing.current = 0;
+    };
+  }, [peerId]);
+
   return {
     messages,
     loading,
     sending,
     blocked,
+    peerTyping,
+    notifyTyping,
     clearBlocked: useCallback(() => setBlocked(false), []),
     send,
     scrollRef,

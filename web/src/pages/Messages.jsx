@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import RoleBadge from '../components/RoleBadge';
 import Transcript from '../components/Transcript';
+import TypingIndicator from '../components/TypingIndicator';
 import { primaryRole } from '../lib/roles';
 import { useMessageSound } from '../lib/sound';
 import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
 import { useContacts, useConversation, useRetentionPolicy } from '../lib/useMessaging';
+import { openChat } from '../components/ChatDock';
 
 // Staff direct messages, full-screen.
 //
@@ -24,6 +26,7 @@ import { useContacts, useConversation, useRetentionPolicy } from '../lib/useMess
 export default function Messages() {
   const { user } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState('');
   const [draft, setDraft] = useState('');
@@ -41,7 +44,8 @@ export default function Messages() {
   const peerId = params.get('peer');
 
   const { contacts, loading: loadingContacts, error: contactsError } = useContacts();
-  const { messages, sending, blocked, clearBlocked, send, scrollRef } = useConversation(peerId, user?.id);
+  const { messages, sending, blocked, peerTyping, notifyTyping, clearBlocked, send, scrollRef } =
+    useConversation(peerId, user?.id);
   const retention = useRetentionPolicy();
 
   // Only the FIRST contact-list failure is worth a toast. One every four
@@ -101,6 +105,7 @@ export default function Messages() {
     e?.preventDefault?.();
     const body = draft.trim();
     if (!body) return;
+    notifyTyping(false);
     const res = await send(body);
     if (res.ok) setDraft('');
     // A refusal leaves the draft alone on purpose — the sender edits the part
@@ -237,6 +242,26 @@ export default function Messages() {
                     </span>
                   </div>
                 </div>
+                {/* Pops this conversation into the floating dock and leaves the
+                    page. The dock deliberately does not render on /messages
+                    (two live views of one thread), so staying here would open a
+                    window nobody can see — leaving is the feature, not a side
+                    effect: it is how you keep the thread while you go back to
+                    work. Back rather than a fixed route, so you land where you
+                    came from. */}
+                <button
+                  type="button"
+                  className="btn-ghost msg-dock-btn"
+                  title="Keep this conversation in a floating window while you work"
+                  onClick={() => {
+                    openChat(peer.id);
+                    if (window.history.length > 1) navigate(-1);
+                    else navigate('/');
+                  }}
+                >
+                  <Icon name="minimize" size={14} strokeWidth={2} />
+                  <span>Open in dock</span>
+                </button>
               </header>
 
               <div className="msg-scroll" ref={scrollRef}>
@@ -247,6 +272,7 @@ export default function Messages() {
                 ) : (
                   <Transcript rows={rows} />
                 )}
+                {peerTyping && <TypingIndicator name={peer.displayName.split(' ')[0]} />}
               </div>
 
               {blocked && (
@@ -266,6 +292,7 @@ export default function Messages() {
                     value={draft}
                     onChange={(e) => {
                       setDraft(e.target.value);
+                      notifyTyping(e.target.value.trim().length > 0);
                       // Clear the warning as soon as they start rewriting,
                       // rather than leaving it up to accuse text that no longer
                       // exists.

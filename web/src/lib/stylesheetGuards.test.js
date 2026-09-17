@@ -114,3 +114,49 @@ test('every badge the JSX renders actually gets a background from somewhere', ()
 
   assert.deepEqual(missing, [], `badges that render as unstyled text:\n  ${missing.join('\n  ')}`);
 });
+
+test('touch devices get a big enough tap target on the messaging controls', () => {
+  // The defect scripts/check-messaging-touch-render.mjs found: the topbar
+  // controls are 36px, under the 44px / 48dp floor Apple and Material both set
+  // for a thumb. A rendered check cannot guard it — headless Chrome reports a
+  // fine pointer, so those rules never apply there — which is why this lives
+  // here, with the suite that always runs.
+  //
+  // Keyed on the input device rather than a width, deliberately: a 1024px iPad
+  // is a wide screen driven by a thumb, and a narrow desktop window is a small
+  // screen driven by a mouse. A width query gets both of those backwards.
+  //
+  // This reads EVERY coarse block rather than the first one it finds. A second
+  // block appended later in the file silently won over the original and shrank
+  // .chat-icon-btn from 44px back to 36px — caught before it shipped, and the
+  // reason the effective value is taken as the last declaration rather than the
+  // first.
+  const blocks = [...CSS.matchAll(/@media \(pointer:\s*coarse\)\s*\{([\s\S]*?)\n\}/g)].map((m) => m[1]);
+  assert.ok(blocks.length > 0, 'styles.css has no (pointer: coarse) block — touch targets are back to 36px');
+
+  const sizeFor = (selector) => {
+    let effective = null;
+    for (const block of blocks) {
+      for (const rule of block.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+        const selectors = rule[1]
+          // Comments sit inside the selector lists in this block, so strip them
+          // before splitting or the commented selector swallows its neighbour.
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .split(',')
+          .map((s) => s.trim());
+        if (!selectors.includes(selector)) continue;
+        const sizes = [...rule[2].matchAll(/(?:min-)?(?:width|height):\s*(\d+)px/g)].map((m) => Number(m[1]));
+        if (sizes.length) effective = Math.min(...sizes);
+      }
+    }
+    return effective;
+  };
+
+  const tooSmall = [];
+  for (const selector of ['.cb-icon-btn', '.chat-icon-btn', '.notif-popup-x']) {
+    const size = sizeFor(selector);
+    if (size === null) tooSmall.push(`${selector}: no size set under pointer:coarse`);
+    else if (size < 44) tooSmall.push(`${selector}: ${size}px, below the 44px floor`);
+  }
+  assert.deepEqual(tooSmall, [], `touch targets too small:\n  ${tooSmall.join('\n  ')}`);
+});

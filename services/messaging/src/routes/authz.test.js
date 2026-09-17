@@ -55,6 +55,7 @@ const OPEN = [
   'GET /messages/with/:userId', // one side of the pair is always req.user.sub
   'POST /messages', // senderId is req.user.sub, never client-supplied
   'POST /messages/presence/ping', // publishes presence for req.user.sub only
+  'POST /messages/typing', // publishes a typing signal FROM req.user.sub only
 ];
 
 test('every route is either guarded or deliberately open', () => {
@@ -117,6 +118,19 @@ test('the presence heartbeat opts out of the activity log', () => {
     body,
     /res\.locals\.activity\s*=\s*false/,
     'the presence ping must set res.locals.activity = false, or it floods the Activity Log'
+  );
+});
+
+test('the typing signal opts out of the activity log', () => {
+  // Same reasoning as the heartbeat: the browser repeats this every 2.5 seconds
+  // for as long as someone is writing a sentence, so logging it would bury the
+  // real entries exactly as the presence ping did.
+  const route = ROUTE_SRC.slice(ROUTE_SRC.indexOf("router.post('/messages/typing'"));
+  const body = route.slice(0, route.indexOf('\n});'));
+  assert.match(
+    body,
+    /res\.locals\.activity\s*=\s*false/,
+    'the typing signal must set res.locals.activity = false'
   );
 });
 
