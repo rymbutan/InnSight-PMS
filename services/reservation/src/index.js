@@ -51,6 +51,7 @@ const { makeInventoryClient, NoInventoryError } = require('./lib/inventoryClient
 const { makeFolioClient } = require('./lib/folioClient');
 const { quotePublicTotal } = require('./lib/publicQuote');
 const { JWT_SECRET } = require('./middleware/auth');
+const { activityLog } = require('./lib/activityLog');
 const inventory = makeInventoryClient({ name: 'reservation', secret: JWT_SECRET });
 const folio = makeFolioClient({ name: 'reservation' });
 app.post('/api/public/reservations', async (req, res) => {
@@ -268,7 +269,7 @@ app.post('/api/public/reservations/:confirmationNumber/notes', async (req, res) 
   }
 });
 
-app.use('/api', verifyToken, idempotency, reservationRoutes);
+app.use('/api', verifyToken, idempotency, activityLog({ service: 'reservation' }), reservationRoutes);
 
 const subscriber = startSubscriber();
 

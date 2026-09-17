@@ -76,3 +76,41 @@ test('a collapsed chat window is styled to shrink to its header', () => {
   const flat = CSS.replace(/\s+/g, ' ');
   assert.match(flat, /\.chat-win\.is-min \{[^}]*width:/, '.chat-win.is-min must set a narrower width');
 });
+
+test('every badge the JSX renders actually gets a background from somewhere', () => {
+  // `.badge` on its own sets shape and type but NO background — every colour
+  // lives on a modifier. So a bare `<span className="badge">` renders as
+  // unstyled text that still passes the build, ESLint and every unit test. The
+  // Activity Log shipped that way for an afternoon and
+  // scripts/check-activity-log-render.mjs is what caught it.
+  //
+  // A badge is satisfied by EITHER a modifier class whose rule sets a
+  // background, OR an inline style that sets one — several call sites legitimately
+  // do the latter to pick a themed variable directly. Modifiers that only adjust
+  // shape (.badge.auto-cancelled sets padding and a cursor, nothing else) are
+  // decorators and are not expected to paint, which is why this asks whether ANY
+  // source of a background exists rather than requiring every class to provide it.
+  const flat = CSS.replace(/\s+/g, ' ');
+  // Double backslashes: this is a template literal, so `\.` would collapse to a
+  // bare `.` and quietly match any character instead of a literal dot.
+  const paints = (mod) => new RegExp(`\\.badge\\.${mod}[ .{][^}]*background`).test(flat);
+  const missing = [];
+
+  for (const file of jsxFiles(SRC)) {
+    const src = readFileSync(file, 'utf8');
+    // Only static class strings: a computed `badge ${status}` cannot be resolved
+    // here and is covered by the per-status rules instead.
+    for (const m of src.matchAll(/className="badge([^"{]*)"([\s\S]{0,240})/g)) {
+      const modifiers = m[1].trim().split(/\s+/).filter(Boolean);
+      // The inline style, if any, belongs to this same element — stop at the
+      // element's closing bracket so a sibling's style cannot vouch for it.
+      const rest = m[2].split('>')[0];
+      const inlineBackground = /style=\{\{[^}]*background/.test(rest);
+      if (inlineBackground) continue;
+      if (modifiers.some(paints)) continue;
+      missing.push(`${file}: "badge ${modifiers.join(' ')}" has no background — renders as plain text`);
+    }
+  }
+
+  assert.deepEqual(missing, [], `badges that render as unstyled text:\n  ${missing.join('\n  ')}`);
+});

@@ -15,6 +15,7 @@ const logger = makeLogger('stay');
 const { startSubscriber } = require('./subscribers/redis.subscriber');
 const { startOverdueSweeper } = require('./overdue/sweeper');
 
+const { activityLog } = require('./lib/activityLog');
 const app = express();
 const PORT = process.env.PORT || 3006;
 
@@ -29,7 +30,7 @@ app.get('/health', (req, res) => {
   res.json({ service: 'stay', status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-app.use('/api', verifyToken, idempotency, stayRoutes);
+app.use('/api', verifyToken, idempotency, activityLog({ service: 'stay' }), stayRoutes);
 
 const subscriber = startSubscriber();
 

@@ -53,3 +53,46 @@ enum DayStatus {
   CLOSED
   FAILED
 }
+
+// Who did what, across every service. Written ONLY by the subscriber in
+// src/subscribers/redis.subscriber.js, from the `activity:recorded` events that
+// lib/activityLog.js publishes on each successful write request. Never written by
+// a route — the API over this table is read-only on purpose, so the log cannot be
+// edited from the screen that displays it.
+//
+// It lives in the audit service because that service already owns "what happened
+// to the property", is already proxied at the gateway, and its Redis subscriber
+// was a documented no-op waiting for exactly this.
+//
+// NOTE ON PII: there is deliberately no body/payload column. See the header of
+// lib/activityLog.js — request bodies here would mean storing passwords and guest
+// data in a table an admin browses casually.
+model ActivityLog {
+  id         String   @id @default(uuid())
+  at         DateTime @default(now())
+  service    String
+  // Null for the handful of successful writes with no session — a guest
+  // completing a public booking, or a password reset redeemed by token.
+  actorId    String?
+  actorName  String   @default("unknown")
+  actorRoles String[] @default([])
+  // Stable, filterable key: "reservations.cancel", "auth.login", "folios.create".
+  action     String
+  // Human-readable line shown in the admin table.
+  summary    String
+  method     String
+  path       String
+  targetType String?
+  targetId   String?
+  status     Int
+  requestId  String?
+  ip         String?
+
+  // The admin screen's three queries: newest-first overall, newest-first for one
+  // person, and newest-first for one action. Each needs `at` as the trailing
+  // column or Postgres sorts the match set by hand.
+  @@index([at])
+  @@index([actorId, at])
+  @@index([action, at])
+  @@index([service, at])
+}
