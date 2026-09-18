@@ -10775,7 +10775,21 @@ html[data-theme='dark'] .chat-launcher-pop {
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 0;
+  /* NOT min-height: 0. .rec-pick-list is a scrollable flex COLUMN
+     (max-height + overflow-y: auto), and every row here is two lines tall
+     (name, then a role badge or a folio's guest line underneath). A flex
+     column with more content than its max-height does not just grow past it
+     and scroll — the browser first tries to satisfy max-height by SHRINKING
+     flex-shrink:1 items, and normally a row's own content sets a floor under
+     that shrink (the default min-height: auto). Zeroing min-height removes
+     that floor, so with more than about seven staff or matches the rows
+     compressed to a sliver and their two lines of text spilled straight
+     through the row below them — unreadable, and only visible once a real
+     staff list or a real search result was long enough to overflow.
+     flex-shrink: 0 is the actual fix: rows keep their content height no
+     matter how many there are, and the list scrolls instead, which is what
+     max-height + overflow-y: auto were there to do in the first place. */
+  flex-shrink: 0;
   padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: 10px;
