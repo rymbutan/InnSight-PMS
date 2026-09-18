@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
-import { STATUS_ORDER as ROOM_STATUSES } from '../sim/statusMeta';
+import { STATUS_ORDER as ROOM_STATUSES, statusMeta } from '../sim/statusMeta';
 import { labelize } from '../lib/labels';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
@@ -290,17 +290,33 @@ export default function Rooms() {
                   </thead>
                   <tbody>
                     {visibleRooms.map((r) => {
-                      const dotCls = r.status === 'OUT_OF_ORDER' ? 'out' : r.status.toLowerCase();
+                      // The SAME colour a status means on the Map & Housekeeping
+                      // board — statusMeta is that one shared source. This used
+                      // to be its own `.badge`/`.status-dot` modifier per status
+                      // (clean/dirty/occupied/out), and that palette had drifted
+                      // from the map's: OCCUPIED rendered in the app's green
+                      // accent, indistinguishable from CLEAN, when the map (and
+                      // hospitality convention) reserves violet for "guest in
+                      // residence" precisely so it never reads as the same
+                      // all-clear signal. DIRTY was amber instead of red, OUT_OF
+                      // _ORDER was red instead of slate, and CLEAN_INSPECTED /
+                      // OUT_OF_SERVICE had no modifier at all — an invisible dot
+                      // and an uncoloured badge. One row of a hotel's clean/dirty/
+                      // occupied board disagreeing with the other is exactly the
+                      // kind of thing that gets a room double-assigned.
+                      const meta = statusMeta(r.status);
                       return (
                         <tr key={r.id}>
                           <td>
-                            <span className={`status-dot ${dotCls}`} />
+                            <span className="status-dot" style={{ background: meta.color }} />
                             {r.number}
                           </td>
                           <td>{r.typeCode}</td>
                           <td className="t-c">{r.floor}</td>
                           <td className="t-c">
-                            <span className={`badge ${dotCls}`}>{labelize(r.status)}</span>
+                            <span className="badge" style={{ background: meta.fill, color: meta.color }}>
+                              {labelize(r.status)}
+                            </span>
                           </td>
                           <td className="t-c">
                             {/* `value` is set explicitly now: the option previously

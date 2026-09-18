@@ -10,6 +10,7 @@ import { buildBars, barAt, reservationIdForBar } from '../../lib/calendarBars';
 import { useTheme } from '../../theme';
 import CalendarShell from '../../components/CalendarShell';
 import Icon from '../../components/Icon';
+import { statusMeta } from '../../sim/statusMeta';
 
 function addDays(d, n) {
   const x = new Date(d);
@@ -446,8 +447,15 @@ export default function ReservationBoard({ startDate, days }) {
                 g.rooms.map((rm) => (
                   <div key={rm.id} style={{ display: 'contents' }}>
                     <div className="cal2-room">
+                      {/* statusMeta, not the .status-dot.clean/dirty/occupied/out
+                          modifiers — those colour OCCUPIED the same green as
+                          CLEAN and DIRTY amber instead of red, disagreeing with
+                          the Map & Housekeeping board's colours for the exact
+                          same room statuses. One shared source keeps every
+                          screen's dot meaning the same thing. */}
                       <span
-                        className={`status-dot ${(rm.status || 'CLEAN').toLowerCase().replace('_', '-') === 'out-of-order' ? 'out' : (rm.status || 'CLEAN').toLowerCase()}`}
+                        className="status-dot"
+                        style={{ background: statusMeta(rm.status || 'CLEAN').color }}
                       />
                       {rm.number}
                     </div>
@@ -577,11 +585,7 @@ export default function ReservationBoard({ startDate, days }) {
               of each other, and "View booking" alone would not say which one is
               about to open. */}
           {popover.bookingId && (
-            <button
-              className="btn-ghost"
-              style={{ width: '100%', marginTop: 6 }}
-              onClick={showBooking}
-            >
+            <button className="btn-ghost" style={{ width: '100%', marginTop: 6 }} onClick={showBooking}>
               <Icon name="calendar" size={14} style={{ marginRight: 6 }} />
               View booking{popover.bookingLabel ? ` · ${popover.bookingLabel}` : ''}
             </button>
