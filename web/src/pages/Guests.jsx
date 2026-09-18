@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import Avatar from '../components/Avatar';
 import EmptyState from '../components/EmptyState';
 import StatusPill from '../components/StatusPill';
 import Icon from '../components/Icon';
+import ShareRecordDialog from '../components/ShareRecordDialog';
+import { guestRef } from '../lib/recordRefs';
 import { labelize } from '../lib/labels';
 import { useAuth } from '../auth';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -16,6 +19,14 @@ export default function Guests() {
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // "Send to colleague": this profile lands in a colleague's chat as a chip
+  // that opens it here.
+  const [shareOpen, setShareOpen] = useState(false);
+  // ?id=<guestId> opens a profile directly — the route a record chip in a chat
+  // message navigates to. Folios has read `?id=` the same way since Arrivals
+  // started linking to it; this page only ever opened a guest from its own
+  // list, so there was no way to link INTO one.
+  const [searchParams] = useSearchParams();
   const [history, setHistory] = useState({ loading: false, stays: [], reservations: [] });
   const [form, setForm] = useState({ firstName: '', lastName: '', nationality: '', vipLevel: 'NONE' });
   const toast = useToast();
@@ -169,12 +180,21 @@ export default function Guests() {
   // into an editable form, so looking someone up to check their room put four
   // live inputs under the cursor — a stray keystroke edited a real record.
   // Editing is now an explicit choice.
-  async function openGuest(id) {
+  //
+  // `fromLink` is the deep-link case: there is no list row to select from, so
+  // the search box and the (hidden) result set are filled from the profile
+  // itself, exactly as pickGuest would have left them.
+  async function openGuest(id, { fromLink = false } = {}) {
     setEditing(false);
     setHistory({ loading: true, stays: [], reservations: [] });
     try {
       const { data } = await api.get(`/api/guests/${id}`);
       setSelected(data);
+      if (fromLink) {
+        setQ(data.displayName || data.profileNumber || '');
+        setResults([data]);
+        setListMode('selected');
+      }
       // Stay and reservation history come from other services, so they load
       // alongside rather than blocking the profile. Either failing leaves that
       // section empty instead of losing the whole panel.
@@ -257,10 +277,22 @@ export default function Guests() {
     }
   }
 
+  // On mount, and again whenever the query string changes — a chip for a
+  // different guest clicked while already on this page has to open THAT guest.
+  // With an id the browse search is skipped, not merely raced: it sets the list
+  // mode when it lands, and landing after the profile would put the full list
+  // back over the record the link was for.
   useEffect(() => {
-    search('', 'browse');
+    const qid = searchParams.get('id');
+    if (qid) {
+      clearTimeout(suggestTimer.current);
+      suggestSeq.current++;
+      openGuest(qid, { fromLink: true });
+    } else {
+      search('', 'browse');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   // This page had no live refresh at all, so a profile edited anywhere else —
   // Quick Edit on a reservation, most often — left this list showing the old
@@ -457,6 +489,15 @@ export default function Guests() {
                 <Icon name="pencil" size={13} />
                 Edit
               </button>
+              <button className="small secondary" onClick={() => setShareOpen(true)}>
+                <Icon name="send" size={13} />
+                Send to colleague
+              </button>
+              <ShareRecordDialog
+                open={shareOpen}
+                onClose={() => setShareOpen(false)}
+                record={guestRef(selected)}
+              />
               {/* Closing the card puts the list back. `setSelected(null)` alone
                   would leave a search bar with nothing under it at all, since
                   the results are dismissed while a guest is selected. */}

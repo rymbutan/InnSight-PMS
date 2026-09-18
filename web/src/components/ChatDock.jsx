@@ -6,7 +6,10 @@ import { useAuth } from '../auth';
 import { primaryRole } from '../lib/roles';
 import Transcript from './Transcript';
 import TypingIndicator from './TypingIndicator';
+import RecordChip from './RecordChip';
+import RecordPicker from './RecordPicker';
 import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
+import { allowedRecordTypes } from '../lib/recordRefs';
 import { useContacts, useConversation } from '../lib/useMessaging';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,9 +115,12 @@ function useIsNarrow() {
 }
 
 export default function ChatDock({ suppressed = false }) {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const navigate = useNavigate();
   const narrow = useIsNarrow();
+  // Which records this person may attach — the picker's tabs. Empty for a role
+  // that can look nothing up, in which case the window shows no paperclip.
+  const attachTypes = useMemo(() => allowedRecordTypes(hasRole), [hasRole]);
   // Restored from the last session, so a reload does not silently close the
   // conversations someone was holding. Minimised on restore whatever they were
   // before: reappearing as three open windows over the page after a refresh is
@@ -261,6 +267,7 @@ export default function ChatDock({ suppressed = false }) {
             meId={user.id}
             minimized={w.minimized}
             unread={peer?.unreadCount || 0}
+            attachTypes={attachTypes}
             onToggle={() => toggleMinimized(w.peerId)}
             onClose={() => close(w.peerId)}
             onExpandFull={() => {
@@ -356,8 +363,18 @@ function Avatar({ name, online, size = 34 }) {
   );
 }
 
-function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, onExpandFull }) {
+function ChatWindow({ peerId, peer, meId, minimized, unread, attachTypes, onToggle, onClose, onExpandFull }) {
   const [draft, setDraft] = useState('');
+  // A record waiting to go with the next message — see lib/recordRefs.js. It
+  // sits above the text box as a removable chip until Send, and survives a
+  // moderation refusal along with the draft.
+  const [pending, setPending] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // A send failure the sender has to act on, other than moderation (which
+  // `blocked` covers): the attached record no longer exists, or the request
+  // itself failed. Shown inline for the same reason `blocked` is — a toast
+  // fades while the unsent message sits there looking sent.
+  const [problem, setProblem] = useState('');
   const taRef = useRef(null);
   // Minimised means NOT polling — see useConversation's `active`. A collapsed
   // window shows no transcript, so fetching one every three seconds is cost for
@@ -386,12 +403,26 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
   async function submit(e) {
     e?.preventDefault?.();
     const body = draft.trim();
-    if (!body) return;
+    if (!body && !pending) return;
     notifyTyping(false);
-    const res = await send(body);
+    setProblem('');
+    const res = await send(body, pending);
     // The draft survives a refusal on purpose: the sender has to edit the part
     // that offended, and clearing it would make them retype the part that was fine.
-    if (res.ok) setDraft('');
+    if (res.ok) {
+      setDraft('');
+      setPending(null);
+    } else if (res.error) {
+      const data = res.error?.response?.data;
+      if (data?.code === 'REF_MISSING') {
+        // The record went away between picking it and sending. The chip is
+        // dropped for them — re-sending the same dead reference cannot succeed.
+        setPending(null);
+        setProblem(data.error || 'That record no longer exists.');
+      } else {
+        setProblem(data?.error || res.error?.message || 'Could not send. Try again.');
+      }
+    }
   }
 
   function onKeyDown(e) {
@@ -477,8 +508,31 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
             That wording is not allowed. Please reword it.
           </p>
         )}
+        {problem && !blocked && (
+          <p className="chat-blocked" role="alert">
+            <Icon name="alert-circle" size={13} strokeWidth={1.9} />
+            {problem}
+          </p>
+        )}
+
+        {pending && (
+          <div className="composer-attach">
+            <RecordChip record={pending} onRemove={() => setPending(null)} />
+          </div>
+        )}
 
         <form className="chat-composer" onSubmit={submit}>
+          {attachTypes.length > 0 && (
+            <button
+              type="button"
+              className={`chat-attach-btn${pending ? ' is-on' : ''}`}
+              onClick={() => setPickerOpen(true)}
+              title="Attach a record"
+              aria-label="Attach a reservation, folio or guest"
+            >
+              <Icon name="paperclip" size={15} strokeWidth={1.9} />
+            </button>
+          )}
           <textarea
             ref={taRef}
             className={blocked ? 'is-blocked' : undefined}
@@ -487,6 +541,7 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
               const next = e.target.value;
               setDraft(next);
               if (blocked) clearBlocked();
+              if (problem) setProblem('');
               // Throttled inside the hook, so calling it per keystroke is fine.
               // Emptying the box sends the explicit stop rather than letting the
               // indicator hang on for the rest of its TTL.
@@ -501,7 +556,7 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
           <button
             type="submit"
             className="chat-send"
-            disabled={!draft.trim() || sending}
+            disabled={(!draft.trim() && !pending) || sending}
             title="Send"
             aria-label="Send"
           >
@@ -509,6 +564,16 @@ function ChatWindow({ peerId, peer, meId, minimized, unread, onToggle, onClose, 
           </button>
         </form>
       </div>
+
+      <RecordPicker
+        open={pickerOpen}
+        onClose={() => {
+          setPickerOpen(false);
+          taRef.current?.focus();
+        }}
+        onPick={setPending}
+        types={attachTypes}
+      />
     </section>
   );
 }

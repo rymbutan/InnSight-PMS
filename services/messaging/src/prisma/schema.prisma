@@ -49,7 +49,20 @@ model Message {
   // that is the point to introduce a real Conversation row.
   userLo      String
   userHi      String
+  // Empty when the message is only an attachment (below) — the send route
+  // requires one or the other, never neither.
   body        String
+  // At most one record reference per message: a reservation, folio or guest
+  // the browser draws as a chip that opens the record in place. refType/refId
+  // say what it points at; refLabel/refSub are a snapshot of how to name it,
+  // taken at send time so the chip renders from this row alone and still reads
+  // correctly after the record is renamed or deleted. Plain columns rather than
+  // a side table because there is at most one, and a join would be paid on
+  // every three-second thread poll. See src/lib/recordRef.js.
+  refType     String?
+  refId       String?
+  refLabel    String?
+  refSub      String?
   createdAt   DateTime  @default(now())
   readAt      DateTime?
 
