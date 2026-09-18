@@ -5,6 +5,8 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const retention = require('../retention/policy');
 const profanity = require('../moderation/profanity');
+const { normalizeRef, refColumns, messagePreview } = require('../lib/recordRef');
+const { recordExists } = require('../lib/recordLookup');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 redis.on('error', (e) => console.error('[Messaging] redis error:', e.message));
 
@@ -101,7 +103,14 @@ router.get('/messages/contacts', async (req, res) => {
       where: { OR: [{ senderId: me }, { recipientId: me }], ...live },
       orderBy: { createdAt: 'desc' },
       take: 400,
-      select: { senderId: true, recipientId: true, body: true, createdAt: true },
+      select: {
+        senderId: true,
+        recipientId: true,
+        body: true,
+        refType: true,
+        refLabel: true,
+        createdAt: true,
+      },
     });
     const lastByPeer = new Map();
     for (const m of recent) {
@@ -119,7 +128,10 @@ router.get('/messages/contacts', async (req, res) => {
         online: onlineById.get(c.id) === true,
         unreadCount: unreadBySender.get(c.id) || 0,
         lastMessageAt: last ? last.createdAt : null,
-        lastMessagePreview: last ? last.body.slice(0, 120) : null,
+        // The body, or "Shared folio: …" for a message that is only an
+        // attachment — otherwise a row whose last message was a record would
+        // preview as blank, which reads as nothing having been sent.
+        lastMessagePreview: last ? messagePreview(last, 120) : null,
       };
     });
 
@@ -210,13 +222,22 @@ router.get('/messages/with/:userId', async (req, res) => {
 router.post('/messages', async (req, res) => {
   try {
     const me = req.user.sub;
-    const { recipientId, body } = req.body || {};
+    const { recipientId, body, ref: rawRef } = req.body || {};
 
-    if (!recipientId || typeof body !== 'string') {
+    // `body` may be omitted when the message is only an attachment; anything
+    // present has to be a string.
+    if (!recipientId || (body != null && typeof body !== 'string')) {
       return res.status(400).json({ error: 'recipientId and body are required.' });
     }
-    const text = body.trim();
-    if (!text) return res.status(400).json({ error: 'Message cannot be empty.' });
+    // The optional record reference — a reservation, folio or guest the
+    // recipient can open from the chip. Shape-checked here; whether the record
+    // exists is asked of its owning service below, after the cheap checks.
+    const normalized = normalizeRef(rawRef);
+    if (!normalized.ok) return res.status(400).json({ error: normalized.error });
+    const ref = normalized.ref;
+
+    const text = (body || '').trim();
+    if (!text && !ref) return res.status(400).json({ error: 'Message cannot be empty.' });
     if (text.length > MAX_BODY) {
       return res.status(400).json({ error: `Message cannot exceed ${MAX_BODY} characters.` });
     }
@@ -226,7 +247,11 @@ router.post('/messages', async (req, res) => {
     // is a courtesy to the person typing; this is the one that holds, because
     // the endpoint is reachable without the page. See moderation/profanity.js
     // for why this blocks the send instead of masking the words.
-    const verdict = profanity.check(text);
+    //
+    // The chip's label and sub-line are checked too. They are copied from a
+    // record in the normal case, but the endpoint does not know that — a label
+    // is just another string a caller chose, and it is rendered in the thread.
+    const verdict = profanity.check([text, ref?.label, ref?.sub].filter(Boolean).join('\n'));
     if (!verdict.clean) {
       // Log the rule, never the message — a moderation log that quotes what was
       // refused just relocates the problem into a file more people can read.
@@ -253,8 +278,19 @@ router.post('/messages', async (req, res) => {
       return res.status(404).json({ error: 'Recipient not found.' });
     }
 
+    // Last, because it is the one check that leaves this service. A definite
+    // 404 refuses the send — a chip that opens onto "not found" is worse than
+    // no chip. An unreachable or slow owner lets it through; see
+    // lib/recordLookup.js for why that is the right way round.
+    if (ref && (await recordExists(ref)) === 'missing') {
+      return res.status(400).json({
+        code: 'REF_MISSING',
+        error: 'That record no longer exists. Remove the attachment and try again.',
+      });
+    }
+
     const message = await prisma.message.create({
-      data: { senderId: me, recipientId, ...pairOf(me, recipientId), body: text },
+      data: { senderId: me, recipientId, ...pairOf(me, recipientId), body: text, ...refColumns(ref) },
     });
 
     // Carries enough to RENDER the notification, not just to trigger a refetch.
@@ -276,7 +312,7 @@ router.post('/messages', async (req, res) => {
           senderId: me,
           senderName: senderName || 'A colleague',
           recipientId,
-          preview: text.slice(0, 90),
+          preview: messagePreview(message, 90),
           createdAt: message.createdAt,
         })
       )

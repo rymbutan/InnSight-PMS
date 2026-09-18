@@ -7,9 +7,12 @@ import Icon from '../components/Icon';
 import RoleBadge from '../components/RoleBadge';
 import Transcript from '../components/Transcript';
 import TypingIndicator from '../components/TypingIndicator';
+import RecordChip from '../components/RecordChip';
+import RecordPicker from '../components/RecordPicker';
 import { primaryRole } from '../lib/roles';
 import { useMessageSound } from '../lib/sound';
 import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
+import { allowedRecordTypes } from '../lib/recordRefs';
 import { useContacts, useConversation, useRetentionPolicy } from '../lib/useMessaging';
 import { openChat } from '../components/ChatDock';
 
@@ -24,12 +27,17 @@ import { openChat } from '../components/ChatDock';
 // layout.
 
 export default function Messages() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState('');
   const [draft, setDraft] = useState('');
+  // A record to go with the next message — a reservation, folio or guest,
+  // shown as a removable chip above the box until Send. See lib/recordRefs.js.
+  const [pending, setPending] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const attachTypes = useMemo(() => allowedRecordTypes(hasRole), [hasRole]);
   const [soundOn, setSoundOn] = useMessageSound();
   const taRef = useRef(null);
 
@@ -83,6 +91,7 @@ export default function Messages() {
   // line to the next person — which is how a draft gets sent to the wrong one.
   useEffect(() => {
     setDraft('');
+    setPending(null);
   }, [peerId]);
 
   // Grow the composer with its content up to a few lines, then scroll inside
@@ -104,14 +113,29 @@ export default function Messages() {
   async function submit(e) {
     e?.preventDefault?.();
     const body = draft.trim();
-    if (!body) return;
+    if (!body && !pending) return;
     notifyTyping(false);
-    const res = await send(body);
-    if (res.ok) setDraft('');
-    // A refusal leaves the draft alone on purpose — the sender edits the part
-    // that offended instead of retyping the part that was fine. `blocked` from
-    // the hook renders the notice.
-    else if (res.error) toast.error(errMsg(res.error));
+    const res = await send(body, pending);
+    if (res.ok) {
+      setDraft('');
+      setPending(null);
+    } else if (res.error) {
+      // A refusal leaves the draft alone on purpose — the sender edits the part
+      // that offended instead of retyping the part that was fine. `blocked` from
+      // the hook renders the notice.
+      toast.error(errMsg(res.error));
+      // Except a record that vanished between picking and sending: re-sending
+      // the same dead reference cannot succeed, so the chip is dropped for them.
+      if (res.error?.response?.data?.code === 'REF_MISSING') setPending(null);
+    }
+  }
+
+  // Opening a record from a chip. Navigating away would close the conversation
+  // the reader just clicked out of, so it is handed to the dock first — the
+  // same move the "Open in dock" button makes — and follows them to the record.
+  function openRecord(record) {
+    if (peer) openChat(peer.id);
+    navigate(record.path);
   }
 
   // Enter sends, Shift+Enter breaks the line — the convention every chat client
@@ -270,7 +294,7 @@ export default function Messages() {
                     No messages yet — say hello to {peer.displayName.split(' ')[0]}.
                   </p>
                 ) : (
-                  <Transcript rows={rows} />
+                  <Transcript rows={rows} onOpenRecord={openRecord} />
                 )}
                 {peerTyping && <TypingIndicator name={peer.displayName.split(' ')[0]} />}
               </div>
@@ -285,7 +309,24 @@ export default function Messages() {
                 </div>
               )}
 
+              {pending && (
+                <div className="composer-attach">
+                  <RecordChip record={pending} onRemove={() => setPending(null)} />
+                </div>
+              )}
+
               <form className="msg-composer" onSubmit={submit}>
+                {attachTypes.length > 0 && (
+                  <button
+                    type="button"
+                    className={`chat-attach-btn${pending ? ' is-on' : ''}`}
+                    onClick={() => setPickerOpen(true)}
+                    title="Attach a record"
+                    aria-label="Attach a reservation, folio or guest"
+                  >
+                    <Icon name="paperclip" size={17} strokeWidth={1.9} />
+                  </button>
+                )}
                 <div className={`msg-composer-field${blocked ? ' is-blocked' : ''}`}>
                   <textarea
                     ref={taRef}
@@ -308,7 +349,7 @@ export default function Messages() {
                 <button
                   type="submit"
                   className="msg-send"
-                  disabled={!draft.trim() || sending}
+                  disabled={(!draft.trim() && !pending) || sending}
                   aria-label="Send message"
                   title="Send  ·  Shift+Enter for a new line"
                 >
@@ -319,6 +360,16 @@ export default function Messages() {
           )}
         </section>
       </div>
+
+      <RecordPicker
+        open={pickerOpen}
+        onClose={() => {
+          setPickerOpen(false);
+          taRef.current?.focus();
+        }}
+        onPick={setPending}
+        types={attachTypes}
+      />
     </div>
   );
 }

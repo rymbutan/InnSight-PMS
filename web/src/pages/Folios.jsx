@@ -9,7 +9,9 @@ import { pesosToCents, formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { downloadAuthed } from '../lib/download';
 import SplitBillDialog from '../components/SplitBillDialog';
+import ShareRecordDialog from '../components/ShareRecordDialog';
 import Modal from '../components/Modal';
+import { folioRef } from '../lib/recordRefs';
 import { useAuth } from '../auth';
 import { paymentMethodGroups, isEWallet } from '../lib/paymentMethods';
 import { labelize } from '../lib/labels';
@@ -90,6 +92,9 @@ export default function Folios() {
   const [siblings, setSiblings] = useState([]);
   const [moving, setMoving] = useState(null);
   const [splitOpen, setSplitOpen] = useState(false);
+  // "Send to colleague": this folio lands in a colleague's chat as a chip
+  // that opens it here.
+  const [shareOpen, setShareOpen] = useState(false);
   // The stay's guest name. Neither GET /folios/:id nor the statement carries it —
   // it lives on the guest service and only the folio LIST joins it — so it is
   // read out of the sibling fetch below rather than paid for with a second call.
@@ -883,6 +888,14 @@ export default function Folios() {
                 <button className="secondary" onClick={printPdf}>
                   Print PDF
                 </button>
+                <button className="secondary" onClick={() => setShareOpen(true)}>
+                  Send to colleague
+                </button>
+                <ShareRecordDialog
+                  open={shareOpen}
+                  onClose={() => setShareOpen(false)}
+                  record={folioRef(folio, headerGuestName)}
+                />
                 {folio.status === 'OPEN' && folio.stayId && (
                   <>
                     {/* A real split: pick the payers and how the bill divides,
