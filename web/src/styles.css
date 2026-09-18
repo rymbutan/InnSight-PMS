@@ -5336,12 +5336,28 @@ html[data-theme='dark'] .skel {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Its own scroll, separate from the page's: a hotel adds room types far more
+     often than it removes them, and without a cap this list pushed the panel
+     — and everything below it in the sidebar — taller with every one added.
+     380px is about four cards before it scrolls, which is what the panel's
+     own height budget in this layout can give it. */
+  max-height: 380px;
+  overflow-y: auto;
+  /* Room for the scrollbar so it doesn't sit flush on a card's border. */
+  padding-right: 4px;
 }
 .rt-item {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2);
+  /* Not shrinkable. A flex column with a max-height and more content than fits
+     satisfies that height by SHRINKING flex-shrink:1 items before it lets the
+     list scroll, unless something holds each item to its content size — see
+     .rec-pick-row's own comment for the version of this that shipped visibly
+     broken. Nothing here zeroes that floor, but this pins it explicitly so a
+     future edit to this rule can't reintroduce that bug by accident. */
+  flex-shrink: 0;
 }
 .rt-head {
   display: flex;
@@ -5379,8 +5395,25 @@ html[data-theme='dark'] .skel {
   flex: 1 1 110px;
   min-width: 0;
 }
+/* Smaller than the shared .small tier (28px): that height was sized for a
+   button standing next to ordinary body text, and here it sits beside an
+   11.5px meta line in a card built to be scanned quickly, one of several in
+   a scrolling list — at that density it read as the biggest thing on the
+   card. Scoped to .rt-edit specifically, not to .small everywhere, since
+   .small is the height an actual click target needs everywhere else it's
+   used (list rows, table actions) and this is the one place it was too much. */
 .rt-edit button {
   flex: 0 0 auto;
+  min-height: 24px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+}
+/* The delete button carries only a trash icon — square, not a rectangle with
+   padding built for text either side of it. */
+.rt-edit button.danger {
+  width: 24px;
+  height: 24px;
+  padding: 0;
 }
 
 /* ==========================================================================
@@ -10847,4 +10880,51 @@ html[data-theme='dark'] .chat-launcher-pop {
   margin: 8px 0 0;
   font-size: 12.5px;
   color: var(--danger);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Service Health — outbound mail card. pages/Health.jsx's MailHealthCard.
+   ══════════════════════════════════════════════════════════════════════════ */
+.health-mail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health-mail-head svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.health-mail-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 650;
+  font-size: 14px;
+}
+/* The badge stays put at the end of the title line even when the title wraps
+   on a narrow screen — flex-shrink: 0 on a fixed-width child, not something
+   that depends on the title never wrapping. */
+.health-mail-head .badge {
+  flex-shrink: 0;
+}
+.health-mail-from {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+/* The actual mailbox, broken onto its own line rather than run into the
+   sentence — an address in angle brackets mid-sentence read as a typo, not
+   the one fact here worth coming back to check. Monospaced so it reads as a
+   value rather than another word, the same treatment folio references and
+   confirmation numbers get elsewhere. */
+.health-mail-addr {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+.health-mail-detail {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
