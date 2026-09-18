@@ -10562,3 +10562,275 @@ html[data-theme='dark'] .chat-launcher-pop {
     opacity: 0.6;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Record attachments in messages — components/RecordChip.jsx, RecordPicker.jsx,
+   ShareRecordDialog.jsx; lib/recordRefs.js.
+
+   A message may carry one reservation, folio or guest, drawn as a small card
+   under its text. The card is a BUTTON in the transcript (it opens the record
+   in place), a static preview in the share dialog, and a removable pending
+   attachment in the composers — one component, three states, so it reads as
+   the same object everywhere it appears.
+   ══════════════════════════════════════════════════════════════════════════ */
+.rec-chip {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+/* Under the text of a bubble; flush when the record IS the message. */
+.chat-bubble-body + .rec-chip {
+  margin-top: 6px;
+}
+.chat-bubble.has-record {
+  /* The card has its own surface, so the bubble's padding shrinks to a frame
+     around it instead of doubling up. */
+  padding: 6px;
+}
+.chat-bubble.has-record .chat-bubble-body {
+  padding: 2px 7px 0;
+}
+.rec-chip-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 7px 10px 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s ease;
+}
+.rec-chip-main:disabled {
+  cursor: default;
+}
+.rec-chip-main:hover:not(:disabled),
+.rec-chip-main:focus-visible {
+  border-color: var(--accent);
+}
+.rec-chip-main:hover:not(:disabled) .rec-chip-go {
+  color: var(--accent);
+  transform: translateX(2px);
+}
+.rec-chip-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.rec-chip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.rec-chip-type {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.rec-chip-label {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-chip-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-chip-go {
+  flex-shrink: 0;
+  color: var(--muted-2);
+  transition:
+    color 0.14s ease,
+    transform 0.14s ease;
+}
+.rec-chip-remove {
+  flex-shrink: 0;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.rec-chip-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+/* Inside the sender's own accent-coloured bubble the card keeps its own light
+   surface; text on green would fail contrast and the card would vanish. */
+.chat-group.mine .rec-chip-main {
+  border-color: transparent;
+}
+
+/* ── The paperclip and the pending attachment in the composers ── */
+.chat-attach-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.chat-attach-btn:hover,
+.chat-attach-btn.is-on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.msg-composer .chat-attach-btn {
+  width: 38px;
+  height: 38px;
+}
+/* Sits between the transcript and the text box, in the composer's column, so
+   the chip is visibly part of what is about to be sent. */
+.composer-attach {
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 0;
+}
+.msg-thread .composer-attach {
+  padding: 10px 14px 0;
+}
+
+/* ── The picker and the share dialog ── */
+.rec-pick-tabs {
+  margin-bottom: 10px;
+}
+.rec-pick-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rec-pick-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  transition: border-color 0.14s ease;
+}
+.rec-pick-search:focus-within {
+  border-color: var(--accent);
+}
+.rec-pick-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+.rec-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 320px;
+  overflow-y: auto;
+  /* Room for the row's focus ring, which the scroll box would otherwise clip. */
+  padding: 2px;
+}
+.rec-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rec-pick-row:hover,
+.rec-pick-row:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.rec-pick-row.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.rec-pick-row .rec-chip-icon {
+  width: 32px;
+  height: 32px;
+}
+.rec-pick-row .rec-chip-text {
+  flex: 1;
+}
+.rec-pick-empty {
+  margin: 0;
+  padding: 18px 8px;
+  text-align: center;
+  font-size: 13px;
+}
+.share-list {
+  max-height: 240px;
+}
+.share-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  font-size: 11.5px;
+}
+.share-check {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.share-note {
+  width: 100%;
+  margin-top: 10px;
+  resize: vertical;
+  min-height: 56px;
+}
+.share-problem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}

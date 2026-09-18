@@ -10,6 +10,8 @@ import { downloadAuthed } from '../lib/download';
 import StatusPill from '../components/StatusPill';
 import ActionsMenu from '../components/ActionsMenu';
 import Modal from '../components/Modal';
+import ShareRecordDialog from '../components/ShareRecordDialog';
+import { reservationRef } from '../lib/recordRefs';
 import FilterPanel, { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
 import Timeline from '../components/Timeline';
@@ -51,6 +53,7 @@ export default function ReservationDetail() {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [quickEditOpen, setQuickEditOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [stay, setStay] = useState(null);
   const [chargeCodes, setChargeCodes] = useState([]);
 
@@ -212,6 +215,10 @@ export default function ReservationDetail() {
 
   return (
     <div>
+      {/* "Send to Colleague" in the Actions menu: this reservation lands in a
+          colleague's chat as a chip that opens it. */}
+      <ShareRecordDialog open={shareOpen} onClose={() => setShareOpen(false)} record={reservationRef(res)} />
+
       {/* Header */}
       <div className="res-header">
         <div className="res-head-top">
@@ -249,6 +256,7 @@ export default function ReservationDetail() {
                   label: 'Send Confirmation Email',
                   onClick: doSendConfirmationEmail,
                 },
+                { label: 'Send to Colleague', onClick: () => setShareOpen(true) },
                 { divider: true },
                 ['CONFIRMED', 'PENDING'].includes(res.status) &&
                   hasRole('ADMIN', 'MANAGER', 'AUDITOR') && {

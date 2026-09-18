@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api';
+import { refPayload } from './recordRefs';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The messaging data layer, shared by the Messages page and the docked chat
@@ -175,13 +176,19 @@ export function useConversation(peerId, meId, { active = true } = {}) {
     if (el && wasAtBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, active]);
 
+  // `ref` is an optional record attachment — see lib/recordRefs.js. A message
+  // may be text, a record, or both; it may not be neither.
   const send = useCallback(
-    async (body) => {
+    async (body, ref = null) => {
       const text = String(body ?? '').trim();
-      if (!text || !peerId || sending) return { ok: false };
+      if ((!text && !ref) || !peerId || sending) return { ok: false };
       setSending(true);
       try {
-        const { data } = await api.post('/api/messages', { recipientId: peerId, body: text });
+        const { data } = await api.post('/api/messages', {
+          recipientId: peerId,
+          body: text,
+          ref: refPayload(ref),
+        });
         // Append rather than waiting for the next poll: up to 3s of the message
         // not appearing reads as the send having failed.
         setMessages((m) => [...m, data]);
