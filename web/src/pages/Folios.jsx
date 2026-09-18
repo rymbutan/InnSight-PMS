@@ -884,56 +884,79 @@ export default function Folios() {
                   </div>
                 </div>
               </div>
+              {/* Three groups, not six buttons in a row: reference (nothing here
+                  changes the bill), billing structure (splits it), and the
+                  lifecycle gate (signs it off, then closes it). Every button is
+                  .small now — Split Bill and Approve for Checkout were both
+                  .btn-cta, the same full-size, shouting-uppercase treatment the
+                  dashboard's one "Create new reservation" button uses, so two
+                  actions in one toolbar were each claiming to be THE thing to
+                  click. Approve for Checkout keeps that treatment, shrunk, as
+                  the one action actually gating checkout — see the banner right
+                  below this row. Everything else reads as an equal, ordinary
+                  choice, which is what it is. */}
               <div className="folio-summary-actions">
-                <button className="secondary" onClick={printPdf}>
-                  Print PDF
-                </button>
-                <button className="secondary" onClick={() => setShareOpen(true)}>
-                  Send to colleague
-                </button>
-                <ShareRecordDialog
-                  open={shareOpen}
-                  onClose={() => setShareOpen(false)}
-                  record={folioRef(folio, headerGuestName)}
-                />
+                <div className="folio-action-group">
+                  <button className="secondary small" onClick={printPdf}>
+                    Print PDF
+                  </button>
+                  <button className="secondary small" onClick={() => setShareOpen(true)}>
+                    Send to colleague
+                  </button>
+                  <ShareRecordDialog
+                    open={shareOpen}
+                    onClose={() => setShareOpen(false)}
+                    record={folioRef(folio, headerGuestName)}
+                  />
+                </div>
                 {folio.status === 'OPEN' && folio.stayId && (
                   <>
-                    {/* A real split: pick the payers and how the bill divides,
-                        and the folios are opened and the charges apportioned in
-                        one action. The button this replaced said "Split bill"
-                        but only opened an empty folio, leaving the operator to
-                        move every charge by hand — and a charge that did not
-                        divide into whole cents could not be divided at all. */}
-                    <button className="btn-cta" onClick={() => setSplitOpen(true)}>
-                      Split bill
-                    </button>
-                    {/* Kept, honestly labelled now. The per-line Move control
-                        needs a sibling folio to move a charge ONTO, so removing
-                        the only way to open one would take away manual
-                        splitting along with the misleading label. */}
-                    <button className="secondary" onClick={addFolio}>
-                      Add folio
-                    </button>
+                    <span className="folio-action-divider" aria-hidden="true" />
+                    <div className="folio-action-group">
+                      {/* A real split: pick the payers and how the bill
+                          divides, and the folios are opened and the charges
+                          apportioned in one action. The button this replaced
+                          said "Split bill" but only opened an empty folio,
+                          leaving the operator to move every charge by hand —
+                          and a charge that did not divide into whole cents
+                          could not be divided at all. */}
+                      <button className="secondary small" onClick={() => setSplitOpen(true)}>
+                        Split bill
+                      </button>
+                      {/* Kept, honestly labelled now. The per-line Move control
+                          needs a sibling folio to move a charge ONTO, so
+                          removing the only way to open one would take away
+                          manual splitting along with the misleading label. */}
+                      <button className="secondary small" onClick={addFolio}>
+                        Add folio
+                      </button>
+                    </div>
                   </>
                 )}
                 {/* Night-audit sign-off. Only the auditor (and Admin as
                     break-glass) sees these: the desk cannot certify its own
-                    takings, which is the entire point of the gate. */}
-                {folio.status === 'OPEN' && canSignOff && !folio.auditApproved && (
-                  <button className="btn-cta" onClick={approveAudit} disabled={auditBusy}>
-                    {auditBusy ? 'Approving…' : 'Approve for checkout'}
-                  </button>
-                )}
-                {folio.status === 'OPEN' && canSignOff && folio.auditApproved && (
-                  <button className="secondary" onClick={revokeAudit} disabled={auditBusy}>
-                    Withdraw approval
-                  </button>
-                )}
-                {folio.status === 'OPEN' && (
-                  <button className="danger" onClick={closeFolio}>
-                    Close folio
-                  </button>
-                )}
+                    takings, which is the entire point of the gate. The divider
+                    itself is gated on OPEN alone, not canSignOff — Close Folio
+                    below renders for every OPEN folio regardless of role, so
+                    this group is never actually empty when the divider shows. */}
+                {folio.status === 'OPEN' && <span className="folio-action-divider" aria-hidden="true" />}
+                <div className="folio-action-group">
+                  {folio.status === 'OPEN' && canSignOff && !folio.auditApproved && (
+                    <button className="btn-cta small" onClick={approveAudit} disabled={auditBusy}>
+                      {auditBusy ? 'Approving…' : 'Approve for checkout'}
+                    </button>
+                  )}
+                  {folio.status === 'OPEN' && canSignOff && folio.auditApproved && (
+                    <button className="secondary small" onClick={revokeAudit} disabled={auditBusy}>
+                      Withdraw approval
+                    </button>
+                  )}
+                  {folio.status === 'OPEN' && (
+                    <button className="danger small" onClick={closeFolio}>
+                      Close folio
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             {/* Readable by EVERY role, not just the auditor. The desk is the one
