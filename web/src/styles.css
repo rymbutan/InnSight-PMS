@@ -8433,8 +8433,32 @@ html[data-theme='dark'] .hk-tooltip {
 }
 .folio-summary-actions {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
+}
+/* Reference, billing structure, lifecycle — the six buttons here read as one
+   long undifferentiated row without something marking where one job ends and
+   the next begins. */
+.folio-action-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.folio-action-divider {
+  align-self: stretch;
+  width: 1px;
+  min-height: 20px;
+  background: var(--border);
+}
+/* A vertical divider only means something between two groups sitting on the
+   same line. Narrow enough that the groups wrap onto their own lines instead,
+   and it has nothing left to divide — so it drops out rather than floating
+   next to whichever group it landed beside that time. */
+@media (max-width: 640px) {
+  .folio-action-divider {
+    display: none;
+  }
 }
 
 .folio-layout {
