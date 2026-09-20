@@ -2323,16 +2323,39 @@ router.post('/folios/:id/lock', requireRole(...FINANCE), async (req, res) => {
 // POST /api/folios/:id/close
 router.post('/folios/:id/close', requireRole(...FINANCE), async (req, res) => {
   try {
+    const existing = await prisma.folio.findUnique({
+      where: { id: req.params.id },
+      include: { transactions: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Folio not found.' });
+    if (existing.status === 'CLOSED') return res.status(409).json({ error: 'Folio is already closed.' });
+
+    // Same balance formula as /settle: charges/tax/adjustments add, payments
+    // subtract, refunds add back. Unlike /settle (front-desk cashiering, which
+    // pays off whatever remains and closes in one step), this route has no
+    // `method` to settle with — it is a direct close, so an outstanding
+    // balance must already be paid some other way before it is reachable here.
+    let balance = 0n;
+    for (const t of existing.transactions) {
+      if (t.type === 'CHARGE' || t.type === 'TAX' || t.type === 'ADJUSTMENT')
+        balance += t.amountCents + t.taxAmountCents;
+      else if (t.type === 'PAYMENT') balance -= t.amountCents;
+      else if (t.type === 'REFUND') balance += t.amountCents;
+    }
+    if (balance > 0n) {
+      return res.status(409).json({
+        error: 'This folio still has an outstanding balance and cannot be closed until it is fully paid.',
+        balanceCents: balance.toString(),
+      });
+    }
+
     const folio = await prisma.folio.update({
       where: { id: req.params.id },
       data: { status: 'CLOSED', closedAt: new Date() },
     });
     // Total charged (gross of charges/tax/adjustments) drives loyalty accrual in
     // the guest service, which reads totalCents off this event.
-    const txs = await prisma.folioTransaction.findMany({
-      where: { folioId: folio.id },
-      select: { type: true, amountCents: true, taxAmountCents: true },
-    });
+    const txs = existing.transactions;
     let totalCents = 0n;
     for (const t of txs) {
       if (t.type === 'CHARGE' || t.type === 'TAX' || t.type === 'ADJUSTMENT')
