@@ -866,7 +866,7 @@ export default function Amenities() {
       {!catalogOpen ? (
         <button type="button" className="am-catalog-toggle" onClick={() => setCatalogOpen(true)}>
           <Icon name="box" size={15} strokeWidth={2} />
-          View catalog &amp; laundry
+          View Amenities Catalog, Add-ons &amp; Promo Codes
           <span className="muted">{facilities.length} amenities</span>
           <Icon name="chevron-down" size={15} strokeWidth={2} />
         </button>

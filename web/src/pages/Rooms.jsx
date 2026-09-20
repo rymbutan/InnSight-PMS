@@ -163,7 +163,7 @@ export default function Rooms() {
   }
 
   return (
-    <div>
+    <div className="rooms-fixed">
       <h2>{isAdmin ? 'Hotel Room Information Editor' : 'Hotel Rooms'}</h2>
 
       {/* The only non-admin who reaches this page now is a Manager — Front Desk
