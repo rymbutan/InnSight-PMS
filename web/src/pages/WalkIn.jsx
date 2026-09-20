@@ -86,6 +86,11 @@ export default function WalkIn() {
     e.preventDefault();
     const guestName = pickedGuest?.displayName || guestQ.trim();
     if (!guestName) return toast.error('Guest name is required.');
+    // Mandatory Downpayment Constraint, same as the reservation wizard — this
+    // catches it before the round trip, the server enforces it regardless.
+    if (!(pesosToCents(form.deposit) > 0)) {
+      return toast.error('A deposit is required before a walk-in guest can check in.');
+    }
     const checkout = new Date();
     checkout.setDate(checkout.getDate() + Number(form.nights || 1));
     try {
@@ -218,11 +223,12 @@ export default function WalkIn() {
               />
             </div>
             <div>
-              <label>Deposit (₱)</label>
+              <label>Deposit (₱) *</label>
               <input
                 type="number"
                 step="0.01"
-                min="0"
+                min="0.01"
+                required
                 value={form.deposit}
                 onChange={(e) => setForm({ ...form, deposit: e.target.value })}
               />
