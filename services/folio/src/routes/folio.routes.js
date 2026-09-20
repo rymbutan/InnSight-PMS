@@ -661,6 +661,18 @@ router.post('/folios/:id/audit-revoke', requireRole(...AUDIT_SIGNOFF), async (re
       where: { id: folio.id },
       data: { auditApprovedAt: null, auditApprovedBy: null },
     });
+    // Same reasoning as approve's own publish: another screen watching this
+    // folio (or the checkout guard) needs to know its approval just vanished,
+    // not just the tab that clicked Revoke.
+    redis.publish(
+      'folio:audit',
+      JSON.stringify({
+        event: 'folio.audit_revoked',
+        folioId: folio.id,
+        folioNumber: folio.folioNumber,
+        stayId: folio.stayId,
+      })
+    );
     res.json({ id: updated.id, folioNumber: updated.folioNumber, auditApprovedAt: null });
   } catch (err) {
     console.error('[Folio] Audit revoke error:', err.message);
@@ -788,7 +800,10 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
   try {
     const folio = await prisma.folio.findUnique({
       where: { id: req.params.id },
-      include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: { include: { proof: true } } },
+      include: {
+        transactions: { orderBy: { postedAt: 'asc' }, include: { dispute: true } },
+        payments: { include: { proof: true } },
+      },
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
@@ -836,7 +851,10 @@ router.get('/folios/:id/statement', requireRole(...ROLE_GROUPS.DESK_AUDIT), asyn
   try {
     const folio = await prisma.folio.findUnique({
       where: { id: req.params.id },
-      include: { transactions: { orderBy: { postedAt: 'asc' } }, payments: { include: { proof: true } } },
+      include: {
+        transactions: { orderBy: { postedAt: 'asc' }, include: { dispute: true } },
+        payments: { include: { proof: true } },
+      },
     });
     if (!folio) return res.status(404).json({ error: 'Not found.' });
 
@@ -1605,9 +1623,38 @@ router.post('/folios/:id/adjustments', requireRole(...FINANCE), async (req, res)
   }
 });
 
-// POST /api/folios/:id/void-transaction/:txId
+// POST /api/folios/:id/void-transaction/:txId — disputing/cancelling a
+// charge (Reservations & Walk-Ins item 1: "Maria Santa, Lane A-02"). FINANCE
+// already matches the requested audience (AUDITOR + MANAGER, plus ADMIN as
+// the same break-glass path every other money-moving/sign-off action in this
+// file uses). A reason is now mandatory and an optional screenshot — e.g. of
+// the guest conversation the auditor is citing — travels with it; both are
+// filed on a FolioTransactionDispute row keyed to the ORIGINAL transaction,
+// alongside the reversal this route already knew how to post.
 router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async (req, res) => {
   try {
+    const { reason, screenshotFilename, screenshotContentType, screenshotContentBase64 } = req.body || {};
+    if (!reason || !String(reason).trim()) {
+      return res.status(400).json({ error: 'A reason is required to dispute or cancel a charge.' });
+    }
+    let screenshotBuffer = null;
+    if (screenshotContentBase64) {
+      if (!screenshotFilename || !String(screenshotFilename).trim()) {
+        return res.status(400).json({ error: 'screenshotFilename is required with screenshotContentBase64.' });
+      }
+      try {
+        screenshotBuffer = Buffer.from(screenshotContentBase64, 'base64');
+      } catch {
+        return res.status(400).json({ error: 'screenshotContentBase64 is not valid base64.' });
+      }
+      if (screenshotBuffer.length === 0) return res.status(400).json({ error: 'The uploaded screenshot is empty.' });
+      if (screenshotBuffer.length > MAX_PROOF_BYTES) {
+        return res.status(400).json({
+          error: `File is ${(screenshotBuffer.length / (1024 * 1024)).toFixed(1)}MB, over the ${MAX_PROOF_BYTES / (1024 * 1024)}MB limit.`,
+        });
+      }
+    }
+
     const original = await prisma.folioTransaction.findUnique({ where: { id: req.params.txId } });
     if (!original) return res.status(404).json({ error: 'Transaction not found.' });
     // The transaction must belong to the folio in the path (no cross-folio voids).
@@ -1654,6 +1701,7 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
         }))
       : null;
 
+    const actor = req.user?.username || req.user?.sub || null;
     const reversal = await prisma.folioTransaction.create({
       data: {
         folioId: req.params.id,
@@ -1664,6 +1712,9 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
         taxAmountCents: -original.taxAmountCents,
         taxBreakdown: reversalBreakdown,
         reversalOf: original.id,
+        // Previously left null on every void — an anonymous reversal in a
+        // ledger otherwise stamped with who posted every other line.
+        postedBy: actor,
       },
     });
     // If the voided transaction was a payment linked to a Payment row, flip it to VOIDED.
@@ -1675,12 +1726,97 @@ router.post('/folios/:id/void-transaction/:txId', requireRole(...FINANCE), async
         })
         .catch(() => {});
     }
-    res.json(reversal);
+
+    // Uploaded AFTER the reversal is safely posted, same sequencing the
+    // payment-proof route uses — a failed screenshot write must not undo an
+    // otherwise-successful dispute/void.
+    let screenshotMeta = {};
+    if (screenshotBuffer) {
+      const objectKey = storage.objectKeyForDispute(original.id, screenshotFilename);
+      await storage.ensureBucket();
+      await storage.putDocument(objectKey, screenshotBuffer, screenshotContentType);
+      screenshotMeta = {
+        screenshotFilename: String(screenshotFilename),
+        screenshotContentType: screenshotContentType || 'application/octet-stream',
+        screenshotSizeBytes: screenshotBuffer.length,
+        screenshotObjectKey: objectKey,
+      };
+    }
+    const dispute = await prisma.folioTransactionDispute.upsert({
+      where: { transactionId: original.id },
+      create: {
+        transactionId: original.id,
+        reversalTransactionId: reversal.id,
+        reason: String(reason).trim(),
+        filedBy: actor,
+        ...screenshotMeta,
+      },
+      // A transaction can only be voided once (guarded above), so update()
+      // is unreachable in practice — upsert is used only so a redelivered
+      // request can't crash on the dispute row after already posting the
+      // reversal once.
+      update: {
+        reversalTransactionId: reversal.id,
+        reason: String(reason).trim(),
+        filedBy: actor,
+        ...screenshotMeta,
+      },
+    });
+
+    // Another screen showing this same ledger needs to see the void without
+    // a manual refresh, same as any other folio-changing action.
+    redis.publish(
+      'folio:transaction_voided',
+      JSON.stringify({
+        event: 'folio.transaction_voided',
+        folioId: req.params.id,
+        transactionId: original.id,
+        reversalTransactionId: reversal.id,
+      })
+    );
+
+    res.json({ ...reversal, dispute });
   } catch (err) {
     console.error('[Folio] Void tx error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
+// GET /api/folios/:id/transactions/:txId/dispute/screenshot — streams the
+// evidence image back through this service, same discipline as the payment
+// proof download (never a direct MinIO link).
+router.get(
+  '/folios/:id/transactions/:txId/dispute/screenshot',
+  requireRole(...ROLE_GROUPS.DESK_AUDIT),
+  async (req, res) => {
+    try {
+      const original = await prisma.folioTransaction.findFirst({
+        where: { id: req.params.txId, folioId: req.params.id },
+      });
+      if (!original) return res.status(404).json({ error: 'Transaction not found.' });
+      const dispute = await prisma.folioTransactionDispute.findUnique({
+        where: { transactionId: original.id },
+      });
+      if (!dispute?.screenshotObjectKey) {
+        return res.status(404).json({ error: 'No screenshot on file for this dispute.' });
+      }
+      const stream = await storage.getDocumentStream(dispute.screenshotObjectKey);
+      res.setHeader('Content-Type', dispute.screenshotContentType || 'application/octet-stream');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${(dispute.screenshotFilename || 'screenshot').replace(/"/g, '')}"`
+      );
+      stream.on('error', (err) => {
+        console.error('[Folio] Dispute screenshot stream error:', err.message);
+        if (!res.headersSent) res.status(502).json({ error: 'Could not read the stored file.' });
+      });
+      stream.pipe(res);
+    } catch (err) {
+      console.error('[Folio] Download dispute screenshot error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
 
 // POST /api/folios/:id/transfer — move one transaction to another folio on the
 // same stay. This is the mechanism behind bill splitting: the front desk opens a
