@@ -251,17 +251,25 @@
           "to": "/reports",
           "label": "Reports & Revenue",
           "icon": "bar-chart",
-          "matchPaths": ["/revenue"],
+          "_mergeComment": [
+            "Night Audit used to be its own top-level item here (key 'audit',",
+            "icon 'sunrise'). It is now a sibling page reached through the",
+            "in-page SectionSwitcher (web/src/components/SectionSwitcher.jsx),",
+            "the same pattern /revenue already used — one rail entry, several",
+            "routes behind it. /audit is a matchPath for exactly that reason:",
+            "it keeps this rail row highlighted while standing on the Night",
+            "Audit page, same as /revenue already did.",
+            "",
+            "The 'audit' key is gone from the catalogue, so BOTH copies that",
+            "keyed off it had to move: App.jsx's ProtectedRoute for /audit now",
+            "checks section=\"reports\", and the audit tour step in",
+            "TutorialTour.jsx now gates on hasSection('reports') instead of a",
+            "key that no longer exists (which would have made hasSection()",
+            "return false forever and silently drop the step)."
+          ],
+          "matchPaths": ["/revenue", "/audit"],
           "roles": ["ADMIN", "MANAGER", "AUDITOR"],
-          "api": ["/api/reports", "/api/audit", "/api/reservations"]
-        },
-        {
-          "key": "audit",
-          "to": "/audit",
-          "label": "Night Audit",
-          "icon": "sunrise",
-          "roles": ["ADMIN", "MANAGER", "AUDITOR"],
-          "api": ["/api/audit", "/api/in-house"]
+          "api": ["/api/reports", "/api/audit", "/api/reservations", "/api/in-house"]
         }
       ]
     },

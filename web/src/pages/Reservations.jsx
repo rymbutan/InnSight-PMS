@@ -21,7 +21,12 @@ export default function Reservations() {
   // AUDITOR reaches this list for oversight (server already allows the read —
   // ROLE_GROUPS.DESK_AUDIT on GET /reservations), not to create bookings —
   // /reservations/new stays out of their reach at the route level too.
-  const canCreate = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
+  //
+  // MANAGER is the same story as of the Manager Role Logic redesign: strict
+  // oversight and correction of EXISTING bookings, not making new ones — the
+  // desk creates a reservation, a manager reviews/edits/cancels one. See the
+  // matching change on /reservations/new's own route in App.jsx.
+  const canCreate = hasRole('ADMIN', 'FRONT_DESK');
   const [list, setList] = useState([]);
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);

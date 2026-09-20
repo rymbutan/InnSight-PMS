@@ -122,7 +122,11 @@ export default function Layout() {
   // The desk roles. Drives both the top-bar "create" menu and the calendar
   // shortcut, which are the two top-bar controls whose every destination is
   // guarded to exactly these three.
-  const canCreate = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
+  // MANAGER dropped from this set as part of the Manager Role Logic redesign:
+  // strict oversight of existing bookings/guests/facilities, not creating new
+  // ones — every item this flag gates (reservation, walk-in, guest, facility
+  // booking) is exactly the "creation, booking" scope that redesign strips.
+  const canCreate = hasRole('ADMIN', 'FRONT_DESK');
   const { theme, toggle: toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -427,6 +431,20 @@ export default function Layout() {
     setUser({ ...user, hasSeenTutorial: true });
   }
 
+  // Feature/page matches are local (the catalogue is already in memory) and
+  // gated by the same `reachable` check the rail uses, so the box never
+  // suggests a page this role — or an admin's Sidebar Visibility choice —
+  // has already closed off. Computed synchronously, unlike the guest/
+  // reservation calls below, so a page match shows up before the debounce
+  // even fires.
+  function matchFeatures(v) {
+    const needle = v.trim().toLowerCase();
+    if (!needle) return [];
+    return searchableFeatures.filter(
+      (n) => n.label.toLowerCase().includes(needle) || n.group.toLowerCase().includes(needle)
+    );
+  }
+
   function onSearchChange(v) {
     setSearchQ(v);
     setSearchOpen(true);
@@ -435,6 +453,11 @@ export default function Layout() {
       setSearchResults(null);
       return;
     }
+    const pages = matchFeatures(v);
+    // Painted immediately, ahead of the debounce below — a page match is
+    // already-loaded data, so there is no reason to make it wait on the
+    // network round trip the guest/reservation lookups need.
+    setSearchResults((prev) => ({ pages, guests: prev?.guests || [], reservations: prev?.reservations || [] }));
     const seq = ++searchSeq.current;
     searchTimer.current = setTimeout(async () => {
       try {
@@ -445,6 +468,7 @@ export default function Layout() {
         // Ignore a slow response that a newer query has superseded.
         if (seq !== searchSeq.current) return;
         setSearchResults({
+          pages,
           guests: (g.data || []).slice(0, 5),
           reservations: (r.data || []).slice(0, 5),
         });
@@ -477,6 +501,20 @@ export default function Layout() {
   // this role cannot reach it.
   const messagesEntry = NAV_SECTIONS.flatMap((s) => s.items).find(
     (n) => n.key === 'messages' && n.chrome === 'topbar' && reachable(n)
+  );
+
+  // Every reachable feature, flattened for the search box — unlike `sections`
+  // above, chrome:'topbar' entries (Messages) stay in: the box is a way to
+  // FIND a feature, not a second copy of the rail, and Messages is reachable
+  // whether or not it happens to also have a rail row.
+  const searchableFeatures = NAV_SECTIONS.flatMap((s) =>
+    s.items.filter(reachable).map((n) => ({
+      key: n.key,
+      to: n.to,
+      icon: n.icon,
+      group: s.label,
+      label: n.nonAdminLabel && !hasRole('ADMIN') ? n.nonAdminLabel : n.label,
+    }))
   );
 
   const initial = (user?.displayName || '?').slice(0, 1).toUpperCase();
@@ -644,8 +682,30 @@ export default function Layout() {
               onChange={(e) => onSearchChange(e.target.value)}
               onFocus={() => setSearchOpen(true)}
             />
-            {searchOpen && searchResults && (searchResults.guests.length || searchResults.reservations.length) ? (
+            {searchOpen &&
+            searchResults &&
+            (searchResults.pages.length || searchResults.guests.length || searchResults.reservations.length) ? (
               <div className="cb-search-pop">
+                {searchResults.pages.length > 0 && (
+                  <>
+                    <div className="cb-search-section">Pages</div>
+                    {searchResults.pages.map((n) => (
+                      <button
+                        key={n.key}
+                        className="cb-search-item"
+                        onClick={() => {
+                          setSearchOpen(false);
+                          navigate(n.to);
+                        }}
+                      >
+                        <span>
+                          <Icon name={n.icon} size={14} strokeWidth={2} /> {n.label}
+                        </span>
+                        <span className="muted">{n.group}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
                 {searchResults.guests.length > 0 && (
                   <>
                     <div className="cb-search-section">Guests</div>
