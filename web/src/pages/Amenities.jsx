@@ -135,6 +135,70 @@ export default function Amenities() {
   const [laundryGuest, setLaundryGuest] = useState('');
   const [laundryMethod, setLaundryMethod] = useState('CASH');
 
+  // Reservation add-ons (extra pillows, airport transfer…) — a priced catalog
+  // like Facility, managed from this same page instead of a separate settings
+  // screen, so admins set every sellable extra's price in one place. `code`
+  // is what guest-service's GuestPreference rows (a guest's standing
+  // checklist) key against, so it's fixed at creation, not editable after.
+  const [addOnCatalog, setAddOnCatalog] = useState([]);
+  const [addOnEdit, setAddOnEdit] = useState({}); // { [code]: pesos }
+  const [addOnForm, setAddOnForm] = useState({ code: '', label: '', priceCents: '' });
+
+  async function loadAddOnCatalog() {
+    try {
+      const { data } = await api.get('/api/addon-catalog');
+      setAddOnCatalog(data);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function createAddOnCatalogItem(e) {
+    e.preventDefault();
+    try {
+      await api.post('/api/addon-catalog', {
+        ...addOnForm,
+        priceCents: pesosToCents(addOnForm.priceCents || 0),
+      });
+      toast.success(`Add-on ${addOnForm.code} created.`);
+      setAddOnForm({ code: '', label: '', priceCents: '' });
+      loadAddOnCatalog();
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+  async function saveAddOnField(code, patch, label) {
+    try {
+      await api.patch(`/api/addon-catalog/${code}`, patch);
+      toast.success(`${code} ${label}.`);
+      loadAddOnCatalog();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function saveAddOnPrice(code) {
+    const pesos = addOnEdit[code];
+    if (pesos === undefined || pesos === '') return;
+    await saveAddOnField(code, { priceCents: pesosToCents(pesos) }, 'price updated');
+    setAddOnEdit((p) => {
+      const n = { ...p };
+      delete n[code];
+      return n;
+    });
+  }
+  async function toggleAddOnCatalogItem(item) {
+    if (item.active) {
+      const ok = await confirm({
+        title: 'Deactivate add-on',
+        message: `Are you sure you want to deactivate ${item.label}?`,
+        detail:
+          'It disappears from the guest checklist and reservation wizard. Guests who already have it checked keep it, and you can reactivate it later.',
+        confirmLabel: 'Deactivate',
+      });
+      if (!ok) return;
+    }
+    saveAddOnField(item.code, { active: !item.active }, item.active ? 'deactivated' : 'activated');
+  }
+
   async function load() {
     try {
       const { data } = await api.get('/api/facilities');
@@ -154,6 +218,7 @@ export default function Amenities() {
 
   useEffect(() => {
     load();
+    loadAddOnCatalog();
     // Who is checked in, for the hotel-guest branch of the booking form. Fails
     // quietly: a desk clerk taking a walk-in booking should not be blocked by
     // the stay service being down.
@@ -788,6 +853,20 @@ export default function Amenities() {
                   Laundry
                 </button>
               )}
+              {canSell && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={amTab === 'addons'}
+                  className={amTab === 'addons' ? 'is-on' : ''}
+                  onClick={() => {
+                    setAmTab('addons');
+                    setAddOpen(false);
+                  }}
+                >
+                  Add-ons
+                </button>
+              )}
             </div>
             {!addOpen && amTab === 'catalog' && (
               <div className="filter-bar">
@@ -815,22 +894,61 @@ export default function Amenities() {
                 </span>
               </div>
             )}
-            {isAdmin && (
+            {isAdmin && amTab !== 'laundry' && (
               <button
                 type="button"
                 className="rt-add"
                 style={{ marginLeft: 'auto' }}
                 onClick={() => setAddOpen((v) => !v)}
                 aria-expanded={addOpen}
-                aria-label={addOpen ? 'Close the add-amenity form' : 'Add an amenity'}
-                title={addOpen ? 'Close' : 'Add amenity'}
+                aria-label={
+                  addOpen
+                    ? `Close the add-${amTab === 'addons' ? 'add-on' : 'amenity'} form`
+                    : `Add ${amTab === 'addons' ? 'an add-on' : 'an amenity'}`
+                }
+                title={addOpen ? 'Close' : amTab === 'addons' ? 'Add add-on' : 'Add amenity'}
               >
                 <Icon name={addOpen ? 'x' : 'plus'} size={15} strokeWidth={2.6} />
               </button>
             )}
           </div>
 
-          {addOpen ? (
+          {addOpen && amTab === 'addons' ? (
+            <form onSubmit={createAddOnCatalogItem}>
+              <div className="row">
+                <div>
+                  <label>Code</label>
+                  <input
+                    required
+                    value={addOnForm.code}
+                    onChange={(e) => setAddOnForm({ ...addOnForm, code: e.target.value.toUpperCase().replace(/\s+/g, '_') })}
+                  />
+                </div>
+                <div>
+                  <label>Label</label>
+                  <input
+                    required
+                    value={addOnForm.label}
+                    onChange={(e) => setAddOnForm({ ...addOnForm, label: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label>Price (₱)</label>
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={addOnForm.priceCents}
+                    onChange={(e) => setAddOnForm({ ...addOnForm, priceCents: e.target.value })}
+                  />
+                </div>
+                <div className="row-action">
+                  <button>Create add-on</button>
+                </div>
+              </div>
+            </form>
+          ) : addOpen ? (
             <form onSubmit={createFacility}>
               <div className="row">
                 <div>
@@ -923,6 +1041,64 @@ export default function Amenities() {
                 </div>
               </div>
             </form>
+          ) : amTab === 'addons' ? (
+            addOnCatalog.length === 0 ? (
+              <EmptyState
+                kind="search"
+                title="No add-ons in the catalog yet"
+                hint={isAdmin ? 'Use the + button above to add one.' : 'Ask an admin to add one.'}
+              />
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Label</th>
+                    <th className="t-n">Price</th>
+                    <th className="t-c">Active</th>
+                    {isAdmin && <th className="t-c">Admin</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {addOnCatalog.map((o) => (
+                    <tr key={o.code} style={{ opacity: o.active ? 1 : 0.5 }}>
+                      <td>{o.code}</td>
+                      <td>{o.label}</td>
+                      <td className="t-n">{formatPeso(o.priceCents)}</td>
+                      <td className="t-c">{o.active ? '✓' : '✗'}</td>
+                      {isAdmin && (
+                        <td className="t-c">
+                          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              style={{ width: 100 }}
+                              placeholder={centsToPesos(o.priceCents).toFixed(2)}
+                              value={addOnEdit[o.code] ?? ''}
+                              onChange={(e) => setAddOnEdit((p) => ({ ...p, [o.code]: e.target.value }))}
+                            />
+                            <button
+                              className="small secondary outline-success"
+                              disabled={addOnEdit[o.code] === undefined || addOnEdit[o.code] === ''}
+                              onClick={() => saveAddOnPrice(o.code)}
+                            >
+                              Save Price
+                            </button>
+                            <button
+                              className={`small ${o.active ? 'danger' : 'secondary'}`}
+                              onClick={() => toggleAddOnCatalogItem(o)}
+                            >
+                              {o.active ? 'Deactivate' : 'Activate'}
+                            </button>
+                          </span>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
           ) : amTab === 'laundry' ? (
             <>
               <p className="muted" style={{ marginTop: 0 }}>
