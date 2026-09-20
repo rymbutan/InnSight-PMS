@@ -562,6 +562,36 @@ router.post('/check-out/:stayId', requireRole(...STAFF), async (req, res) => {
   }
 });
 
+// Mirrors services/reservation/src/lib/missingDepositField.js exactly, so a
+// walk-in deposit the wizard lets through is never silently missing the one
+// field its payment method actually needs.
+function missingWalkInDepositField(method, detail) {
+  if (method === 'CARD') {
+    if (!/^\d{4}$/.test(detail.cardMasked || '')) return 'Enter the last 4 digits of the card.';
+    if (!(detail.cardholderName || '').trim()) return 'Cardholder name is required.';
+  }
+  if (method === 'BANK_TRANSFER') {
+    if (!(detail.bankName || '').trim()) return 'Enter the bank name.';
+    if (!(detail.senderName || '').trim()) return "Sender/account holder's name is required.";
+  }
+  return null;
+}
+
+// Mirrors services/reservation/src/lib/addOns.js's shape ({description,
+// costCents} -> the same plus a frozen totalCents) minus the admin fee
+// percentage — a walk-in has no equivalent "addon_fee_percent" setting to
+// read, since that lives on reservation-service's AppSetting table and isn't
+// worth a cross-service call for. Priced at face value instead.
+function computeWalkInAddOns(rawAddOns) {
+  if (!Array.isArray(rawAddOns)) return [];
+  return rawAddOns
+    .filter((a) => a && typeof a.description === 'string' && a.description.trim())
+    .map((a) => {
+      const costCents = Math.max(0, Math.round(Number(a.costCents) || 0));
+      return { description: a.description.trim(), costCents, totalCents: costCents };
+    });
+}
+
 // POST /api/walk-in
 router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
   try {
@@ -574,8 +604,24 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
       adults,
       children,
       nightlyRateCents: requestedRateCents,
+      specialRequests,
+      addOns: rawAddOns,
+      paymentType,
+      cardMasked,
+      cardholderName,
+      bankName,
+      transferNetwork,
+      senderName,
+      gatewayRef,
+      reference,
+      transferredAt,
     } = req.body;
     if (!guestName) return res.status(400).json({ error: 'guestName is required.' });
+
+    if (paymentType) {
+      const missingDeposit = missingWalkInDepositField(paymentType, { cardMasked, cardholderName, bankName, senderName });
+      if (missingDeposit) return res.status(400).json({ error: missingDeposit });
+    }
 
     // Mandatory Downpayment Constraint, walk-in's side of it. A reservation
     // cannot reach CONFIRMED without one (see reservation.routes.js's own
@@ -647,6 +693,8 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
         ? Math.max(1, Math.round((checkOutAt - checkInAt) / 86400000))
         : 1;
 
+    const enrichedAddOns = computeWalkInAddOns(rawAddOns);
+
     const stay = await prisma.stay.create({
       data: {
         guestName,
@@ -660,6 +708,24 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
         nightlyRateCents,
         adults: Number(adults) > 0 ? Math.round(Number(adults)) : 1,
         children: Number(children) >= 0 ? Math.round(Number(children)) : 0,
+        specialRequests: specialRequests || undefined,
+        addOns: enrichedAddOns,
+        paymentType: paymentType || undefined,
+        // Only the sub-fields relevant to the chosen method are ever
+        // persisted — same discipline as Folio's own payment route and
+        // reservation.routes.js's POST /reservations.
+        depositCardMasked: paymentType === 'CARD' ? cardMasked : undefined,
+        depositCardholderName: paymentType === 'CARD' ? cardholderName : undefined,
+        depositBankName: paymentType === 'BANK_TRANSFER' ? bankName : undefined,
+        depositTransferNetwork: paymentType === 'BANK_TRANSFER' ? transferNetwork : undefined,
+        depositSenderName: paymentType === 'BANK_TRANSFER' ? senderName : undefined,
+        // NewReservation.jsx's wizard sends this as `gatewayRef` for both
+        // CARD and BANK_TRANSFER; `reference` is accepted too, same as
+        // reservation.routes.js's own POST /reservations.
+        depositGatewayRef:
+          paymentType === 'CARD' || paymentType === 'BANK_TRANSFER' ? gatewayRef || reference || undefined : undefined,
+        depositTransferredAt:
+          paymentType === 'BANK_TRANSFER' ? new Date(transferredAt || Date.now()) : undefined,
       },
     });
 
@@ -675,6 +741,7 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
         depositAmount: stay.depositAmount,
         nightlyRateCents,
         nights,
+        addOns: enrichedAddOns,
       })
     );
 

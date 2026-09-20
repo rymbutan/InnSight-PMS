@@ -198,7 +198,7 @@ function startSubscriber() {
                 },
               });
             }
-          } else if (data.walkIn && Number(data.nightlyRateCents) > 0) {
+          } else if (data.walkIn) {
             // A walk-in has no reservationId, so the branch above never runs for
             // it — that was the whole bug: the deposit posted as a PAYMENT
             // above, but the offsetting room CHARGE never did. The rate and
@@ -208,36 +208,63 @@ function startSubscriber() {
             // reference the night audit checks before charging a stay for that
             // day, so a walk-in that runs through the audit later is never
             // double-charged for a night this already posted.
-            const nights = Math.max(1, Math.round(Number(data.nights) || 1));
-            const nightlyCents = Math.round(Number(data.nightlyRateCents));
-            const cc = await prisma.chargeCode.findUnique({ where: { code: ROOM_CHARGE_CODE } });
-            const rates = await getTaxRates();
-            let day = localDay(new Date());
-            for (let i = 0; i < nights; i += 1) {
-              const reference = `AUDIT-${day}-${data.stayId}`;
-              const already = await prisma.folioTransaction.findFirst({ where: { reference } });
-              if (!already) {
-                const { taxCents, breakdown } = computeTax({
-                  subtotalCents: nightlyCents,
-                  category: cc?.category || 'ROOM',
-                  rates,
-                });
-                await prisma.folioTransaction.create({
-                  data: {
-                    folioId: folio.id,
-                    type: 'CHARGE',
-                    chargeCode: ROOM_CHARGE_CODE,
-                    description: `Room charge for ${day}`,
-                    amountCents: BigInt(nightlyCents),
-                    taxAmountCents: taxCents,
-                    taxBreakdown: breakdown.map((b) => ({ ...b, amountCents: b.amountCents.toString() })),
-                    postedBy: 'system.stay-checkin',
-                    sourceSystem: 'stay',
-                    reference,
-                  },
-                });
+            if (Number(data.nightlyRateCents) > 0) {
+              const nights = Math.max(1, Math.round(Number(data.nights) || 1));
+              const nightlyCents = Math.round(Number(data.nightlyRateCents));
+              const cc = await prisma.chargeCode.findUnique({ where: { code: ROOM_CHARGE_CODE } });
+              const rates = await getTaxRates();
+              let day = localDay(new Date());
+              for (let i = 0; i < nights; i += 1) {
+                const reference = `AUDIT-${day}-${data.stayId}`;
+                const already = await prisma.folioTransaction.findFirst({ where: { reference } });
+                if (!already) {
+                  const { taxCents, breakdown } = computeTax({
+                    subtotalCents: nightlyCents,
+                    category: cc?.category || 'ROOM',
+                    rates,
+                  });
+                  await prisma.folioTransaction.create({
+                    data: {
+                      folioId: folio.id,
+                      type: 'CHARGE',
+                      chargeCode: ROOM_CHARGE_CODE,
+                      description: `Room charge for ${day}`,
+                      amountCents: BigInt(nightlyCents),
+                      taxAmountCents: taxCents,
+                      taxBreakdown: breakdown.map((b) => ({ ...b, amountCents: b.amountCents.toString() })),
+                      postedBy: 'system.stay-checkin',
+                      sourceSystem: 'stay',
+                      reference,
+                    },
+                  });
+                }
+                day = addDaysToDayKey(day, 1);
               }
-              day = addDaysToDayKey(day, 1);
+            }
+
+            // Same add-on posting the reservationId branch above does, just
+            // sourced from the check-in event instead of a fetched Reservation
+            // — a walk-in's add-ons travel on the event for the same reason
+            // its rate and night count do (see stay.routes.js's POST
+            // /api/walk-in): there is no Reservation to fetch them from.
+            const walkInAddOns = Array.isArray(data.addOns) ? data.addOns : [];
+            for (let i = 0; i < walkInAddOns.length; i += 1) {
+              const addOn = walkInAddOns[i];
+              const reference = `ADDON-${data.stayId}-${i}`;
+              const already = await prisma.folioTransaction.findFirst({ where: { reference } });
+              if (already) continue;
+              await prisma.folioTransaction.create({
+                data: {
+                  folioId: folio.id,
+                  type: 'CHARGE',
+                  chargeCode: 'AO',
+                  description: addOn.description,
+                  amountCents: BigInt(Math.round(addOn.totalCents)),
+                  postedBy: 'system.stay-checkin-addons',
+                  sourceSystem: 'stay',
+                  reference,
+                },
+              });
             }
           }
         }
