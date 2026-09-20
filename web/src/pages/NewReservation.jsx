@@ -10,6 +10,7 @@ import Autocomplete from '../components/Autocomplete';
 
 import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
 import { paymentMethodGroups } from '../lib/paymentMethods';
+import { ADDON_PREFERENCE_OPTIONS, ADDON_PREFERENCE_CATEGORY } from '../lib/guestAddonPreferences';
 
 const STEPS = ['Availability', 'Details', 'Guests', 'Payment'];
 
@@ -129,6 +130,21 @@ export default function NewReservation() {
       .get(`/api/guests/${pickedGuest.id}/bank-accounts`)
       .then(({ data }) => setGuestBankAccounts(Array.isArray(data) ? data : []))
       .catch(() => setGuestBankAccounts([])); // no saved accounts is the common case, not an error
+  }, [pickedGuest?.id]);
+  // Read-only here — set on the guest's own profile (Guests.jsx), not
+  // per-booking. Shown so the desk sees what this guest usually wants
+  // without leaving the wizard to look up their profile.
+  const [guestAddonPrefs, setGuestAddonPrefs] = useState([]);
+  useEffect(() => {
+    if (!pickedGuest?.id) return setGuestAddonPrefs([]);
+    api
+      .get(`/api/guests/${pickedGuest.id}/preferences`)
+      .then(({ data }) =>
+        setGuestAddonPrefs(
+          (Array.isArray(data) ? data : []).filter((p) => p.category === ADDON_PREFERENCE_CATEGORY && p.value)
+        )
+      )
+      .catch(() => setGuestAddonPrefs([]));
   }, [pickedGuest?.id]);
   const [newGuest, setNewGuest] = useState({
     firstName: '',
@@ -747,7 +763,21 @@ export default function NewReservation() {
                 Change
               </button>
             </div>
-          ) : (
+          ) : null}
+          {pickedGuest && (
+            // Read-only preview of what's already saved on this guest's
+            // profile — edited from Guests.jsx, not here, so it can't drift
+            // into a second, per-booking copy of the same preference.
+            <div className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
+              Add-on preferences:{' '}
+              {guestAddonPrefs.length
+                ? ADDON_PREFERENCE_OPTIONS.filter((o) => guestAddonPrefs.some((p) => p.key === o.code))
+                    .map((o) => o.label)
+                    .join(', ')
+                : 'None set on this guest’s profile.'}
+            </div>
+          )}
+          {!pickedGuest && (
             <>
               <label>Search existing guest</label>
               {/* Was an always-open results box pushed below the field; now the

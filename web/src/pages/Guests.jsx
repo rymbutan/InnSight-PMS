@@ -9,26 +9,7 @@ import { useAuth } from '../auth';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
-
-// Standardized, unpriced guest preferences — "Add-on information" moved here
-// from the reservation wizard, which used to let staff type a one-off item
-// and a cost for it. A free preference (extra pillows, an early check-in)
-// isn't a billing event, and the same guest wants the same things on every
-// stay, so it belongs on the profile, set once, rather than re-entered (and
-// re-priced, inconsistently) at every booking. Backed by GuestPreference
-// (category 'addon'), which already existed for exactly this shape of data
-// and had no UI anywhere.
-const ADDON_PREFERENCE_OPTIONS = [
-  { code: 'EXTRA_PILLOWS', label: 'Extra pillows' },
-  { code: 'EXTRA_TOWELS', label: 'Extra towels' },
-  { code: 'EXTRA_BED', label: 'Extra bed' },
-  { code: 'BABY_COT', label: 'Baby cot' },
-  { code: 'HYPOALLERGENIC_BEDDING', label: 'Hypoallergenic bedding' },
-  { code: 'AIRPORT_TRANSFER', label: 'Airport transfer' },
-  { code: 'EARLY_CHECKIN', label: 'Early check-in' },
-  { code: 'LATE_CHECKOUT', label: 'Late checkout' },
-];
-const ADDON_PREFERENCE_CATEGORY = 'addon';
+import { ADDON_PREFERENCE_OPTIONS, ADDON_PREFERENCE_CATEGORY } from '../lib/guestAddonPreferences';
 
 export default function Guests() {
   const [q, setQ] = useState('');
