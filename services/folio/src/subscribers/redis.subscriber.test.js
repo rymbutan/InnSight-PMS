@@ -291,6 +291,73 @@ test('a check-in with no reservation (walk-in) posts no room charge', async () =
   assert.strictEqual(memDb.folioTransaction.filter((t) => t.chargeCode === 'RM').length, 0);
 });
 
+// Reservations & Walk-Ins item 6: a walk-in's deposit posted (the folio
+// PAYMENT above always ran), but the room itself never got charged, because
+// this whole block used to be gated on `data.reservationId` and a walk-in
+// never has one. stay.routes.js's POST /api/walk-in now puts the rate and
+// night count directly on the check-in event instead, since there is no
+// reservation to fetch them from.
+test('a walk-in WITH a rate on the event posts room charges for every night', async () => {
+  reset();
+  await emit('room:checkin', {
+    stayId: 's10',
+    guestId: 'g10',
+    walkIn: true,
+    nightlyRateCents: 250000,
+    nights: 2,
+  });
+
+  const roomCharges = memDb.folioTransaction.filter((t) => t.chargeCode === 'RM');
+  assert.strictEqual(roomCharges.length, 2, 'one line per night, same as a reservation check-in');
+  for (const tx of roomCharges) assert.strictEqual(Number(tx.amountCents), 250000);
+});
+
+test('a redelivered walk-in check-in event never double-posts the room charge', async () => {
+  reset();
+  const event = { stayId: 's11', guestId: 'g11', walkIn: true, nightlyRateCents: 180000, nights: 1 };
+  await emit('room:checkin', event);
+  await emit('room:checkin', event);
+
+  assert.strictEqual(memDb.folioTransaction.filter((t) => t.chargeCode === 'RM').length, 1);
+});
+
+// A walk-in's add-ons travel on the check-in event itself (there is no
+// Reservation to fetch them from), same as its rate and night count above —
+// same posting the reservationId branch does, just sourced differently.
+test('a walk-in with add-ons posts each as its own charge', async () => {
+  reset();
+  await emit('room:checkin', {
+    stayId: 's12',
+    guestId: 'g12',
+    walkIn: true,
+    nightlyRateCents: 200000,
+    nights: 1,
+    addOns: [
+      { description: 'Airport transfer', totalCents: 80000 },
+      { description: 'Extra bed', totalCents: 50000 },
+    ],
+  });
+
+  const addOnCharges = memDb.folioTransaction.filter((t) => t.chargeCode === 'AO');
+  assert.strictEqual(addOnCharges.length, 2);
+  assert.strictEqual(Number(addOnCharges.find((t) => t.description === 'Airport transfer').amountCents), 80000);
+  assert.strictEqual(Number(addOnCharges.find((t) => t.description === 'Extra bed').amountCents), 50000);
+});
+
+test('a redelivered walk-in check-in event never double-posts its add-ons', async () => {
+  reset();
+  const event = {
+    stayId: 's13',
+    guestId: 'g13',
+    walkIn: true,
+    addOns: [{ description: 'Late checkout', totalCents: 0 }],
+  };
+  await emit('room:checkin', event);
+  await emit('room:checkin', event);
+
+  assert.strictEqual(memDb.folioTransaction.filter((t) => t.chargeCode === 'AO').length, 1);
+});
+
 test('a reservation with no usable rate (zero total) posts no room charge', async () => {
   reset();
   reservationsById.set('r4', {

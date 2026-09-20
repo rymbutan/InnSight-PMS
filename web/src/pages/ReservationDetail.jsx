@@ -21,17 +21,7 @@ import { paymentMethodGroups } from '../lib/paymentMethods';
 import { planQuickEdit } from '../lib/quickEditPlan';
 import { suggestedCancellationFeeCents } from '../lib/cancellationFee';
 
-const TABS = [
-  'Accommodations',
-  'Folio',
-  'Guest Details',
-  'Credit Cards',
-  'Notes',
-  'Documents',
-  'Reservation Activity',
-  'Notifications',
-  'Sent Pay by Link',
-];
+const TABS = ['Accommodations', 'Folio', 'Guest Details', 'Banking Details', 'Notes', 'Documents', 'Reservation Activity'];
 
 export default function ReservationDetail() {
   const { id } = useParams();
@@ -39,6 +29,11 @@ export default function ReservationDetail() {
   const toast = useToast();
   const confirm = useConfirm();
   const { hasRole } = useAuth();
+  // AUDITOR reaches this page for oversight (accommodation + reservation
+  // detail), not to change the guest record — same reasoning Users.jsx
+  // documents for its own role-gated controls: not offered at all to a role
+  // that shouldn't have it, rather than shown and then rejected.
+  const canEditGuest = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   const [res, setRes] = useState(null);
   const [activeTab, setActiveTab] = useState('Accommodations');
   const [showMore, setShowMore] = useState(false);
@@ -46,7 +41,6 @@ export default function ReservationDetail() {
   const [folioTxns, setFolioTxns] = useState([]);
   const [notes, setNotes] = useState({ active: [], archived: [] });
   const [activity, setActivity] = useState([]);
-  const [notifications, setNotifications] = useState([]);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
   const [chargeOpen, setChargeOpen] = useState(false);
@@ -81,8 +75,6 @@ export default function ReservationDetail() {
       });
       const actResp = await api.get(`/api/reservations/${id}/activity`).catch(() => ({ data: [] }));
       setActivity(actResp.data || []);
-      const notifResp = await api.get(`/api/reservations/${id}/notifications`).catch(() => ({ data: [] }));
-      setNotifications(notifResp.data || []);
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -245,10 +237,11 @@ export default function ReservationDetail() {
                   label: 'Check Out',
                   onClick: doCheckOut,
                 },
-                ['CONFIRMED', 'PENDING'].includes(res.status) && {
-                  label: 'Modify Dates / Quick Edit',
-                  onClick: () => setQuickEditOpen(true),
-                },
+                ['CONFIRMED', 'PENDING'].includes(res.status) &&
+                  canEditGuest && {
+                    label: 'Modify Dates / Quick Edit',
+                    onClick: () => setQuickEditOpen(true),
+                  },
                 { label: 'Print Registration Card', onClick: printReg, disabled: !stay },
                 // Matches the route's own guard: the template says "your reservation
                 // is confirmed", which is only true once it actually has been.
@@ -343,10 +336,6 @@ export default function ReservationDetail() {
               <div className="res-field-label">Estimated Arrival Time</div>
               <div className="res-field-value">{res.expectedArrivalTime || 'Unknown'}</div>
             </div>
-            <div>
-              <div className="res-field-label">Special Requests</div>
-              <div className="res-field-value">{res.specialRequests || '—'}</div>
-            </div>
             {res.status === 'CANCELLED' && (
               <>
                 <div>
@@ -400,13 +389,11 @@ export default function ReservationDetail() {
           onRefund={() => setRefundOpen(true)}
         />
       )}
-      {activeTab === 'Guest Details' && <GuestDetailsTab res={res} onSaved={load} />}
-      {activeTab === 'Credit Cards' && <CreditCardsTab reservationId={id} />}
+      {activeTab === 'Guest Details' && <GuestDetailsTab res={res} onSaved={load} canEdit={canEditGuest} />}
+      {activeTab === 'Banking Details' && <CreditCardsTab reservationId={id} />}
       {activeTab === 'Notes' && <NotesTab notes={notes} reservationId={id} onChanged={load} />}
       {activeTab === 'Documents' && <DocumentsTab reservationId={id} />}
       {activeTab === 'Reservation Activity' && <ActivityTab activity={activity} />}
-      {activeTab === 'Notifications' && <NotificationsTab notifications={notifications} />}
-      {activeTab === 'Sent Pay by Link' && <PayLinkTab res={res} folio={folio} />}
 
       {/* Modals */}
       <CancelModal
@@ -574,6 +561,14 @@ function AccommodationsTab({ res, stay, onQuickEdit, navigate }) {
           </tr>
         </tbody>
       </table>
+      {/* Moved here from the reservation header's "Show more" section — this
+          is a fact about the STAY (what the guest needs once they're in the
+          room), not about the booking record itself, so it belongs on the
+          stay-details tab rather than buried in the reservation summary. */}
+      <div style={{ marginTop: 16 }}>
+        <div className="res-field-label">Special Requests</div>
+        <div className="res-field-value">{res.specialRequests || '—'}</div>
+      </div>
     </div>
   );
 }
@@ -711,7 +706,7 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
   );
 }
 
-function GuestDetailsTab({ res, onSaved }) {
+function GuestDetailsTab({ res, onSaved, canEdit }) {
   const toast = useToast();
   const [g, setG] = useState({
     firstName: res.guestName?.split(' ')[0] || '',
@@ -760,50 +755,75 @@ function GuestDetailsTab({ res, onSaved }) {
   return (
     <div className="panel">
       <h3>Guest information</h3>
+      {/* AUDITOR reaches this tab for oversight, not to change the record —
+          disabled inputs rather than hiding the tab, so the information is
+          still there to read. */}
       <div className="row">
         <div>
           <label>First name</label>
-          <input value={g.firstName} onChange={(e) => setG({ ...g, firstName: e.target.value })} />
+          <input
+            value={g.firstName}
+            disabled={!canEdit}
+            onChange={(e) => setG({ ...g, firstName: e.target.value })}
+          />
         </div>
         <div>
           <label>Last name</label>
-          <input value={g.lastName} onChange={(e) => setG({ ...g, lastName: e.target.value })} />
+          <input
+            value={g.lastName}
+            disabled={!canEdit}
+            onChange={(e) => setG({ ...g, lastName: e.target.value })}
+          />
         </div>
         <div>
           <label>Email</label>
-          <input value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} />
+          <input value={g.email} disabled={!canEdit} onChange={(e) => setG({ ...g, email: e.target.value })} />
         </div>
         <div>
           <label>Phone</label>
-          <input value={g.phone} onChange={(e) => setG({ ...g, phone: e.target.value })} />
+          <input value={g.phone} disabled={!canEdit} onChange={(e) => setG({ ...g, phone: e.target.value })} />
         </div>
       </div>
       <h3 style={{ marginTop: 18 }}>Guest address</h3>
       <div className="row">
         <div>
           <label>Street address</label>
-          <input value={g.streetAddress} onChange={(e) => setG({ ...g, streetAddress: e.target.value })} />
+          <input
+            value={g.streetAddress}
+            disabled={!canEdit}
+            onChange={(e) => setG({ ...g, streetAddress: e.target.value })}
+          />
         </div>
         <div>
           <label>City</label>
-          <input value={g.city} onChange={(e) => setG({ ...g, city: e.target.value })} />
+          <input value={g.city} disabled={!canEdit} onChange={(e) => setG({ ...g, city: e.target.value })} />
         </div>
         <div>
           <label>Country</label>
-          <input value={g.country} onChange={(e) => setG({ ...g, country: e.target.value })} />
+          <input
+            value={g.country}
+            disabled={!canEdit}
+            onChange={(e) => setG({ ...g, country: e.target.value })}
+          />
         </div>
         <div>
           <label>State/Region</label>
-          <input value={g.state} onChange={(e) => setG({ ...g, state: e.target.value })} />
+          <input value={g.state} disabled={!canEdit} onChange={(e) => setG({ ...g, state: e.target.value })} />
         </div>
         <div>
           <label>Postal/ZIP</label>
-          <input value={g.postal} onChange={(e) => setG({ ...g, postal: e.target.value })} />
+          <input
+            value={g.postal}
+            disabled={!canEdit}
+            onChange={(e) => setG({ ...g, postal: e.target.value })}
+          />
         </div>
       </div>
-      <button className="btn-cta" onClick={save} disabled={saving}>
-        {saving ? 'Saving…' : 'Save'}
-      </button>
+      {canEdit && (
+        <button className="btn-cta" onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      )}
     </div>
   );
 }
@@ -932,7 +952,7 @@ function CreditCardsTab({ reservationId }) {
           </div>
         ) : cards.length === 0 ? (
           <div className="muted" style={{ textAlign: 'center', padding: 36 }}>
-            No credit cards on file.
+            No banking details on file.
             <br />
             <small>Capstone build — a masked guarantee only, never a full card number.</small>
           </div>
@@ -1199,177 +1219,6 @@ function ActivityTab({ activity }) {
     <div className="panel">
       <h3>Booking lifecycle</h3>
       <Timeline items={ordered} />
-    </div>
-  );
-}
-
-// Every attempted booking confirmation — Email, SMS, and Viber alike. SMS and
-// Viber are mocked (see services/reservation/src/lib/notifyChannels.js — no
-// real provider exists anywhere in this stack), so this is the only place to
-// see what would have gone out and to whom.
-function NotificationsTab({ notifications }) {
-  if (notifications.length === 0) {
-    return (
-      <div className="panel">
-        <h3>Notifications</h3>
-        <p className="muted">
-          No confirmations have gone out yet. Confirming the booking sends one over every channel the guest
-          has an address for (email, and SMS/Viber to their phone).
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="panel">
-      <h3>Notifications</h3>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Sent</th>
-            <th>Channel</th>
-            <th>To</th>
-            <th>Status</th>
-            <th>Message</th>
-          </tr>
-        </thead>
-        <tbody>
-          {notifications.map((n) => (
-            <tr key={n.id}>
-              <td>{new Date(n.sentAt).toLocaleString()}</td>
-              <td>{n.channel}</td>
-              <td>{n.to}</td>
-              <td>
-                <span className={`badge ${n.status === 'SENT' ? 'confirmed' : 'cancelled'}`}>{n.status}</span>
-              </td>
-              <td className="muted">{n.subject || n.body}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// Payment links ride on the stay's folio (see planTransfer/PaymentIntent in the
-// folio service) — there is nowhere else in this app to post the eventual
-// payment. So this tab, like Print Registration Card and Check Out, is only
-// available once the reservation actually has one.
-function PayLinkTab({ res, folio }) {
-  const toast = useToast();
-  const [intents, setIntents] = useState(null);
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('QR_WALLET');
-  const [sending, setSending] = useState(false);
-
-  async function loadIntents() {
-    if (!folio?.id) return;
-    const { data } = await api.get(`/api/folios/${folio.id}/payment-intents`).catch(() => ({ data: [] }));
-    setIntents(data || []);
-  }
-  useEffect(() => {
-    loadIntents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folio?.id]);
-
-  async function send() {
-    const amountCents = pesosToCents(amount);
-    if (!amountCents || amountCents <= 0) return toast.error('Enter an amount greater than zero.');
-    setSending(true);
-    try {
-      const { data } = await api.post(`/api/folios/${folio.id}/payment-intents`, {
-        amountCents,
-        method,
-        to: res.guestEmail,
-      });
-      toast.success(`Payment link sent to ${data.sentTo}.`);
-      setAmount('');
-      loadIntents();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  if (!folio) {
-    return (
-      <div className="panel">
-        <h3>Sent Pay by Link</h3>
-        <div className="muted" style={{ padding: 24, textAlign: 'center' }}>
-          Available once this stay has an open folio to bill — check the guest in first.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="panel">
-      <h3>Sent Pay by Link</h3>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
-        <div>
-          <label>Amount (₱)</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            style={{ width: 140 }}
-          />
-        </div>
-        <div>
-          <label>Method</label>
-          {/* A QR code is scanned into an e-wallet app, so only e-wallet
-              methods belong here — Card and the mislabelled "BANK" option
-              this used to offer were never actually a scannable QR flow, and
-              the value the desk picked here used to be silently dropped by
-              the server anyway (every intent was QR_WALLET regardless). */}
-          <select value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option value="QR_WALLET">QR wallet (unbranded)</option>
-            <option value="GCASH">GCash</option>
-            <option value="MAYA">Maya</option>
-          </select>
-        </div>
-        <button className="btn-primary" onClick={send} disabled={sending || !res.guestEmail}>
-          {sending ? 'Sending…' : 'Send Link'}
-        </button>
-        {!res.guestEmail && <span className="muted">No guest email on file.</span>}
-      </div>
-
-      {intents === null ? (
-        <div className="loading-row">
-          <span className="spinner" /> Loading…
-        </div>
-      ) : intents.length === 0 ? (
-        <div className="loading-row">No payment links sent yet.</div>
-      ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Sent To</th>
-              <th>Amount</th>
-              <th>Method</th>
-              <th>Status</th>
-              <th>Sent</th>
-              <th>Expires</th>
-            </tr>
-          </thead>
-          <tbody>
-            {intents.map((it) => (
-              <tr key={it.id}>
-                <td>{it.sentTo || '— (in-person QR)'}</td>
-                <td>{formatPeso(it.amountCents)}</td>
-                <td>{it.method}</td>
-                <td>
-                  <StatusPill status={it.status} />
-                </td>
-                <td>{new Date(it.createdAt).toLocaleString()}</td>
-                <td>{new Date(it.expiresAt).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
     </div>
   );
 }

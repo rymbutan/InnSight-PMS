@@ -5,6 +5,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 import { pesosToCents, formatPeso } from '../lib/money';
 import { labelize } from '../lib/labels';
+import SectionSwitcher, { REPORTS_SECTIONS } from '../components/SectionSwitcher';
 
 export default function Audit() {
   const toast = useToast();
@@ -71,7 +72,12 @@ export default function Audit() {
 
   return (
     <div>
-      <h2>Night Audit</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Night Audit</h1>
+          <SectionSwitcher options={REPORTS_SECTIONS} />
+        </div>
+      </div>
 
       <div className="panel">
         <h3>Current business day</h3>

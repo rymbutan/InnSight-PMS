@@ -464,6 +464,16 @@ html[data-theme='dark'] .side-brand-wordmark {
 html[data-theme='dark'] .side-brand-mark {
   filter: brightness(1.12);
 }
+/* Same two brand images, same deep-green-on-transparent problem, on the
+   login screen: .login-eyebrow-mark sits on the photo scrim and
+   .login-wordmark sits on .login-panel's background, both of which go dark
+   under this theme. */
+html[data-theme='dark'] .login-wordmark {
+  filter: brightness(1.85) saturate(0.9);
+}
+html[data-theme='dark'] .login-eyebrow-mark {
+  filter: brightness(1.12);
+}
 
 .cb-search-wrap {
   position: relative;
@@ -2584,22 +2594,22 @@ tr.active td {
    that matters, since a `min-content` floor is what forces a wrap.
    Below the point where tiles would become unreadable the row scrolls sideways
    instead of crushing them. */
+/* WRAPS, rather than scrolling sideways.
+   This was `grid-auto-flow: column` with `overflow-x: auto`, which forces all
+   seven tiles onto ONE row at every width and hands the rest to a horizontal
+   scrollbar. Measured at iPad widths that put three or four tiles off the right
+   edge of the screen — the product's headline figures, behind a sideways scroll
+   nobody thinks to try.
+
+   `auto-fit` with a floor lets the row be seven across on a wide monitor, four
+   and three on a tablet, three and three and one on a narrow one, with no
+   breakpoints to keep in step. The floor is 200px because that is what the
+   longest figure needs — see .kpi-num. */
 .kpi-row {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
-}
-/* Seven across is tighter than six was, so the tile gives back the padding and
-   the number gives back a little size. */
-@media (max-width: 1500px) {
-  .kpi-row {
-    grid-auto-columns: minmax(158px, 1fr);
-  }
 }
 .kpi-tile {
   background: var(--surface);
@@ -2612,12 +2622,34 @@ tr.active td {
   position: relative;
   min-height: 92px;
   min-width: 0; /* lets a tile shrink inside its track instead of forcing a wrap */
+  /* Makes the tile a query container so the figure inside can size itself to
+     THIS tile rather than to the viewport. The viewport is the wrong measure:
+     the tiles wrap, so a 1366px laptop and a 1024px tablet can end up with
+     identically sized tiles, and the sidebar takes 264px off the top besides. */
+  container-type: inline-size;
 }
+/* The tile's own flex child, which holds the figure and its label. Without
+   `min-width: 0` a flex item refuses to shrink below its content, so a long
+   figure pushed the text out past the tile's padding instead of the type
+   getting smaller — which is the "cut off" in the report. */
+.kpi-tile > div {
+  min-width: 0;
+}
+/* The figure scales with the tile it is in. 30px is the size on a wide monitor;
+   below that it steps down rather than overflowing, with a floor that keeps it
+   a headline number rather than body copy.
+   `nowrap` because the alternative is a peso amount broken across two lines
+   mid-thousands, which reads as two numbers. */
 .kpi-tile .kpi-num {
-  font-size: 30px;
+  font-size: clamp(17px, 10.5cqi, 30px);
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.05;
   color: var(--text);
+  white-space: nowrap;
+  min-width: 0;
+  /* Tabular figures so the columns of digits line up between tiles and the
+     width of a number does not change as the digits change. */
+  font-variant-numeric: tabular-nums;
 }
 .kpi-tile .kpi-label {
   font-size: 11px;
@@ -3760,7 +3792,11 @@ tr.active td {
   flex-direction: column;
   justify-content: space-between;
   padding: 30px 34px 34px;
-  color: var(--on-accent);
+  /* Fixed white, NOT var(--on-accent) — this sits on the photo's own dark
+     scrim, which stays dark in both themes. --on-accent flips to near-black
+     under data-theme="dark" (see .role-badge above), which turned the
+     "Every Stay, Perfectly Run" heading invisible on this panel. */
+  color: #fff;
 }
 /* Brand mark in the upper-left corner, with the rule that trails off it. */
 .login-eyebrow {
@@ -3789,7 +3825,7 @@ tr.active td {
   font-size: clamp(28px, 3.2vw, 42px);
   line-height: 1.12;
   letter-spacing: -0.02em;
-  color: var(--on-accent);
+  color: #fff;
 }
 .login-figure-quote p {
   margin: 0;

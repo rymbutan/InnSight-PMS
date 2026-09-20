@@ -68,6 +68,10 @@ export default function Folios() {
   // people certifying it. Mirrors AUDIT_SIGNOFF on the API.
   const { hasRole } = useAuth();
   const canSignOff = hasRole('AUDITOR', 'ADMIN');
+  // Mirrors FINANCE on the API (services/folio/src/routes/folio.routes.js) —
+  // auditors and managers dispute/cancel a charge, Admin as the same
+  // break-glass path every other money-moving action here already uses.
+  const canDispute = hasRole('AUDITOR', 'MANAGER', 'ADMIN');
   const [auditBusy, setAuditBusy] = useState(false);
   const [folioId, setFolioId] = useState(searchParams.get('id') || '');
   const [folio, setFolio] = useState(null);
@@ -110,6 +114,13 @@ export default function Folios() {
   const [resolving, setResolving] = useState(null); // { dispute, decision }
   const [resolveNote, setResolveNote] = useState('');
   const [resolvingId, setResolvingId] = useState(null);
+  // Disputing/cancelling a CHARGE (or any other ledger line) — see the
+  // Dispute/Cancel button on a Ledger row below. Separate from disputeFor
+  // above, which is the e-wallet refund/chargeback flow scoped to Payments.
+  const [voidFor, setVoidFor] = useState(null); // the FolioTransaction being voided
+  const [voidReason, setVoidReason] = useState('');
+  const [voidScreenshot, setVoidScreenshot] = useState(null);
+  const [voidBusy, setVoidBusy] = useState(false);
   // Which of the three "take an action" forms the sidebar shows. They used to
   // be three stacked full-width panels; one at a time in a tab is the same
   // three forms without scrolling past two you are not about to use.
@@ -723,6 +734,45 @@ export default function Folios() {
     }
   }
 
+  async function viewDisputeScreenshot(t) {
+    try {
+      await downloadAuthed(`/api/folios/${folioId}/transactions/${t.id}/dispute/screenshot`, {
+        filename: t.dispute?.screenshotFilename || 'screenshot',
+        openInTab: true,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
+  // Disputing/cancelling a ledger line — posts the reversal void-transaction
+  // already knew how to make, now with the auditor's reason (and, optionally,
+  // a screenshot of the conversation being cited) attached to it.
+  async function submitVoid(e) {
+    e.preventDefault();
+    if (!voidFor) return;
+    if (!voidReason.trim()) return toast.error('A reason is required.');
+    setVoidBusy(true);
+    try {
+      const payload = { reason: voidReason.trim() };
+      if (voidScreenshot) {
+        payload.screenshotFilename = voidScreenshot.name;
+        payload.screenshotContentType = voidScreenshot.type || 'application/octet-stream';
+        payload.screenshotContentBase64 = await readFileAsBase64(voidScreenshot);
+      }
+      await api.post(`/api/folios/${folioId}/void-transaction/${voidFor.id}`, payload);
+      toast.success('Charge disputed/cancelled.');
+      setVoidFor(null);
+      setVoidReason('');
+      setVoidScreenshot(null);
+      load(folioId);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setVoidBusy(false);
+    }
+  }
+
   // Shared between the Payment and Deposit tabs — one method list, one place
   // that renders it as <option>s or <optgroup>s.
   function renderMethodOptions() {
@@ -881,6 +931,13 @@ export default function Folios() {
                   <div className="folio-summary-sub">
                     Folio {folio.folioNumber}
                     <span className={`badge ${folio.status.toLowerCase()}`}>{labelize(folio.status)}</span>
+                    {folio.adults != null && (
+                      <span className="muted">
+                        {' · '}
+                        {folio.adults + (folio.children || 0)} guest
+                        {folio.adults + (folio.children || 0) === 1 ? '' : 's'}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -952,7 +1009,16 @@ export default function Folios() {
                     </button>
                   )}
                   {folio.status === 'OPEN' && (
-                    <button className="danger small" onClick={closeFolio}>
+                    <button
+                      className="danger small"
+                      onClick={closeFolio}
+                      disabled={Number(statement?.balanceCents || 0) > 0}
+                      title={
+                        Number(statement?.balanceCents || 0) > 0
+                          ? 'Settle the outstanding balance before closing this folio.'
+                          : undefined
+                      }
+                    >
                       Close folio
                     </button>
                   )}
@@ -1023,6 +1089,7 @@ export default function Folios() {
                           move 1,220.00 with nothing on screen accounting for
                           the 220.00. The ledger has to add up on its face. */}
                       <th style={{ textAlign: 'right' }}>Tax</th>
+                      <th>Dispute</th>
                       {siblings.length > 0 && <th />}
                     </tr>
                   </thead>
@@ -1106,6 +1173,51 @@ export default function Folios() {
                             {t.taxAmountCents == null || String(t.taxAmountCents) === '0'
                               ? '—'
                               : formatPeso(t.taxAmountCents)}
+                          </td>
+                          <td>
+                            {t.dispute ? (
+                              // Already disputed/cancelled — the reversal this
+                              // produced is its own separate row right below,
+                              // netting the balance to zero. This is the
+                              // record of WHY.
+                              <details className="payment-tx-details">
+                                <summary>
+                                  <span className="badge cancelled">Disputed/Cancelled</span>
+                                </summary>
+                                <div className="payment-tx-details-body">
+                                  <div>Reason: {t.dispute.reason}</div>
+                                  {t.dispute.filedBy && <div>By: {t.dispute.filedBy}</div>}
+                                  <div>{new Date(t.dispute.filedAt).toLocaleString()}</div>
+                                  {t.dispute.screenshotObjectKey && (
+                                    <div>
+                                      <button
+                                        type="button"
+                                        className="secondary small"
+                                        onClick={() => viewDisputeScreenshot(t)}
+                                      >
+                                        View screenshot
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
+                            ) : (
+                              // Not offered on a reversal row itself (nothing to
+                              // dispute about a correction) or once the folio is
+                              // no longer OPEN — same gate every other
+                              // ledger-changing action on this page uses.
+                              canDispute &&
+                              folio.status === 'OPEN' &&
+                              !t.reversalOf && (
+                                <button
+                                  type="button"
+                                  className="secondary small"
+                                  onClick={() => setVoidFor(t)}
+                                >
+                                  Dispute/Cancel
+                                </button>
+                              )
+                            )}
                           </td>
                           {siblings.length > 0 && (
                             <td style={{ textAlign: 'right' }}>
@@ -1759,6 +1871,75 @@ export default function Folios() {
                   : 'Why this claim was decided this way.'
               }
             />
+          </form>
+        )}
+      </Modal>
+
+      {/* Disputing/cancelling a charge — the Dispute/Cancel button on a
+          Ledger row above. Posts the same reversal void-transaction already
+          knew how to make, now with a mandatory reason and an optional
+          screenshot attached as evidence. */}
+      <Modal
+        open={!!voidFor}
+        onClose={() => {
+          setVoidFor(null);
+          setVoidReason('');
+          setVoidScreenshot(null);
+        }}
+        title={voidFor ? `Dispute/Cancel — ${voidFor.description}` : 'Dispute/Cancel'}
+        width={420}
+        footer={
+          <>
+            <button
+              className="secondary"
+              onClick={() => {
+                setVoidFor(null);
+                setVoidReason('');
+                setVoidScreenshot(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button onClick={submitVoid} disabled={voidBusy || !voidReason.trim()}>
+              {voidBusy ? 'Filing…' : 'Confirm dispute/cancel'}
+            </button>
+          </>
+        }
+      >
+        {voidFor && (
+          <form onSubmit={submitVoid}>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Posts a reversal of {formatPeso(voidFor.amountCents)} against this line. This cannot be
+              undone — it does not delete the original charge, it nets it to zero and keeps both rows on
+              the ledger.
+            </p>
+            <label>Reason *</label>
+            <textarea
+              rows={3}
+              required
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="Why this charge is being disputed or cancelled."
+            />
+            <label style={{ marginTop: 10 }}>Screenshot (optional)</label>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                if (file && file.size > MAX_PROOF_BYTES) {
+                  toast.error(`File is too large — max ${(MAX_PROOF_BYTES / (1024 * 1024)).toFixed(0)}MB.`);
+                  e.target.value = '';
+                  return;
+                }
+                setVoidScreenshot(file);
+              }}
+            />
+            {voidScreenshot && (
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {voidScreenshot.name} ({(voidScreenshot.size / 1024).toFixed(0)} KB)
+              </p>
+            )}
           </form>
         )}
       </Modal>

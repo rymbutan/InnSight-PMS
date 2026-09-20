@@ -90,6 +90,10 @@ const mockPrisma = {
   folioTransaction: txDelegate,
   chargeCode: { findMany: async () => [] },
   payment: { updateMany: async () => ({ count: 0 }) },
+  // void-transaction files a dispute record alongside the reversal it posts
+  // — not this file's concern (folioVoid.test.js covers its shape), just
+  // needs to not throw here.
+  folioTransactionDispute: { upsert: async ({ create }) => ({ id: 'd1', ...create }) },
   // Interactive form only — the split issues everything through one callback so
   // it cannot half-apply.
   $transaction: async (fn) => {
@@ -462,7 +466,7 @@ test('a split charge is refused for being split, not for being voided', async ()
   // voided sends the desk hunting for a void that never happened.
   seed();
   await call('POST', '/api/folios/src/split', { method: 'PERCENT', payers: TWO });
-  const r = await call('POST', '/api/folios/src/void-transaction/rm1');
+  const r = await call('POST', '/api/folios/src/void-transaction/rm1', { reason: 'test reason' });
   assert.equal(r.status, 409);
   assert.match(r.body.error, /split or transferred/i);
   assert.doesNotMatch(r.body.error, /already been voided/i);
@@ -470,9 +474,9 @@ test('a split charge is refused for being split, not for being voided', async ()
 
 test('a genuinely voided charge still reports that it was voided', async () => {
   seed();
-  const first = await call('POST', '/api/folios/src/void-transaction/rm1');
+  const first = await call('POST', '/api/folios/src/void-transaction/rm1', { reason: 'test reason' });
   assert.equal(first.status, 200);
-  const second = await call('POST', '/api/folios/src/void-transaction/rm1');
+  const second = await call('POST', '/api/folios/src/void-transaction/rm1', { reason: 'test reason' });
   assert.equal(second.status, 409);
   assert.match(second.body.error, /already been voided/i);
 });

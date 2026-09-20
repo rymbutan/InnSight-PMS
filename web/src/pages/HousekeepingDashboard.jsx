@@ -8,6 +8,9 @@ import { STATUS_META, STATUS_ORDER } from '../sim/statusMeta';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import { labelize } from '../lib/labels';
+import { localDay } from '../lib/date';
+import { SparkLine } from '../components/Chart';
+import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf, outlookOccupancy } from '../lib/outlookHeat';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The dashboard a Housekeeping & Maintenance account sees instead of the
@@ -16,39 +19,30 @@ import { labelize } from '../lib/labels';
 // WHY IT IS A SEPARATE PAGE
 // -------------------------
 // The shared dashboard answers front-office questions — arrivals, departures,
-// occupancy, a 14-day booking outlook, revenue history. A room attendant can
-// act on none of it, and most of it they are not entitled to read at all: the
-// reservations, audit and revenue calls on that page 403 for this role and get
-// swallowed, so the page they were shown was mostly empty tiles built from
-// requests that had already failed.
+// audit and revenue history — most of which this role is not entitled to read
+// at all: those calls 403 and get swallowed, so the page they were shown was
+// mostly empty tiles built from requests that had already failed.
 //
-// Everything here is either a room they have to turn over, a job assigned to
-// them, or somebody asking them for something. Nothing on this page is a number
-// they can only look at.
+// The 14-day booking outlook is the one exception, reused verbatim below: GET
+// /api/reservations was widened to also allow HOUSEKEEPING_MAINTENANCE for
+// exactly this (see the comment on that route in reservation.routes.js) — a
+// room attendant benefits from seeing demand coming the same way the front
+// desk does, and the endpoint returns nothing more sensitive than a booking
+// count per room type per night already does on that page.
+//
+// Everything else here is either a room they have to turn over, a job
+// assigned to them, or somebody asking them for something. Nothing on this
+// page is a number they can only look at.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Newest first, and only the states that still need somebody. A verified order
-// is history; it belongs in the Completed tab, not in the worklist.
-const OPEN_WO = ['REPORTED', 'TRIAGED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD'];
-
-// Fixed hex, matching STATUS_META's reasoning: a priority colour is an
-// identifier, and one that shifted between themes would stop being learnable.
-const WO_PRIORITY = {
-  EMERGENCY: { label: 'Emergency', bg: '#dc2626', fg: '#fff' },
-  URGENT: { label: 'Urgent', bg: '#ea580c', fg: '#fff' },
-  NORMAL: { label: 'Normal', bg: '#94a3b8', fg: '#0f172a' },
-  SCHEDULED: { label: 'Scheduled', bg: '#cbd5e1', fg: '#0f172a' },
-};
-
-const WO_STATUS_LABEL = {
-  REPORTED: 'Reported',
-  TRIAGED: 'Triaged',
-  ASSIGNED: 'Assigned',
-  IN_PROGRESS: 'In progress',
-  ON_HOLD: 'On hold',
-  COMPLETED: 'Completed',
-  VERIFIED: 'Verified',
-  CANCELLED: 'Cancelled',
+// A room's Job Orders priority/request come from whichever call the front
+// desk most recently placed on it, if any. SPILL is the one reason that is
+// genuinely urgent — a spill left to sit is a slip hazard, not just a
+// scheduling problem — everything else waiting on an attendant is routine.
+const CALL_PRIORITY = {
+  SPILL: { label: 'Urgent', bg: '#dc2626', fg: '#fff' },
+  DEFAULT: { label: 'Requested', bg: '#f59e0b', fg: '#fff' },
+  NONE: { label: 'Routine', bg: '#cbd5e1', fg: '#0f172a' },
 };
 
 const CALL_REASON_LABEL = {
@@ -110,37 +104,64 @@ export default function HousekeepingDashboard() {
   const toast = useToast();
   const { user } = useAuth();
   const [rooms, setRooms] = useState([]);
-  const [orders, setOrders] = useState([]);
   const [calls, setCalls] = useState([]);
-  const [woTab, setWoTab] = useState('Open');
-  const [callTab, setCallTab] = useState('Waiting');
-  const [busyWo, setBusyWo] = useState(null);
+  const [callTab, setCallTab] = useState('All');
+  const [outlook, setOutlook] = useState({ types: [], days: [], cells: {} });
 
   // Every request fails soft to an empty list. This page is a worklist made of
-  // four independent sources, and one of them being unreachable is no reason to
+  // independent sources, and one of them being unreachable is no reason to
   // show none of the others — the shared dashboard had exactly that failure and
   // greeted the whole role with a red toast.
   async function load() {
-    const [r, w, c] = await Promise.all([
+    const [r, c, types, res] = await Promise.all([
       api.get('/api/rooms').catch(() => ({ data: [] })),
-      api.get('/api/work-orders').catch(() => ({ data: [] })),
       api.get('/api/housekeeping-calls', { params: { limit: 50 } }).catch(() => ({ data: [] })),
+      api.get('/api/room-types').catch(() => ({ data: [] })),
+      api.get('/api/reservations').catch(() => ({ data: [] })),
     ]);
     setRooms(Array.isArray(r.data) ? r.data : []);
-    setOrders(Array.isArray(w.data) ? w.data : []);
     setCalls(Array.isArray(c.data) ? c.data : []);
+
+    // Same build as the front-office dashboard's 14 Day Outlook — see
+    // Dashboard.jsx's FrontOfficeDashboard.load(). Kept as one copy would be
+    // nicer, but the two pages already don't share a module and duplicating
+    // ~15 lines is cheaper than introducing one for a single caller.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayList = Array.from({ length: 14 }, (_, i) => {
+      const dt = new Date(today);
+      dt.setDate(today.getDate() + i);
+      return dt;
+    });
+    const cells = {};
+    for (const t of types.data) {
+      for (const day of dayList) {
+        const ds = localDay(day);
+        const reserved = res.data.filter((rv) => {
+          if (rv.roomTypeCode !== t.code) return false;
+          if (['CANCELLED', 'NO_SHOW'].includes(rv.status)) return false;
+          const ci = localDay(rv.checkIn);
+          const co = localDay(rv.checkOut);
+          return ci <= ds && ds < co;
+        }).length;
+        cells[`${t.code}|${ds}`] = Math.max(0, t.totalInventory - reserved);
+      }
+    }
+    setOutlook({ types: types.data, days: dayList, cells });
   }
 
   useEffect(() => {
     load();
   }, []);
 
-  // Rooms, work orders and the desk's calls — the three things this page is
-  // made of, and nothing else. A booking being made does not change a room
-  // attendant's day.
+  // Rooms, the desk's calls, and reservations for the outlook below — a
+  // booking being made doesn't change what an attendant has to clean today,
+  // but it does change tomorrow's forecast.
   const { connected } = useLiveRefresh(() => load(), {
-    channels: channels('rooms', 'maintenance', 'housekeeping'),
+    channels: channels('rooms', 'housekeeping', 'reservations'),
   });
+
+  const outlookOcc = useMemo(() => outlookOccupancy(outlook, localDay), [outlook]);
 
   const counts = useMemo(() => {
     const c = {};
@@ -153,58 +174,24 @@ export default function HousekeepingDashboard() {
     [rooms, user]
   );
 
-  const openOrders = useMemo(() => orders.filter((o) => OPEN_WO.includes(o.status)), [orders]);
-  const urgentOrders = useMemo(
-    () => openOrders.filter((o) => o.priority === 'EMERGENCY' || o.priority === 'URGENT'),
-    [openOrders]
-  );
-  const waitingCalls = useMemo(() => calls.filter((c) => !c.answeredAt), [calls]);
+  // The one still-ringing call on each room, if any — Job Orders' Priority
+  // and Requests columns read off this. Keyed by room NUMBER because that is
+  // all a call carries (see POST /housekeeping-calls); a room with more than
+  // one open call keeps only the latest, same as the ringing modal would.
+  const openCallByRoom = useMemo(() => {
+    const m = new Map();
+    for (const c of calls) if (!c.answeredAt) m.set(c.roomNumber, c);
+    return m;
+  }, [calls]);
 
-  const visibleOrders = useMemo(() => {
-    if (woTab === 'Urgent') return urgentOrders;
-    if (woTab === 'Mine') return openOrders.filter((o) => o.assignedTo === user?.id);
-    if (woTab === 'Completed') {
-      return orders.filter((o) => o.status === 'COMPLETED' || o.status === 'VERIFIED');
-    }
-    return openOrders;
-  }, [woTab, orders, openOrders, urgentOrders, user]);
+  // History's three tabs — an answered call is either Accepted or Declined,
+  // and a call still ringing belongs in neither, so it only shows up under
+  // All (with its own "Waiting …" pill, same as before).
+  const acceptedCalls = useMemo(() => calls.filter((c) => c.answeredAt && c.accepted), [calls]);
+  const declinedCalls = useMemo(() => calls.filter((c) => c.answeredAt && !c.accepted), [calls]);
 
-  const visibleCalls = callTab === 'Waiting' ? waitingCalls : calls;
-
-  // Room numbers, so a work order reads "Room 204" instead of a UUID. A work
-  // order can also be against an asset with no room at all, hence the fallback.
-  const roomNumberOf = useMemo(() => {
-    const m = new Map(rooms.map((r) => [r.id, r.number]));
-    return (id) => (id ? m.get(id) || id : null);
-  }, [rooms]);
-
-  // The lifecycle button this order is up to, if any. Mirrors the state machine
-  // the maintenance service enforces (requireWorkOrderState), so a button is
-  // only ever offered where the service would accept it.
-  function nextAction(o) {
-    if (o.status === 'REPORTED') return { label: 'Triage', path: 'triage', body: {} };
-    if (o.status === 'TRIAGED' || o.status === 'ASSIGNED') {
-      return { label: 'Start', path: 'start', body: {} };
-    }
-    if (o.status === 'IN_PROGRESS') return { label: 'Complete', path: 'complete', body: {} };
-    if (o.status === 'COMPLETED') return { label: 'Verify', path: 'verify', body: {} };
-    return null;
-  }
-
-  async function advance(o) {
-    const action = nextAction(o);
-    if (!action) return;
-    setBusyWo(o.id);
-    try {
-      await api.post(`/api/work-orders/${o.id}/${action.path}`, action.body);
-      toast.success(`${o.workOrderNumber} — ${action.label.toLowerCase()}d.`);
-      load();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setBusyWo(null);
-    }
-  }
+  const visibleCalls =
+    callTab === 'Accepted' ? acceptedCalls : callTab === 'Declined' ? declinedCalls : calls;
 
   async function answerCall(c) {
     try {
@@ -219,12 +206,6 @@ export default function HousekeepingDashboard() {
       toast.error(errMsg(e));
     }
   }
-
-  const totalRooms = rooms.length;
-  const toClean = counts.DIRTY || 0;
-  const awaitingInspection = counts.CLEAN || 0;
-  const ready = counts.CLEAN_INSPECTED || 0;
-  const offline = (counts.OUT_OF_ORDER || 0) + (counts.OUT_OF_SERVICE || 0);
 
   return (
     <div>
@@ -247,66 +228,6 @@ export default function HousekeepingDashboard() {
           <button className="icon" title="Refresh" onClick={load}>
             <Icon name="refresh-cw" size={16} />
           </button>
-        </div>
-      </div>
-
-      {/* Six numbers, every one of them a queue somebody has to empty. */}
-      <div className="kpi-row">
-        <div className="kpi-tile">
-          <div>
-            <div className="kpi-num">{toClean}</div>
-            <div className="kpi-label">To clean</div>
-          </div>
-          <div className="kpi-icon">
-            <Icon name="bed" size={26} />
-          </div>
-        </div>
-        <div className="kpi-tile">
-          <div>
-            <div className="kpi-num">{awaitingInspection}</div>
-            <div className="kpi-label" title="Cleaned — waiting on a supervisor to sign them off">
-              Awaiting inspection
-            </div>
-          </div>
-          <div className="kpi-icon">
-            <Icon name="search" size={26} />
-          </div>
-        </div>
-        <div className="kpi-tile">
-          <div>
-            <div className="kpi-num">{ready}</div>
-            <div className="kpi-label">Guest-ready</div>
-          </div>
-          <span className="kpi-pct">{totalRooms ? Math.round((ready / totalRooms) * 100) : 0}%</span>
-        </div>
-        <div className="kpi-tile">
-          <div>
-            <div className="kpi-num">{offline}</div>
-            <div className="kpi-label" title="Out of order or out of service">
-              Off inventory
-            </div>
-          </div>
-          <div className="kpi-icon">
-            <Icon name="ban" size={26} />
-          </div>
-        </div>
-        <div className="kpi-tile">
-          <div>
-            <div className="kpi-num">{openOrders.length}</div>
-            <div className="kpi-label">Open job orders</div>
-          </div>
-          <div className="kpi-icon">
-            <Icon name="settings" size={26} />
-          </div>
-        </div>
-        <div className="kpi-tile">
-          <div>
-            <div className="kpi-num">{waitingCalls.length}</div>
-            <div className="kpi-label">Calls waiting</div>
-          </div>
-          <div className="kpi-icon">
-            <Icon name="phone" size={26} />
-          </div>
         </div>
       </div>
 
@@ -337,11 +258,14 @@ export default function HousekeepingDashboard() {
         </div>
       </div>
 
+      {/* Job orders and History side by side — the two worklists this role
+          actually clears, at equal weight. Below the two-column breakpoint
+          they stack, same as the status board's own tiles. */}
       <div className="hkd-cols">
-        {/* ── My rooms ── */}
+        {/* ── Job orders ── */}
         <div className="panel">
           <h3>
-            My rooms{' '}
+            Job orders{' '}
             <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
               ({myRooms.length})
             </span>
@@ -358,188 +282,259 @@ export default function HousekeepingDashboard() {
               }
             />
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Room</th>
-                  <th>Floor</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {myRooms.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <strong>{r.number}</strong>
-                    </td>
-                    <td className="t-c">{r.floor}</td>
-                    <td>
-                      <RoomStatusPill status={r.status} />
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="secondary small" onClick={() => navigate('/housekeeping')}>
-                        Open
-                      </button>
-                    </td>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table" style={{ minWidth: 520 }}>
+                <thead>
+                  <tr>
+                    <th>Room</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Requests</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {myRooms.map((r) => {
+                    const call = openCallByRoom.get(r.number);
+                    const pri = call ? CALL_PRIORITY[call.reason] || CALL_PRIORITY.DEFAULT : CALL_PRIORITY.NONE;
+                    return (
+                      <tr key={r.id}>
+                        <td>
+                          <strong>{r.number}</strong>
+                        </td>
+                        <td>
+                          <RoomStatusPill status={r.status} />
+                        </td>
+                        <td>
+                          <Pill bg={pri.bg} fg={pri.fg}>
+                            {pri.label}
+                          </Pill>
+                        </td>
+                        <td>
+                          {call ? (
+                            <>
+                              <div>{CALL_REASON_LABEL[call.reason] || call.reason}</div>
+                              {call.note && (
+                                <div className="muted" style={{ fontSize: 12 }}>
+                                  {call.note}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button className="secondary small" onClick={() => navigate('/housekeeping')}>
+                            Open
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
-        {/* ── Calls from the front desk ── */}
+        {/* ── History — every call from the front desk, answered or not.
+            Same table this panel always had; only the tabs and the title
+            changed (it used to default to "Waiting", which is also the one
+            KPI tile above and the live ringing modal already cover). */}
         <div className="panel">
-          <h3>Calls from the front desk</h3>
+          <h3>History</h3>
           <div className="tabs-pill" style={{ marginBottom: 10 }}>
-            {['Waiting', 'All'].map((t) => (
+            {['Accepted', 'Declined', 'All'].map((t) => (
               <button key={t} className={callTab === t ? 'active' : ''} onClick={() => setCallTab(t)}>
                 {t}
-                {t === 'Waiting' && waitingCalls.length > 0 ? ` (${waitingCalls.length})` : ''}
               </button>
             ))}
           </div>
           {visibleCalls.length === 0 ? (
             <EmptyState
               kind="inbox"
-              title={callTab === 'Waiting' ? 'No calls waiting' : 'No calls yet'}
+              title={
+                callTab === 'Accepted'
+                  ? 'No accepted calls yet'
+                  : callTab === 'Declined'
+                    ? 'No declined calls'
+                    : 'No calls yet'
+              }
               hint="The front desk rings housekeeping from the room map. Every call is logged here, answered or not."
             />
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Room</th>
-                  <th>Reason</th>
-                  <th>From</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCalls.map((c) => (
-                  <tr key={c.id}>
-                    <td title={new Date(c.placedAt).toLocaleString()}>{clockTime(c.placedAt)}</td>
-                    <td>
-                      <strong>{c.roomNumber}</strong>
-                    </td>
-                    <td>
-                      <div>{CALL_REASON_LABEL[c.reason] || c.reason}</div>
-                      {c.note && (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {c.note}
-                        </div>
-                      )}
-                    </td>
-                    <td className="muted">{c.callerName || '—'}</td>
-                    <td>
-                      {c.answeredAt ? (
-                        <Pill bg="#dcfce7" fg="#16a34a" title={new Date(c.answeredAt).toLocaleString()}>
-                          {c.answeredByName || 'Answered'}
-                        </Pill>
-                      ) : (
-                        /* Age, not a timestamp: a call that has been ringing for
-                           40 minutes is the problem, and the reader should not
-                           have to do the subtraction. */
-                        <Pill bg="#fee2e2" fg="#dc2626">
-                          Waiting {ageSince(c.placedAt)}
-                        </Pill>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {!c.answeredAt && (
-                        <button className="secondary small" onClick={() => answerCall(c)}>
-                          Pick up
-                        </button>
-                      )}
-                    </td>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table" style={{ minWidth: 560 }}>
+                <thead>
+                  <tr>
+                    <th>Job #</th>
+                    <th>Room</th>
+                    <th>Time</th>
+                    <th>Reason</th>
+                    <th>From</th>
+                    <th>Status</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleCalls.map((c) => (
+                    <tr key={c.id}>
+                      {/* Calls have no sequential number of their own (unlike a
+                          work order's workOrderNumber) — this is the id's tail,
+                          just so a call is something you can point at in
+                          conversation ("CL-4F2A9B") rather than only by room
+                          and time. */}
+                      <td className="muted" style={{ fontSize: 12 }}>
+                        CL-{c.id.slice(-6).toUpperCase()}
+                      </td>
+                      <td>
+                        <strong>{c.roomNumber}</strong>
+                      </td>
+                      <td title={new Date(c.placedAt).toLocaleString()}>{clockTime(c.placedAt)}</td>
+                      <td>
+                        <div>{CALL_REASON_LABEL[c.reason] || c.reason}</div>
+                        {c.note && (
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            {c.note}
+                          </div>
+                        )}
+                      </td>
+                      <td className="muted">{c.callerName || '—'}</td>
+                      <td>
+                        {c.answeredAt ? (
+                          <Pill bg="#dcfce7" fg="#16a34a" title={new Date(c.answeredAt).toLocaleString()}>
+                            {c.answeredByName || 'Answered'}
+                          </Pill>
+                        ) : (
+                          /* Age, not a timestamp: a call that has been ringing for
+                             40 minutes is the problem, and the reader should not
+                             have to do the subtraction. */
+                          <Pill bg="#fee2e2" fg="#dc2626">
+                            Waiting {ageSince(c.placedAt)}
+                          </Pill>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {!c.answeredAt && (
+                          <button className="secondary small" onClick={() => answerCall(c)}>
+                            Pick up
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
 
-      {/* ── Job orders ── */}
+      {/* 14 Day Outlook — identical to the front-office dashboard's panel
+          (same lib/outlookHeat helpers, same heat-* CSS), so demand reads the
+          same way for whoever is looking at it. */}
       <div className="panel">
-        <h3>Job orders</h3>
-        <div className="tabs-pill" style={{ marginBottom: 10 }}>
-          {['Open', 'Mine', 'Urgent', 'Completed'].map((t) => (
-            <button key={t} className={woTab === t ? 'active' : ''} onClick={() => setWoTab(t)}>
-              {t}
-              {t === 'Urgent' && urgentOrders.length > 0 ? ` (${urgentOrders.length})` : ''}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>14 Day Outlook</h3>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
+              {outlookOcc.pct.toFixed(2)}%
+            </span>
+            <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
+              14-Day Occupancy
+            </span>
+          </div>
+          {outlookOcc.series.length >= 2 && (
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="muted" style={{ fontSize: 10 }}>
+                TODAY
+              </span>
+              <SparkLine
+                data={outlookOcc.series}
+                color="var(--accent)"
+                width={200}
+                height={36}
+                min={0}
+                max={100}
+                fill
+              />
+              <span className="muted" style={{ fontSize: 10 }}>
+                +14d
+              </span>
+            </div>
+          )}
         </div>
-        {visibleOrders.length === 0 ? (
-          <EmptyState
-            kind="inbox"
-            title={woTab === 'Open' ? 'Nothing outstanding' : `No ${woTab.toLowerCase()} job orders`}
-            hint="Work orders are raised from the room map and by the front desk when a guest reports a fault."
-          />
-        ) : (
-          <table className="table">
+        <div style={{ overflowX: 'auto' }}>
+          <table className="outlook-heat" style={{ minWidth: 800 }}>
             <thead>
               <tr>
-                <th>Order</th>
-                <th>Room</th>
-                <th>Priority</th>
-                <th>What</th>
-                <th>Status</th>
-                <th className="t-c">Age</th>
-                <th />
+                <th style={{ minWidth: 200 }}>Rooms left to sell</th>
+                {outlook.days.map((d) => {
+                  const weekend = d.getDay() === 0 || d.getDay() === 6;
+                  return (
+                    <th
+                      key={d.toISOString()}
+                      className={weekend ? 'weekend' : undefined}
+                      style={{ textAlign: 'center', minWidth: 54 }}
+                    >
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                        {d.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
+                      </div>
+                      <div style={{ fontWeight: 600, marginTop: 2 }}>{d.getDate()}</div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {visibleOrders.map((o) => {
-                const pri = WO_PRIORITY[o.priority] || WO_PRIORITY.NORMAL;
-                const action = nextAction(o);
-                const room = roomNumberOf(o.roomId);
-                return (
-                  <tr key={o.id}>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {o.workOrderNumber}
+              {outlook.types.length === 0 ? (
+                <tr>
+                  <td colSpan={15} className="loading-row">
+                    No room types yet.
+                  </td>
+                </tr>
+              ) : (
+                outlook.types.map((t) => (
+                  <tr key={t.code}>
+                    <td style={{ fontWeight: 500 }}>
+                      {t.name}{' '}
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {t.totalInventory} rooms
+                      </span>
                     </td>
-                    <td>{room ? <strong>{room}</strong> : <span className="muted">—</span>}</td>
-                    <td>
-                      <Pill bg={pri.bg} fg={pri.fg}>
-                        {pri.label}
-                      </Pill>
-                    </td>
-                    <td>
-                      <div>{o.description}</div>
-                      {(o.category || o.roomOutOfService) && (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {o.category}
-                          {o.category && o.roomOutOfService ? ' · ' : ''}
-                          {o.roomOutOfService ? 'room off inventory' : ''}
-                        </div>
-                      )}
-                    </td>
-                    <td>{WO_STATUS_LABEL[o.status] || o.status}</td>
-                    <td className="t-c" title={new Date(o.createdAt).toLocaleString()}>
-                      {ageSince(o.createdAt)}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {action && (
-                        <button
-                          className="secondary small"
-                          disabled={busyWo === o.id}
-                          onClick={() => advance(o)}
-                        >
-                          {busyWo === o.id ? '…' : action.label}
-                        </button>
-                      )}
-                    </td>
+                    {outlook.days.map((d) => {
+                      const ds = localDay(d);
+                      const avail = outlook.cells[`${t.code}|${ds}`] ?? 0;
+                      const occ = occupancyOf(avail, t.totalInventory);
+                      return (
+                        <td key={ds} className="heat-cell">
+                          <div
+                            className="heat-box"
+                            style={{ background: heatFill(occ), color: heatInk(occ) }}
+                            title={heatTitle(t.name, d, avail, t.totalInventory)}
+                          >
+                            {avail}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
-                );
-              })}
+                ))
+              )}
             </tbody>
           </table>
-        )}
+        </div>
+
+        <div className="heat-legend">
+          <span className="muted">Share of the room type already sold</span>
+          {HEAT_LEGEND.map((l) => (
+            <span key={l.label} className="heat-legend-item">
+              <span className="heat-legend-swatch" style={{ background: l.fill }} />
+              {l.label}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );

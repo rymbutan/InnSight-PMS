@@ -122,6 +122,27 @@ async function pickAssignableRoom(args) {
 }
 
 /**
+ * Is `roomId` actually free for [checkIn, checkOut)? Auto-assignment already
+ * only ever proposes a room from this same free set — but a STAFF-CHOSEN room
+ * (the wizard's per-pick dropdown, or a PATCH that reassigns one) went straight
+ * into the database with no server-side check at all beyond the exclusion
+ * constraint, which only rejects a room already held by another RESERVATION.
+ * It has no idea a walk-in (no reservation row at all) is sitting in that room
+ * right now — inventory's OCCUPIED status is what carries that fact, and
+ * `freeRoomIds` already reads it. Reusing it here, rather than trusting the
+ * client, is what makes an explicit pick and an auto-assign agree on what
+ * "free" means.
+ *
+ * @param {object} args  same shape as freeRoomIds, plus
+ * @param {string} args.roomId  the room being requested
+ * @returns {Promise<boolean>}
+ */
+async function isRoomFree(args) {
+  const ids = await freeRoomIds(args);
+  return ids.includes(args.roomId);
+}
+
+/**
  * Normalise a client-supplied room id.
  *
  * '' is not the same as "no room": it is NOT NULL as far as the
@@ -138,4 +159,4 @@ function normaliseRoomId(value) {
   return trimmed === '' ? null : trimmed;
 }
 
-module.exports = { pickAssignableRoom, freeRoomIds, normaliseRoomId, MAX_ASSIGN_ATTEMPTS };
+module.exports = { pickAssignableRoom, freeRoomIds, isRoomFree, normaliseRoomId, MAX_ASSIGN_ATTEMPTS };

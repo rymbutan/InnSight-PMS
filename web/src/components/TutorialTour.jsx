@@ -164,7 +164,11 @@ const PAGES = [
     body: 'Occupancy, revenue, and operational reports for the property over a date range you control. Use these to catch a trend before it shows up as a problem at the front desk.',
   },
   {
-    key: 'audit',
+    // Gated on 'reports', not 'audit': Night Audit no longer has its own
+    // catalogue key (see the _mergeComment on navSections.json's "reports"
+    // item) — hasSection('audit') would return false forever and this step
+    // would silently vanish from the tour.
+    key: 'reports',
     to: '/audit',
     roles: ['ADMIN', 'MANAGER', 'AUDITOR'],
     title: 'Night Audit',

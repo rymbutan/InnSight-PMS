@@ -163,6 +163,11 @@ const LIVE_CHANNELS = [
   // E-wallet refund/chargeback claims (services/folio's PaymentDispute).
   'folio:dispute_filed',
   'folio:dispute_resolved',
+  // Night-audit sign-off approve/revoke — published by folio.routes.js but
+  // never whitelisted here, so it never reached the browser at all.
+  'folio:audit',
+  // A charge/payment disputed or cancelled via void-transaction.
+  'folio:transaction_voided',
   // Guests
   'guest:profile_created',
   'guest:profile_updated',
@@ -257,6 +262,10 @@ const CHANNEL_DOMAIN = {
   'folio:transferred': 'folio',
   'folio:dispute_filed': 'folio',
   'folio:dispute_resolved': 'folio',
+  // Same bug as the three above, on a channel added later: present in
+  // LIVE_CHANNELS is not enough on its own without a domain here too.
+  'folio:audit': 'folio',
+  'folio:transaction_voided': 'folio',
   'guest:profile_created': 'guests',
   'guest:profile_updated': 'guests',
   'guest:flagged': 'guests',

@@ -834,6 +834,65 @@ router.patch('/facilities/:code', requireRole(...ROOM_ADMIN), async (req, res) =
   }
 });
 
+// GET /api/addon-catalog?active=true
+// Priced reservation add-ons, managed here alongside Facility. Read by the
+// guest-profile and reservation-wizard checklists (Guests.jsx,
+// NewReservation.jsx) to show a price next to each option.
+router.get('/addon-catalog', requireRole(...ROLE_GROUPS.ALL_STAFF), async (req, res) => {
+  try {
+    const where = {};
+    if (req.query.active === 'true') where.active = true;
+    const list = await prisma.addOnCatalogItem.findMany({ where, orderBy: { label: 'asc' } });
+    res.json(list);
+  } catch (err) {
+    console.error('[Inventory] List addon catalog error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/addon-catalog  (ADMIN)
+router.post('/addon-catalog', requireRole(...ROOM_ADMIN), async (req, res) => {
+  try {
+    const { code, label, priceCents } = req.body;
+    if (!code || !label) return res.status(400).json({ error: 'code and label required.' });
+    if (!Number.isInteger(priceCents) || priceCents < 0)
+      return res.status(400).json({ error: 'priceCents must be a non-negative integer.' });
+    const item = await prisma.addOnCatalogItem.create({ data: { code, label, priceCents } });
+    redis.publish('addon-catalog:changed', JSON.stringify({ code: item.code, action: 'created' }));
+    res.status(201).json(item);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Add-on code already exists.' });
+    console.error('[Inventory] Create addon catalog item error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PATCH /api/addon-catalog/:code  (ADMIN) — edit price/label, activate/deactivate
+router.patch('/addon-catalog/:code', requireRole(...ROOM_ADMIN), async (req, res) => {
+  try {
+    const b = req.body;
+    const data = {};
+    if (b.label !== undefined) data.label = b.label;
+    if (b.priceCents !== undefined) {
+      if (!Number.isInteger(b.priceCents) || b.priceCents < 0)
+        return res.status(400).json({ error: 'priceCents must be a non-negative integer.' });
+      data.priceCents = b.priceCents;
+    }
+    if (b.active !== undefined) data.active = !!b.active;
+    if (!Object.keys(data).length) return res.status(400).json({ error: 'No editable fields provided.' });
+    const item = await prisma.addOnCatalogItem.update({ where: { code: req.params.code }, data }).catch((e) => {
+      if (e.code === 'P2025') return null;
+      throw e;
+    });
+    if (!item) return res.status(404).json({ error: 'Add-on not found.' });
+    redis.publish('addon-catalog:changed', JSON.stringify({ code: item.code, action: 'updated' }));
+    res.json(item);
+  } catch (err) {
+    console.error('[Inventory] Update addon catalog item error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/facility-bookings?facilityCode=&from=&to=
 router.get('/facility-bookings', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
   try {
@@ -1124,10 +1183,13 @@ router.post('/housekeeping-calls', requireRole(...CALLERS), async (req, res) => 
     // who is not on that room without reassigning it first — which is a change
     // everyone can see, rather than a private choice inside one phone call.
     //
-    // Unassigned rooms still ring the whole team. Refusing to place the call
-    // would be worse: the moment somebody most needs housekeeping is not the
-    // moment to be told to fill in a dropdown first.
-    const targetUserId = room.assignedTo || null;
+    // An unassigned room has no "whose job it is" to ring, so there is no one
+    // call target — the call is refused rather than fanned out to the whole
+    // team. Assign the room first (a change everyone can see, same as above).
+    if (!room.assignedTo) {
+      return res.status(409).json({ error: 'Room is unassigned. Assign a housekeeper before calling.' });
+    }
+    const targetUserId = room.assignedTo;
     // Written down BEFORE it is published, and the row's own id is the callId.
     // The call used to exist only as a Redis message, so the moment it had been
     // delivered there was no trace of it: a housekeeper coming on shift could

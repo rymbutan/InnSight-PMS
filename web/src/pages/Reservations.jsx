@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -16,6 +17,16 @@ const STATUS_OPTIONS = ['CONFIRMED', 'PENDING', 'CANCELLED', 'IN_HOUSE', 'CHECKE
 export default function Reservations() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { hasRole } = useAuth();
+  // AUDITOR reaches this list for oversight (server already allows the read —
+  // ROLE_GROUPS.DESK_AUDIT on GET /reservations), not to create bookings —
+  // /reservations/new stays out of their reach at the route level too.
+  //
+  // MANAGER is the same story as of the Manager Role Logic redesign: strict
+  // oversight and correction of EXISTING bookings, not making new ones — the
+  // desk creates a reservation, a manager reviews/edits/cancels one. See the
+  // matching change on /reservations/new's own route in App.jsx.
+  const canCreate = hasRole('ADMIN', 'FRONT_DESK');
   const [list, setList] = useState([]);
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -143,14 +154,16 @@ export default function Reservations() {
           <h1>Reservations</h1>
           <FilterPill open={filtersOpen} onClick={() => setFiltersOpen((o) => !o)} />
         </div>
-        <button
-          className="btn-cta"
-          data-tour="tour-process-reservations"
-          onClick={() => navigate('/reservations/new')}
-        >
-          <Icon name="plus" size={14} style={{ marginRight: 6 }} />
-          Create new reservation
-        </button>
+        {canCreate && (
+          <button
+            className="btn-cta"
+            data-tour="tour-process-reservations"
+            onClick={() => navigate('/reservations/new')}
+          >
+            <Icon name="plus" size={14} style={{ marginRight: 6 }} />
+            Create new reservation
+          </button>
+        )}
       </div>
 
       <FilterPanel
@@ -323,6 +336,7 @@ export default function Reservations() {
                     onClick={toggleSort}
                   />
                   <SortableTh field="guestName" label="Guest" sortBy={sortBy} onClick={toggleSort} />
+                  <th className="t-c">Guests</th>
                   <SortableTh field="createdAt" label="Date Booked" sortBy={sortBy} onClick={toggleSort} />
                   <th className="t-c">Room(s)</th>
                   <SortableTh field="checkIn" label="Check-In" sortBy={sortBy} onClick={toggleSort} />
@@ -356,6 +370,9 @@ export default function Reservations() {
                   <tr key={r.id} onClick={() => navigate(`/reservations/${r.id}`)}>
                     <td className="table-link">{r.confirmationNumber || r.id?.slice(0, 8)}</td>
                     <td>{r.guestName || '—'}</td>
+                    <td className="t-c">
+                      {r.adults == null ? '—' : r.adults + (r.children || 0)}
+                    </td>
                     <td>{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—'}</td>
                     <td className="t-c">{r.assignedRoomId || r.roomTypeCode || 'N/A'}</td>
                     <td>{new Date(r.checkIn).toLocaleDateString()}</td>

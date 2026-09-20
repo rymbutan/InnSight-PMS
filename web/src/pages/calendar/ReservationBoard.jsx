@@ -535,6 +535,8 @@ export default function ReservationBoard({ startDate, days }) {
                                     onBarClick(b);
                                   }}
                                   title={`${b.label} · ${new Date(b.ci).toLocaleDateString()} → ${new Date(b.co).toLocaleDateString()} · ${b.nights} night${b.nights === 1 ? '' : 's'}${
+                                    b.adults == null ? '' : ` · ${b.adults + (b.children || 0)} guest${b.adults + (b.children || 0) === 1 ? '' : 's'}`
+                                  }${
                                     b.status === 'ooo' ? '' : ` · ${b.status.replace('_', ' ')}`
                                   }`}
                                 >

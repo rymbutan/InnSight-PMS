@@ -11,10 +11,16 @@ const prisma = require('../lib/prisma');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 const STAY_URL = process.env.STAY_URL || 'http://stay-service:3006';
-// Used on exactly one path — the delete below. Claims no roles, because the
-// only question it asks is "does this guest have a live stay", which
-// /api/stays answers to any authenticated caller.
-const stayCall = makeServiceCaller({ name: 'guest', roles: [], permissions: [] });
+const RESERVATION_URL = process.env.RESERVATION_URL || 'http://reservation-service:3011';
+// Used on exactly two paths — both below, in DELETE /guests/:id. Both
+// GET /stays and GET /reservations are guarded with requireRole(...DESK_AUDIT)
+// on their own side, so a caller with no roles at all was rejected with a 403
+// on every single call — this claimed to be open when it never was, which is
+// what made every delete attempt fail with "cannot confirm" regardless of the
+// guest's actual status. ADMIN is a member of DESK_AUDIT on both services,
+// same as how audit-service's own machine token authenticates to them.
+const stayCall = makeServiceCaller({ name: 'guest', roles: ['ADMIN'], permissions: ['stay.read'] });
+const reservationCall = makeServiceCaller({ name: 'guest', roles: ['ADMIN'], permissions: ['reservation.read'] });
 
 function nextProfileNumber() {
   return `G-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -142,6 +148,8 @@ const GUEST_EDITABLE = [
   'nationality',
   'vipLevel',
   'tags',
+  'companyName',
+  'employeeName',
 ];
 router.patch('/guests/:id', requireRole(...STAFF), async (req, res) => {
   try {
@@ -239,6 +247,111 @@ router.put('/guests/:id/preferences/:key', requireRole(...STAFF), async (req, re
   }
 });
 
+// ── Saved banking details ───────────────────────────────────────────────────
+// STAFF, not OPS_READ — this is financial detail, not an operational fact
+// like a room status, and OPS_READ includes housekeeping/maintenance, who
+// have no reason to see it.
+
+// GET /api/guests/:id/bank-accounts
+router.get('/guests/:id/bank-accounts', requireRole(...STAFF), async (req, res) => {
+  try {
+    const accounts = await prisma.guestBankAccount.findMany({
+      where: { guestId: req.params.id },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    });
+    res.json(accounts);
+  } catch (err) {
+    console.error('[Guest] List bank accounts error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/guests/:id/bank-accounts
+router.post('/guests/:id/bank-accounts', requireRole(...STAFF), async (req, res) => {
+  try {
+    const { bankName, accountName, accountNumberLast4, transferNetwork, isDefault } = req.body;
+    if (!bankName || !String(bankName).trim()) return res.status(400).json({ error: 'bankName is required.' });
+    if (!accountName || !String(accountName).trim())
+      return res.status(400).json({ error: 'accountName is required.' });
+    if (!accountNumberLast4 || !/^\d{4}$/.test(String(accountNumberLast4))) {
+      return res.status(400).json({ error: 'accountNumberLast4 must be exactly 4 digits.' });
+    }
+    const guest = await prisma.guest.findUnique({ where: { id: req.params.id } });
+    if (!guest) return res.status(404).json({ error: 'Guest not found.' });
+
+    const account = await prisma.$transaction(async (px) => {
+      // Exactly one default at a time — same reasoning as a primary contact.
+      if (isDefault) {
+        await px.guestBankAccount.updateMany({ where: { guestId: req.params.id }, data: { isDefault: false } });
+      }
+      return px.guestBankAccount.create({
+        data: {
+          guestId: req.params.id,
+          bankName: String(bankName).trim(),
+          accountName: String(accountName).trim(),
+          accountNumberLast4: String(accountNumberLast4),
+          transferNetwork: transferNetwork || null,
+          isDefault: Boolean(isDefault),
+        },
+      });
+    });
+    res.status(201).json(account);
+  } catch (err) {
+    console.error('[Guest] Create bank account error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PATCH /api/guests/:id/bank-accounts/:accountId
+router.patch('/guests/:id/bank-accounts/:accountId', requireRole(...STAFF), async (req, res) => {
+  try {
+    const existing = await prisma.guestBankAccount.findFirst({
+      where: { id: req.params.accountId, guestId: req.params.id },
+    });
+    if (!existing) return res.status(404).json({ error: 'Bank account not found for this guest.' });
+
+    const { bankName, accountName, accountNumberLast4, transferNetwork, isDefault } = req.body;
+    if (accountNumberLast4 !== undefined && !/^\d{4}$/.test(String(accountNumberLast4))) {
+      return res.status(400).json({ error: 'accountNumberLast4 must be exactly 4 digits.' });
+    }
+    const data = {};
+    if (bankName !== undefined) data.bankName = String(bankName).trim();
+    if (accountName !== undefined) data.accountName = String(accountName).trim();
+    if (accountNumberLast4 !== undefined) data.accountNumberLast4 = String(accountNumberLast4);
+    if (transferNetwork !== undefined) data.transferNetwork = transferNetwork || null;
+    if (isDefault !== undefined) data.isDefault = Boolean(isDefault);
+
+    const account = await prisma.$transaction(async (px) => {
+      if (data.isDefault) {
+        await px.guestBankAccount.updateMany({
+          where: { guestId: req.params.id, id: { not: req.params.accountId } },
+          data: { isDefault: false },
+        });
+      }
+      return px.guestBankAccount.update({ where: { id: req.params.accountId }, data });
+    });
+    res.json(account);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Not found.' });
+    console.error('[Guest] Update bank account error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// DELETE /api/guests/:id/bank-accounts/:accountId
+router.delete('/guests/:id/bank-accounts/:accountId', requireRole(...STAFF), async (req, res) => {
+  try {
+    const result = await prisma.guestBankAccount.deleteMany({
+      where: { id: req.params.accountId, guestId: req.params.id },
+    });
+    if (result.count === 0) return res.status(404).json({ error: 'Bank account not found for this guest.' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('[Guest] Delete bank account error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // POST /api/guests/:id/consent
 router.post('/guests/:id/consent', requireRole(...STAFF), async (req, res) => {
   try {
@@ -295,11 +408,17 @@ router.post('/guests/:id/anonymize', requireRole(...ADMIN), async (req, res) => 
           gender: null,
           nationality: null,
           tags: null,
+          companyName: null,
+          employeeName: null,
         },
       });
       await px.guestContact.deleteMany({ where: { guestId: req.params.id } });
       await px.guestPreference.deleteMany({ where: { guestId: req.params.id } });
       await px.consentRecord.deleteMany({ where: { guestId: req.params.id } });
+      // Banking detail is exactly the kind of PII this route exists to scrub
+      // — the whole point is a card/account number does not survive alongside
+      // a name that no longer does.
+      await px.guestBankAccount.deleteMany({ where: { guestId: req.params.id } });
       return g;
     });
     redis.publish('guest:anonymized', JSON.stringify({ guestId: guest.id }));
@@ -338,9 +457,12 @@ router.delete('/guests/:id', requireRole(...ADMIN), async (req, res) => {
     const guest = await prisma.guest.findUnique({ where: { id: req.params.id } });
     if (!guest) return res.status(404).json({ error: 'Guest not found.' });
 
-    // The one refusal. Erasing the profile of the guest currently in a room
+    // Two refusals. Erasing the profile of the guest currently in a room
     // leaves the desk holding a stay it cannot look up, mid-stay, which is the
-    // exact moment they most need to. Anything already departed is fair game.
+    // exact moment they most need to. Erasing one with a still-active
+    // reservation orphans that booking's guestId before the stay even starts
+    // — this used to be uncaught entirely, since only the stay-service check
+    // existed. Anything already departed/cancelled/checked-out is fair game.
     try {
       const stays = await stayCall.call(`${STAY_URL}/api/stays?guestId=${encodeURIComponent(guest.id)}`);
       const live = (Array.isArray(stays) ? stays : []).find((s) => s.status === 'IN_HOUSE');
@@ -349,6 +471,20 @@ router.delete('/guests/:id', requireRole(...ADMIN), async (req, res) => {
           error:
             'This guest is currently checked in. Check them out first, or use Anonymize to clear their ' +
             'personal details while keeping the stay.',
+        });
+      }
+
+      const reservations = await reservationCall.call(
+        `${RESERVATION_URL}/api/reservations?guestId=${encodeURIComponent(guest.id)}`
+      );
+      const active = (Array.isArray(reservations) ? reservations : []).find((r) =>
+        ['PENDING', 'CONFIRMED'].includes(r.status)
+      );
+      if (active) {
+        return res.status(409).json({
+          error:
+            `This guest has an active reservation (${active.confirmationNumber || active.id.slice(0, 8)}). ` +
+            'Cancel it first, or use Anonymize to clear their personal details while keeping the booking.',
         });
       }
     } catch (err) {
@@ -368,6 +504,7 @@ router.delete('/guests/:id', requireRole(...ADMIN), async (req, res) => {
       await px.guestPreference.deleteMany({ where: { guestId: guest.id } });
       await px.consentRecord.deleteMany({ where: { guestId: guest.id } });
       await px.loyaltyAccount.deleteMany({ where: { guestId: guest.id } });
+      await px.guestBankAccount.deleteMany({ where: { guestId: guest.id } });
       await px.guest.delete({ where: { id: guest.id } });
     });
 
