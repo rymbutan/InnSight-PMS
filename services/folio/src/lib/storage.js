@@ -44,6 +44,19 @@ function objectKeyFor(paymentId, filename) {
   return `payments/${paymentId}/${crypto.randomUUID()}-${safe}`;
 }
 
+// Evidence attached to a charge dispute/void (e.g. a screenshot of the guest
+// conversation an auditor cited) — same bucket as payment proofs, a
+// different prefix so the two don't intermix when the bucket is browsed by
+// hand. Keyed to the transaction being disputed, not the reversal it
+// produces, since that is the row a person is asking "why was this voided?"
+// about.
+function objectKeyForDispute(transactionId, filename) {
+  const safe = String(filename || 'file')
+    .replace(/[^\w.-]/g, '_')
+    .slice(-120);
+  return `disputes/${transactionId}/${crypto.randomUUID()}-${safe}`;
+}
+
 async function putDocument(objectKey, buffer, contentType) {
   await client.putObject(BUCKET, objectKey, buffer, buffer.length, {
     'Content-Type': contentType || 'application/octet-stream',
@@ -60,4 +73,12 @@ async function removeDocument(objectKey) {
   await client.removeObject(BUCKET, objectKey);
 }
 
-module.exports = { ensureBucket, objectKeyFor, putDocument, getDocumentStream, removeDocument, BUCKET };
+module.exports = {
+  ensureBucket,
+  objectKeyFor,
+  objectKeyForDispute,
+  putDocument,
+  getDocumentStream,
+  removeDocument,
+  BUCKET,
+};

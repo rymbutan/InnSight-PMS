@@ -78,6 +78,7 @@ model FolioTransaction {
   refundReason   String?
   reference      String?
   folio          Folio           @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  dispute        FolioTransactionDispute?
 
   // folioId was unindexed despite being the join path for every statement,
   // print and daily-total query — the hottest read path in the folio service.
@@ -139,6 +140,34 @@ model PaymentDocument {
   uploadedAt  DateTime @default(now())
   uploadedBy  String?
   payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+// The reason (and, optionally, evidence) an auditor or manager gave when
+// disputing/cancelling a CHARGE — filed alongside the reversal that POST
+// /folios/:id/void-transaction/:txId already creates for any transaction
+// type. Keyed to the ORIGINAL transaction, not the reversal: "why was THIS
+// voided?" is asked while looking at the original ledger line, which never
+// goes away (the reversal is what nets it to zero).
+//
+// Screenshot metadata is flattened onto this row rather than a separate
+// table, same reasoning as PaymentDocument being 1:1 with its Payment — one
+// dispute carries at most one piece of evidence.
+model FolioTransactionDispute {
+  id                    String   @id @default(uuid())
+  transactionId         String   @unique
+  // The reversal FolioTransaction.id void-transaction created for this
+  // dispute. Not a Prisma relation (a reversal is a FolioTransaction row like
+  // any other, and giving it a second, differently-named FK back to the same
+  // table the way `reversalOf` already does would just duplicate that field).
+  reversalTransactionId String?
+  reason                String
+  filedBy               String?
+  filedAt               DateTime @default(now())
+  screenshotFilename    String?
+  screenshotContentType String?
+  screenshotSizeBytes   Int?
+  screenshotObjectKey   String?  @unique
+  transaction           FolioTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 }
 
 enum FolioType {
