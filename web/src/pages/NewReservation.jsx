@@ -131,21 +131,45 @@ export default function NewReservation() {
       .then(({ data }) => setGuestBankAccounts(Array.isArray(data) ? data : []))
       .catch(() => setGuestBankAccounts([])); // no saved accounts is the common case, not an error
   }, [pickedGuest?.id]);
-  // Read-only here — set on the guest's own profile (Guests.jsx), not
-  // per-booking. Shown so the desk sees what this guest usually wants
-  // without leaving the wizard to look up their profile.
-  const [guestAddonPrefs, setGuestAddonPrefs] = useState([]);
+  // Lives on the guest's own profile (GuestPreference), not on the
+  // reservation — but editable right here too, not only from Guests.jsx.
+  // Each toggle PUTs straight to the guest's profile, same endpoint
+  // Guests.jsx itself uses, so the two are always the same data and neither
+  // can drift into its own per-booking copy.
+  const [guestAddonPrefs, setGuestAddonPrefs] = useState({}); // { [code]: true }
+  const [savingAddonPref, setSavingAddonPref] = useState(null);
   useEffect(() => {
-    if (!pickedGuest?.id) return setGuestAddonPrefs([]);
+    if (!pickedGuest?.id) return setGuestAddonPrefs({});
     api
       .get(`/api/guests/${pickedGuest.id}/preferences`)
       .then(({ data }) =>
         setGuestAddonPrefs(
-          (Array.isArray(data) ? data : []).filter((p) => p.category === ADDON_PREFERENCE_CATEGORY && p.value)
+          Object.fromEntries(
+            (Array.isArray(data) ? data : [])
+              .filter((p) => p.category === ADDON_PREFERENCE_CATEGORY && p.value)
+              .map((p) => [p.key, true])
+          )
         )
       )
-      .catch(() => setGuestAddonPrefs([]));
+      .catch(() => setGuestAddonPrefs({}));
   }, [pickedGuest?.id]);
+
+  async function toggleGuestAddonPref(code, checked) {
+    if (!pickedGuest?.id) return;
+    setSavingAddonPref(code);
+    setGuestAddonPrefs((m) => ({ ...m, [code]: checked || undefined }));
+    try {
+      await api.put(`/api/guests/${pickedGuest.id}/preferences/${code}`, {
+        category: ADDON_PREFERENCE_CATEGORY,
+        value: checked,
+      });
+    } catch (e) {
+      setGuestAddonPrefs((m) => ({ ...m, [code]: !checked || undefined }));
+      toast.error(errMsg(e));
+    } finally {
+      setSavingAddonPref(null);
+    }
+  }
   const [newGuest, setNewGuest] = useState({
     firstName: '',
     lastName: '',
@@ -157,6 +181,61 @@ export default function NewReservation() {
     state: '',
     postal: '',
   });
+
+  // Company/banking details are guest-profile fields (Guests.jsx), but shown
+  // and editable here too — in Step 2, ahead of Step 3's guest pick — so the
+  // desk doesn't have to leave the wizard. Synced FROM the picked guest once
+  // one exists; for a brand-new guest they're carried in the POST /api/guests
+  // payload at submit() instead, same pattern as name/email/phone above.
+  const [companyName, setCompanyName] = useState('');
+  const [employeeName, setEmployeeName] = useState('');
+  useEffect(() => {
+    setCompanyName(pickedGuest?.companyName || '');
+    setEmployeeName(pickedGuest?.employeeName || '');
+  }, [pickedGuest?.id]);
+
+  const [newBankAccount, setNewBankAccount] = useState({
+    bankName: '',
+    accountName: '',
+    accountNumberLast4: '',
+    transferNetwork: '',
+  });
+  const [savingBankAccount, setSavingBankAccount] = useState(false);
+
+  async function refreshGuestBankAccounts() {
+    if (!pickedGuest?.id) return;
+    try {
+      const { data } = await api.get(`/api/guests/${pickedGuest.id}/bank-accounts`);
+      setGuestBankAccounts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
+  async function addGuestBankAccount() {
+    if (!pickedGuest?.id) return;
+    const { bankName, accountName, accountNumberLast4, transferNetwork } = newBankAccount;
+    if (!bankName.trim() || !accountName.trim() || !/^\d{4}$/.test(accountNumberLast4)) {
+      return toast.error('Bank, account name, and the last 4 digits (exactly 4) are required.');
+    }
+    setSavingBankAccount(true);
+    try {
+      await api.post(`/api/guests/${pickedGuest.id}/bank-accounts`, {
+        bankName: bankName.trim(),
+        accountName: accountName.trim(),
+        accountNumberLast4,
+        transferNetwork: transferNetwork.trim() || undefined,
+        isDefault: guestBankAccounts.length === 0,
+      });
+      setNewBankAccount({ bankName: '', accountName: '', accountNumberLast4: '', transferNetwork: '' });
+      await refreshGuestBankAccounts();
+      toast.success('Bank account saved.');
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setSavingBankAccount(false);
+    }
+  }
 
   // Defaults mirror DEFAULT_TAX_RATES in services/_shared/policies.js, so a
   // failed fetch still quotes the same figures the backend falls back to.
@@ -387,7 +466,19 @@ export default function NewReservation() {
       // create guest if new
       let guest = pickedGuest;
       if (!guest && newGuest.firstName) {
-        const { data } = await api.post('/api/guests', newGuest);
+        const { data } = await api.post('/api/guests', {
+          ...newGuest,
+          companyName: companyName.trim() || undefined,
+          employeeName: employeeName.trim() || undefined,
+        });
+        guest = data;
+      } else if (guest && (companyName.trim() !== (guest.companyName || '') || employeeName.trim() !== (guest.employeeName || ''))) {
+        // Existing guest, edited here in Step 2 — write back to their profile
+        // so it's still there next time, same as editing it from Guests.jsx.
+        const { data } = await api.patch(`/api/guests/${guest.id}`, {
+          companyName: companyName.trim(),
+          employeeName: employeeName.trim(),
+        });
         guest = data;
       }
       const first = picks[0];
@@ -713,6 +804,109 @@ export default function NewReservation() {
               </button>
             ))}
           </div>
+
+          {/* Company/banking live on the guest's own profile (Guests.jsx) —
+              editable here too so the desk doesn't have to leave the wizard
+              to set them up before Step 3's guest pick. */}
+          <h3 style={{ marginTop: 18 }}>Company details</h3>
+          <div className="row">
+            <div>
+              <label>Company name</label>
+              <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+            </div>
+            <div>
+              <label>Employee name</label>
+              <input value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} />
+            </div>
+          </div>
+
+          <h3 style={{ marginTop: 18 }}>Banking details</h3>
+          {!pickedGuest && (
+            <p className="hint">
+              Pick an existing guest in the Guests step, or save this booking with a new guest first, to add a bank
+              account. Company/employee name above is kept either way.
+            </p>
+          )}
+          {pickedGuest && (
+            <>
+              {guestBankAccounts.length > 0 && (
+                <table style={{ marginBottom: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Bank</th>
+                      <th>Account</th>
+                      <th>Last 4</th>
+                      <th>Network</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {guestBankAccounts.map((a) => (
+                      <tr key={a.id}>
+                        <td>{a.bankName}</td>
+                        <td>{a.accountName}</td>
+                        <td>{a.accountNumberLast4}</td>
+                        <td>{a.transferNetwork || '—'}</td>
+                        <td className="t-c">{a.isDefault ? 'Default' : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <div className="row">
+                <div>
+                  <label>Bank</label>
+                  <select
+                    value={newBankAccount.bankName}
+                    onChange={(e) => setNewBankAccount({ ...newBankAccount, bankName: e.target.value })}
+                  >
+                    <option value="">Select...</option>
+                    {BANK_NAMES.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Account holder</label>
+                  <input
+                    value={newBankAccount.accountName}
+                    onChange={(e) => setNewBankAccount({ ...newBankAccount, accountName: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label>Last 4 digits</label>
+                  <input
+                    value={newBankAccount.accountNumberLast4}
+                    maxLength={4}
+                    onChange={(e) =>
+                      setNewBankAccount({ ...newBankAccount, accountNumberLast4: e.target.value.replace(/\D/g, '') })
+                    }
+                  />
+                </div>
+                <div>
+                  <label>Network</label>
+                  <select
+                    value={newBankAccount.transferNetwork}
+                    onChange={(e) => setNewBankAccount({ ...newBankAccount, transferNetwork: e.target.value })}
+                  >
+                    <option value="">Select...</option>
+                    {TRANSFER_NETWORKS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ alignSelf: 'flex-end' }}>
+                  <button type="button" className="secondary small" disabled={savingBankAccount} onClick={addGuestBankAccount}>
+                    + Add account
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -765,16 +959,37 @@ export default function NewReservation() {
             </div>
           ) : null}
           {pickedGuest && (
-            // Read-only preview of what's already saved on this guest's
-            // profile — edited from Guests.jsx, not here, so it can't drift
-            // into a second, per-booking copy of the same preference.
-            <div className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
-              Add-on preferences:{' '}
-              {guestAddonPrefs.length
-                ? ADDON_PREFERENCE_OPTIONS.filter((o) => guestAddonPrefs.some((p) => p.key === o.code))
-                    .map((o) => o.label)
-                    .join(', ')
-                : 'None set on this guest’s profile.'}
+            <div style={{ marginBottom: 16 }}>
+              {/* Editable right here, not just a preview — each toggle PUTs
+                  straight to the guest's own profile (see
+                  toggleGuestAddonPref), the same GuestPreference row
+                  Guests.jsx edits. Checking one during a booking saves it for
+                  every future stay too, not just this reservation. */}
+              <label>Add-on preferences</label>
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                {ADDON_PREFERENCE_OPTIONS.map((o) => (
+                  <label
+                    key={o.code}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      width: 'auto',
+                      textTransform: 'none',
+                      fontWeight: 400,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto' }}
+                      checked={Boolean(guestAddonPrefs[o.code])}
+                      disabled={savingAddonPref === o.code}
+                      onChange={(e) => toggleGuestAddonPref(o.code, e.target.checked)}
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           {!pickedGuest && (
