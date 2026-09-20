@@ -8,75 +8,12 @@ import { formatPeso, pesosToCents } from '../lib/money';
 import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 
-import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
+import { SOURCES, SOURCE_LABELS, SPECIAL_REQUEST_QUICK_PICKS, BANK_NAMES, TRANSFER_NETWORKS } from '../lib/reservationOptions';
+import { CARD_BRANDS, EMPTY_DEPOSIT_DETAIL, nowForDateTimeLocal, missingDepositField } from '../lib/depositDetail';
 import { paymentMethodGroups } from '../lib/paymentMethods';
+import { ADDON_PREFERENCE_CATEGORY, useAddOnCatalog } from '../lib/guestAddonPreferences';
 
-const STEPS = ['Availability', 'Details', 'Guests', 'Add-ons', 'Payment'];
-
-// Same per-method deposit detail Folios.jsx's "Post payment" modal collects,
-// minus amount (that's depositPesos) and proof upload (out of scope here — no
-// folio/payment id exists yet at booking time to attach a document to).
-const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'JCB', 'OTHER'];
-const BANK_NAMES = ['BDO', 'BPI', 'Metrobank', 'UnionBank', 'Landbank', 'OTHER'];
-const TRANSFER_NETWORKS = ['InstaPay', 'PESONet', 'Direct OTC Deposit', 'Wire Transfer', 'OTHER'];
-const EMPTY_DEPOSIT_DETAIL = {
-  cardBrand: 'VISA',
-  cardLast4: '',
-  cardholderName: '',
-  gatewayRef: '',
-  bankName: 'BDO',
-  bankNameOther: '',
-  transferNetwork: 'InstaPay',
-  transferNetworkOther: '',
-  senderName: '',
-  bankRef: '',
-  transferredAt: '',
-};
-
-// 'YYYY-MM-DDTHH:mm' in LOCAL time, what <input type="datetime-local"> both
-// accepts and returns — toISOString() would shift this to UTC.
-function nowForDateTimeLocal() {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
-}
-
-// Mirrors services/reservation/src/lib/missingDepositField.js exactly, so a
-// deposit the wizard lets through is never rejected by the server.
-function missingDepositField(method, detail) {
-  if (method === 'CARD') {
-    if (!/^\d{4}$/.test(detail.cardLast4)) return 'Enter the last 4 digits of the card.';
-    if (!detail.cardholderName.trim()) return 'Cardholder name is required.';
-  }
-  if (method === 'BANK_TRANSFER') {
-    if (detail.bankName === 'OTHER' && !detail.bankNameOther.trim()) return 'Enter the bank name.';
-    if (detail.transferNetwork === 'OTHER' && !detail.transferNetworkOther.trim()) {
-      return 'Enter the transfer network/channel.';
-    }
-    if (!detail.senderName.trim()) return "Sender/account holder's name is required.";
-    if (!detail.bankRef.trim()) return 'Bank reference/control number is required.';
-  }
-  return null;
-}
-
-// Built-in special requests for the Add-ons step's dropdown — the common
-// ones a front desk gets asked for repeatedly, so staff pick one instead of
-// re-typing it every time. Phrased as a billed line-item description (not
-// the guest-facing wording on the public booking page's own checklist),
-// since this becomes what prints on the folio. "Other" keeps the free-text
-// input for anything not on the list — a cake brand, a specific chocolate,
-// whatever the guest actually asked for that isn't one of these.
-const BUILT_IN_ADDON_REQUESTS = [
-  'High floor room',
-  'Quiet room',
-  'Luggage storage',
-  'Away from elevator',
-  'Near elevator',
-  'Car parking',
-  'Honeymoon arrangements',
-  'Baby cot (additional charges may apply)',
-  'Airport transfer',
-];
+const STEPS = ['Availability', 'Details', 'Guests', 'Payment'];
 
 export default function NewReservation() {
   const [params] = useSearchParams();
@@ -92,6 +29,11 @@ export default function NewReservation() {
   const [checkIn, setCheckIn] = useState(params.get('checkIn') || '');
   const [checkOut, setCheckOut] = useState('');
   const [promoCode, setPromoCode] = useState('');
+  // Free-text guest preference, no cost — see Stay details in Step 2.
+  // Standardized preferences (extra pillows, etc.) live on the guest's own
+  // profile now instead of being re-entered per booking — see Guests.jsx.
+  const [specialRequests, setSpecialRequests] = useState('');
+  const [otherSpecialRequest, setOtherSpecialRequest] = useState('');
   // Per the Terms & Conditions' "Promotional / Non-Refundable Tier": flagged
   // bookings forfeit the full amount on cancellation regardless of timing.
   const [isNonRefundable, setIsNonRefundable] = useState(false);
@@ -113,6 +55,61 @@ export default function NewReservation() {
   // Step 3
   const [guestQ, setGuestQ] = useState('');
   const [pickedGuest, setPickedGuest] = useState(null);
+  const [adults, setAdults] = useState(2);
+  const [children, setChildren] = useState(0);
+  // This guest's saved bank-transfer details (Ms. Padilla, Lane A-07) — lets
+  // the Payment step auto-fill from one instead of retyping bank/network/
+  // sender every time. Purely a convenience default: the reservation still
+  // records its own copy of whatever ends up in the deposit fields, same as
+  // if it had been typed by hand.
+  const [guestBankAccounts, setGuestBankAccounts] = useState([]);
+  useEffect(() => {
+    if (!pickedGuest?.id) return setGuestBankAccounts([]);
+    api
+      .get(`/api/guests/${pickedGuest.id}/bank-accounts`)
+      .then(({ data }) => setGuestBankAccounts(Array.isArray(data) ? data : []))
+      .catch(() => setGuestBankAccounts([])); // no saved accounts is the common case, not an error
+  }, [pickedGuest?.id]);
+  // Lives on the guest's own profile (GuestPreference), not on the
+  // reservation — but editable right here too, not only from Guests.jsx.
+  // Each toggle PUTs straight to the guest's profile, same endpoint
+  // Guests.jsx itself uses, so the two are always the same data and neither
+  // can drift into its own per-booking copy.
+  const [guestAddonPrefs, setGuestAddonPrefs] = useState({}); // { [code]: true }
+  const addonCatalog = useAddOnCatalog();
+  const [savingAddonPref, setSavingAddonPref] = useState(null);
+  useEffect(() => {
+    if (!pickedGuest?.id) return setGuestAddonPrefs({});
+    api
+      .get(`/api/guests/${pickedGuest.id}/preferences`)
+      .then(({ data }) =>
+        setGuestAddonPrefs(
+          Object.fromEntries(
+            (Array.isArray(data) ? data : [])
+              .filter((p) => p.category === ADDON_PREFERENCE_CATEGORY && p.value)
+              .map((p) => [p.key, true])
+          )
+        )
+      )
+      .catch(() => setGuestAddonPrefs({}));
+  }, [pickedGuest?.id]);
+
+  async function toggleGuestAddonPref(code, checked) {
+    if (!pickedGuest?.id) return;
+    setSavingAddonPref(code);
+    setGuestAddonPrefs((m) => ({ ...m, [code]: checked || undefined }));
+    try {
+      await api.put(`/api/guests/${pickedGuest.id}/preferences/${code}`, {
+        category: ADDON_PREFERENCE_CATEGORY,
+        value: checked,
+      });
+    } catch (e) {
+      setGuestAddonPrefs((m) => ({ ...m, [code]: !checked || undefined }));
+      toast.error(errMsg(e));
+    } finally {
+      setSavingAddonPref(null);
+    }
+  }
   const [newGuest, setNewGuest] = useState({
     firstName: '',
     lastName: '',
@@ -125,25 +122,64 @@ export default function NewReservation() {
     postal: '',
   });
 
-  // Step 4 — Add-ons
-  const [addOns, setAddOns] = useState([]); // [{ description, costCents }]
-  const [addOnDesc, setAddOnDesc] = useState('');
-  const [addOnCostPesos, setAddOnCostPesos] = useState('');
-  // Which built-in request the dropdown has selected, if any — '' (none
-  // chosen yet) or 'OTHER' both fall through to the free-text input below it.
-  const [addOnPreset, setAddOnPreset] = useState('');
-  const [feePercent, setFeePercent] = useState(10);
-  const [feeEditPesos, setFeeEditPesos] = useState('');
+  // Company/banking details are guest-profile fields (Guests.jsx), but shown
+  // and editable here too — in Step 2, ahead of Step 3's guest pick — so the
+  // desk doesn't have to leave the wizard. Synced FROM the picked guest once
+  // one exists; for a brand-new guest they're carried in the POST /api/guests
+  // payload at submit() instead, same pattern as name/email/phone above.
+  const [companyName, setCompanyName] = useState('');
+  const [employeeName, setEmployeeName] = useState('');
+  useEffect(() => {
+    setCompanyName(pickedGuest?.companyName || '');
+    setEmployeeName(pickedGuest?.employeeName || '');
+  }, [pickedGuest?.id]);
+
+  const [newBankAccount, setNewBankAccount] = useState({
+    bankName: '',
+    accountName: '',
+    accountNumberLast4: '',
+    transferNetwork: '',
+  });
+  const [savingBankAccount, setSavingBankAccount] = useState(false);
+
+  async function refreshGuestBankAccounts() {
+    if (!pickedGuest?.id) return;
+    try {
+      const { data } = await api.get(`/api/guests/${pickedGuest.id}/bank-accounts`);
+      setGuestBankAccounts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
+  async function addGuestBankAccount() {
+    if (!pickedGuest?.id) return;
+    const { bankName, accountName, accountNumberLast4, transferNetwork } = newBankAccount;
+    if (!bankName.trim() || !accountName.trim() || !/^\d{4}$/.test(accountNumberLast4)) {
+      return toast.error('Bank, account name, and the last 4 digits (exactly 4) are required.');
+    }
+    setSavingBankAccount(true);
+    try {
+      await api.post(`/api/guests/${pickedGuest.id}/bank-accounts`, {
+        bankName: bankName.trim(),
+        accountName: accountName.trim(),
+        accountNumberLast4,
+        transferNetwork: transferNetwork.trim() || undefined,
+        isDefault: guestBankAccounts.length === 0,
+      });
+      setNewBankAccount({ bankName: '', accountName: '', accountNumberLast4: '', transferNetwork: '' });
+      await refreshGuestBankAccounts();
+      toast.success('Bank account saved.');
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setSavingBankAccount(false);
+    }
+  }
+
   // Defaults mirror DEFAULT_TAX_RATES in services/_shared/policies.js, so a
   // failed fetch still quotes the same figures the backend falls back to.
   const [taxRates, setTaxRates] = useState({ vat: 12, serviceCharge: 10, localTax: 0, realPropertyTax: 0 });
-
-  useEffect(() => {
-    api
-      .get('/api/settings/addon-fee-percent')
-      .then(({ data }) => setFeePercent(data.feePercent))
-      .catch(() => {}); // default of 10 already set; a failed fetch just keeps it
-  }, []);
 
   useEffect(() => {
     api
@@ -152,46 +188,7 @@ export default function NewReservation() {
       .catch(() => {}); // defaults already set; a failed fetch just keeps them
   }, []);
 
-  // costCents alone can't tell "0" (a free special request — allowed) apart
-  // from "" (nothing typed yet — not allowed), since both round to 0. Read
-  // the raw field instead: entered and non-negative is valid, empty or
-  // negative/non-numeric is not.
-  function addOnCostEntered() {
-    const trimmed = addOnCostPesos.trim();
-    if (trimmed === '') return false;
-    const n = Number(trimmed);
-    return Number.isFinite(n) && n >= 0;
-  }
-  function addAddOn() {
-    if (!addOnDesc.trim() || !addOnCostEntered()) return;
-    const costCents = pesosToCents(addOnCostPesos);
-    setAddOns((list) => [...list, { description: addOnDesc.trim(), costCents }]);
-    setAddOnDesc('');
-    setAddOnCostPesos('');
-    setAddOnPreset('');
-  }
-  function removeAddOn(idx) {
-    setAddOns((list) => list.filter((_, i) => i !== idx));
-  }
-  async function saveFeePercent() {
-    const pct = Number(feeEditPesos);
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) return;
-    try {
-      const { data } = await api.put('/api/settings/addon-fee-percent', { feePercent: pct });
-      setFeePercent(data.feePercent);
-      setFeeEditPesos('');
-      toast.success('Add-on fee updated.');
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  }
-
-  const addOnsTotalCents = useMemo(
-    () => addOns.reduce((s, a) => s + Math.round(a.costCents * (1 + feePercent / 100)), 0),
-    [addOns, feePercent]
-  );
-
-  // Step 5
+  // Step 4 — Payment
   const [depositPesos, setDepositPesos] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   // Per-method deposit detail (CARD/BANK_TRANSFER only) — same fields and
@@ -314,8 +311,16 @@ export default function NewReservation() {
     return Math.max(0, Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000));
   }, [checkIn, checkOut]);
 
+  // Checked add-ons, priced from the live catalog — same rows toggleGuestAddonPref
+  // writes to the guest's profile, just also charged onto THIS reservation.
+  const checkedAddOns = useMemo(
+    () => addonCatalog.filter((o) => guestAddonPrefs[o.code]),
+    [addonCatalog, guestAddonPrefs]
+  );
+
   const totals = useMemo(() => {
     const subtotalCents = picks.reduce((s, p) => s + p.ratePerNightCents * p.qty * nights, 0);
+    const addOnsCents = checkedAddOns.reduce((s, o) => s + (o.priceCents || 0), 0);
     // Mirrors computeTax() in services/_shared/policies.js: four named
     // components at the hotel's configured rates, not a hardcoded VAT-only
     // guess — this is the same total the night audit will eventually charge.
@@ -324,10 +329,10 @@ export default function NewReservation() {
         (taxRates.vat + taxRates.serviceCharge + taxRates.localTax + taxRates.realPropertyTax)) /
         100
     );
-    const grandTotalCents = subtotalCents + taxCents + addOnsTotalCents;
+    const grandTotalCents = subtotalCents + addOnsCents + taxCents;
     const suggestedDepositCents = Math.round(grandTotalCents * 0.5);
-    return { subtotalCents, taxCents, grandTotalCents, suggestedDepositCents };
-  }, [picks, nights, addOnsTotalCents, taxRates]);
+    return { subtotalCents, addOnsCents, taxCents, grandTotalCents, suggestedDepositCents };
+  }, [picks, nights, taxRates, checkedAddOns]);
 
   const balanceDueCents = useMemo(() => {
     return Math.max(0, totals.grandTotalCents - pesosToCents(depositPesos));
@@ -369,20 +374,26 @@ export default function NewReservation() {
         );
       }
     }
-    // Add-ons is deliberately skippable — "no add-ons yet" is a valid
-    // finished state, not a missing field. What is NOT allowed is leaving
-    // half of the "add a request" mini-form filled in and silently moving on,
-    // since that discards what was typed without any signal that it never
-    // got added — require it to be finished (via Add) or cleared first.
-    if (step === 4 && (addOnDesc.trim() || addOnCostPesos.trim() !== '')) {
-      return toast.error(
-        'Finish adding this special request (click Add), or clear the special request and cost fields before continuing.'
-      );
-    }
     setStep(Math.min(STEPS.length, step + 1));
   }
   function back() {
     setStep(Math.max(1, step - 1));
+  }
+
+  // A saved account's bank/network might not be one of the fixed options this
+  // form offers (BANK_NAMES/TRANSFER_NETWORKS) — falls back to "Other" with
+  // the real value typed in, same as a human picking "Other" would.
+  function applySavedBankAccount(account) {
+    const bankKnown = BANK_NAMES.includes(account.bankName);
+    const networkKnown = account.transferNetwork && TRANSFER_NETWORKS.includes(account.transferNetwork);
+    setDepositDetail({
+      ...depositDetail,
+      bankName: bankKnown ? account.bankName : 'OTHER',
+      bankNameOther: bankKnown ? '' : account.bankName,
+      transferNetwork: account.transferNetwork ? (networkKnown ? account.transferNetwork : 'OTHER') : depositDetail.transferNetwork,
+      transferNetworkOther: account.transferNetwork && !networkKnown ? account.transferNetwork : '',
+      senderName: account.accountName,
+    });
   }
 
   async function submit() {
@@ -403,8 +414,37 @@ export default function NewReservation() {
       // create guest if new
       let guest = pickedGuest;
       if (!guest && newGuest.firstName) {
-        const { data } = await api.post('/api/guests', newGuest);
+        const { data } = await api.post('/api/guests', {
+          ...newGuest,
+          companyName: companyName.trim() || undefined,
+          employeeName: employeeName.trim() || undefined,
+        });
         guest = data;
+      } else if (guest && (companyName.trim() !== (guest.companyName || '') || employeeName.trim() !== (guest.employeeName || ''))) {
+        // Existing guest, edited here in Step 2 — write back to their profile
+        // so it's still there next time, same as editing it from Guests.jsx.
+        const { data } = await api.patch(`/api/guests/${guest.id}`, {
+          companyName: companyName.trim(),
+          employeeName: employeeName.trim(),
+        });
+        guest = data;
+      }
+      // A bank account typed into Step 2 before a guest existed (or left
+      // un-saved for a picked guest) — save it now that guest.id is known.
+      // "+ Add account" already saves immediately once a guest is picked, so
+      // this only ever fires for what that button couldn't reach yet.
+      if (guest?.id && newBankAccount.bankName.trim() && newBankAccount.accountName.trim() && /^\d{4}$/.test(newBankAccount.accountNumberLast4)) {
+        try {
+          await api.post(`/api/guests/${guest.id}/bank-accounts`, {
+            bankName: newBankAccount.bankName.trim(),
+            accountName: newBankAccount.accountName.trim(),
+            accountNumberLast4: newBankAccount.accountNumberLast4,
+            transferNetwork: newBankAccount.transferNetwork.trim() || undefined,
+            isDefault: guestBankAccounts.length === 0,
+          });
+        } catch (e) {
+          toast.error(`Reservation created, but the bank account could not be saved: ${errMsg(e)}`);
+        }
       }
       const first = picks[0];
       const payload = {
@@ -420,10 +460,13 @@ export default function NewReservation() {
         assignedRoomId: first.assignedRoomId || undefined,
         checkIn,
         checkOut,
-        adults: 2,
-        children: 0,
+        adults: Number(adults) || 1,
+        children: Number(children) || 0,
         source,
         totalEstimateCents: totals.grandTotalCents,
+        // Priced from the catalog at submit time, in the shape the server's
+        // computeAddOns() already expects.
+        addOns: checkedAddOns.map((o) => ({ description: o.label, costCents: o.priceCents })),
         depositCents: pesosToCents(depositPesos),
         paymentType: paymentMethod,
         isNonRefundable,
@@ -456,9 +499,7 @@ export default function NewReservation() {
         // discount and charged full price. It also used to OVERWRITE whatever
         // the guest had typed into Special Requests; the server now appends.
         ...(promoCode ? { promoCode: promoCode.trim().toUpperCase() } : {}),
-        ...(addOns.length
-          ? { addOns: addOns.map((a) => ({ description: a.description, costCents: a.costCents })) }
-          : {}),
+        ...(specialRequests.trim() ? { specialRequests: specialRequests.trim() } : {}),
       };
       const { data: r } = await api.post('/api/reservations', payload);
       // Auto-confirm
@@ -591,7 +632,17 @@ export default function NewReservation() {
                                 (r) =>
                                   availableRoomIds[p.typeCode].includes(r.id) || r.id === p.assignedRoomId
                               )
-                            : allRooms.filter((r) => r.typeCode === p.typeCode && r.status !== 'OUT_OF_ORDER')
+                            : // While the availability fetch is still in flight, don't
+                              // offer a room that's plainly unusable or occupied right
+                              // now — the server re-checks this on submit regardless
+                              // (see reservation.routes.js's isRoomFree), but a choice
+                              // this list shouldn't have suggested in the first place
+                              // is worse UX than a shorter list for a moment.
+                              allRooms.filter(
+                                (r) =>
+                                  r.typeCode === p.typeCode &&
+                                  !['OUT_OF_ORDER', 'OUT_OF_SERVICE', 'OCCUPIED'].includes(r.status)
+                              )
                           ).map((r) => (
                             <option key={r.id} value={r.id}>
                               Room {r.number}
@@ -692,6 +743,167 @@ export default function NewReservation() {
               ))}
             </tbody>
           </table>
+
+          {/* Free-text, guest- and stay-specific, no cost of its own. A
+              guest's STANDING preferences (extra pillows, and the like) live
+              on their own profile now (Guests.jsx) instead of being
+              re-entered — and re-priced — on every booking. */}
+          <h3 style={{ marginTop: 18 }}>Special requests</h3>
+          <textarea
+            rows={3}
+            value={specialRequests}
+            onChange={(e) => setSpecialRequests(e.target.value)}
+            placeholder="e.g. Honeymoon trip — please set the room up for a couple."
+          />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {SPECIAL_REQUEST_QUICK_PICKS.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                className="secondary small"
+                onClick={() =>
+                  setSpecialRequests((prev) => {
+                    if (prev.split(/,\s*/).includes(opt)) return prev;
+                    return prev.trim() ? `${prev.trim()}, ${opt}` : opt;
+                  })
+                }
+              >
+                + {opt}
+              </button>
+            ))}
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <div style={{ flex: 1 }}>
+              <input
+                value={otherSpecialRequest}
+                onChange={(e) => setOtherSpecialRequest(e.target.value)}
+                placeholder="Other — type a request not listed above"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  const text = otherSpecialRequest.trim();
+                  if (!text) return;
+                  setSpecialRequests((prev) => (prev.trim() ? `${prev.trim()}, ${text}` : text));
+                  setOtherSpecialRequest('');
+                }}
+              />
+            </div>
+            <div style={{ alignSelf: 'flex-end' }}>
+              <button
+                type="button"
+                className="secondary small"
+                disabled={!otherSpecialRequest.trim()}
+                onClick={() => {
+                  const text = otherSpecialRequest.trim();
+                  if (!text) return;
+                  setSpecialRequests((prev) => (prev.trim() ? `${prev.trim()}, ${text}` : text));
+                  setOtherSpecialRequest('');
+                }}
+              >
+                + Add
+              </button>
+            </div>
+          </div>
+
+          {/* Company/banking live on the guest's own profile (Guests.jsx) —
+              editable here too so the desk doesn't have to leave the wizard
+              to set them up before Step 3's guest pick. */}
+          <h3 style={{ marginTop: 18 }}>Company details</h3>
+          <div className="row">
+            <div>
+              <label>Company name</label>
+              <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+            </div>
+            <div>
+              <label>Employee name</label>
+              <input value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} />
+            </div>
+          </div>
+
+          <h3 style={{ marginTop: 18 }}>Banking details</h3>
+          {pickedGuest && guestBankAccounts.length > 0 && (
+            <table style={{ marginBottom: 12 }}>
+              <thead>
+                <tr>
+                  <th>Bank</th>
+                  <th>Account</th>
+                  <th>Last 4</th>
+                  <th>Network</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {guestBankAccounts.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.bankName}</td>
+                    <td>{a.accountName}</td>
+                    <td>{a.accountNumberLast4}</td>
+                    <td>{a.transferNetwork || '—'}</td>
+                    <td className="t-c">{a.isDefault ? 'Default' : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="row">
+            <div>
+              <label>Bank</label>
+              <select
+                value={newBankAccount.bankName}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, bankName: e.target.value })}
+              >
+                <option value="">Select...</option>
+                {BANK_NAMES.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Account holder</label>
+              <input
+                value={newBankAccount.accountName}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, accountName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Last 4 digits</label>
+              <input
+                value={newBankAccount.accountNumberLast4}
+                maxLength={4}
+                onChange={(e) =>
+                  setNewBankAccount({ ...newBankAccount, accountNumberLast4: e.target.value.replace(/\D/g, '') })
+                }
+              />
+            </div>
+            <div>
+              <label>Network</label>
+              <select
+                value={newBankAccount.transferNetwork}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, transferNetwork: e.target.value })}
+              >
+                <option value="">Select...</option>
+                {TRANSFER_NETWORKS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {pickedGuest && (
+              <div style={{ alignSelf: 'flex-end' }}>
+                <button type="button" className="secondary small" disabled={savingBankAccount} onClick={addGuestBankAccount}>
+                  + Add account
+                </button>
+              </div>
+            )}
+          </div>
+          {!pickedGuest && (
+            <p className="hint">
+              Saved automatically for this guest once the reservation is created below.
+            </p>
+          )}
         </div>
       )}
 
@@ -699,6 +911,27 @@ export default function NewReservation() {
       {step === 3 && (
         <div className="panel">
           <h3>Guest information</h3>
+          <div className="row" style={{ marginBottom: 16 }}>
+            <div>
+              <label>Adults</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={adults}
+                onChange={(e) => setAdults(e.target.value)}
+              />
+            </div>
+            <div>
+              <label>Children</label>
+              <input
+                type="number"
+                min="0"
+                value={children}
+                onChange={(e) => setChildren(e.target.value)}
+              />
+            </div>
+          </div>
           {pickedGuest ? (
             <div
               style={{
@@ -721,7 +954,43 @@ export default function NewReservation() {
                 Change
               </button>
             </div>
-          ) : (
+          ) : null}
+          {pickedGuest && (
+            <div style={{ marginBottom: 16 }}>
+              {/* Editable right here, not just a preview — each toggle PUTs
+                  straight to the guest's own profile (see
+                  toggleGuestAddonPref), the same GuestPreference row
+                  Guests.jsx edits. Checking one during a booking saves it for
+                  every future stay too, not just this reservation. */}
+              <label>Add-on preferences</label>
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                {addonCatalog.map((o) => (
+                  <label
+                    key={o.code}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      width: 'auto',
+                      textTransform: 'none',
+                      fontWeight: 400,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto' }}
+                      checked={Boolean(guestAddonPrefs[o.code])}
+                      disabled={savingAddonPref === o.code}
+                      onChange={(e) => toggleGuestAddonPref(o.code, e.target.checked)}
+                    />
+                    {o.label}
+                    {o.priceCents > 0 && <span className="muted"> ({formatPeso(o.priceCents)})</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {!pickedGuest && (
             <>
               <label>Search existing guest</label>
               {/* Was an always-open results box pushed below the field; now the
@@ -819,117 +1088,39 @@ export default function NewReservation() {
         </div>
       )}
 
-      {/* Step 4 — Add-ons */}
+      {/* Step 4 — Payment */}
       {step === 4 && (
         <div className="panel">
-          <h3>Add-ons</h3>
-          {addOns.length === 0 && (
-            <div className="muted" style={{ padding: 12 }}>
-              No add-ons yet. Add a special request below, or skip to the next step to take payment.
-            </div>
-          )}
-          {addOns.map((a, i) => {
-            const totalCents = Math.round(a.costCents * (1 + feePercent / 100));
-            return (
-              <div key={i} className="row" style={{ alignItems: 'center' }}>
-                <div style={{ flex: 1 }}>{a.description}</div>
-                <div>{formatPeso(a.costCents)}</div>
-                <div className="muted">+{feePercent}% fee</div>
-                <div>{formatPeso(totalCents)}</div>
-                <button className="secondary" onClick={() => removeAddOn(i)}>
-                  Remove
-                </button>
-              </div>
-            );
-          })}
-          <div className="row" style={{ marginTop: 12 }}>
-            <div>
-              <label>Special request</label>
-              <select
-                value={addOnPreset}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setAddOnPreset(val);
-                  setAddOnDesc(val === 'OTHER' ? '' : val);
-                }}
-              >
-                <option value="">Choose a built-in request…</option>
-                {BUILT_IN_ADDON_REQUESTS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-                <option value="OTHER">Other — type your own…</option>
-              </select>
-            </div>
-            <div>
-              <label>Cost (₱)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={addOnCostPesos}
-                onChange={(e) => setAddOnCostPesos(e.target.value)}
-              />
-            </div>
-            <div className="row-action">
-              <button onClick={addAddOn} disabled={!addOnDesc.trim() || !addOnCostEntered()}>
-                Add
-              </button>
-            </div>
-          </div>
-          {/* Kept OUT of the row above on purpose: it used to live inside the
-              "Special request" cell, and that cell growing to fit a second
-              input stretched the whole row — Cost's input floated near the
-              top of a now-much-taller cell while Add sank to the bottom,
-              visibly disconnected from both. A full-width row of its own
-              can't distort anything beside it. */}
-          {addOnPreset === 'OTHER' && (
-            <div className="row" style={{ marginTop: -4 }}>
-              <div style={{ flex: 1 }}>
-                <label>Custom request</label>
-                <input
-                  value={addOnDesc}
-                  placeholder="e.g. specific brand of cake"
-                  onChange={(e) => setAddOnDesc(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-          {addOns.length > 0 && (
-            <div className="row" style={{ marginTop: 8, fontWeight: 600 }}>
-              <div style={{ flex: 1 }}>Add-ons total</div>
-              <div>{formatPeso(addOnsTotalCents)}</div>
-            </div>
-          )}
-          {isAdmin && (
-            <div
-              className="row"
-              style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}
-            >
-              <div className="muted">Current add-on fee: {feePercent}%</div>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="100"
-                style={{ width: 100 }}
-                placeholder={String(feePercent)}
-                value={feeEditPesos}
-                onChange={(e) => setFeeEditPesos(e.target.value)}
-              />
-              <button className="secondary" disabled={feeEditPesos === ''} onClick={saveFeePercent}>
-                Save fee %
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Step 5 — Payment */}
-      {step === 5 && (
-        <div className="panel">
           <h3>Payment</h3>
+
+          <h3 style={{ marginTop: 0 }}>Total breakdown</h3>
+          <table style={{ marginBottom: 18 }}>
+            <tbody>
+              <tr>
+                <td>Room charges ({nights} night{nights === 1 ? '' : 's'})</td>
+                <td className="t-n">{formatPeso(totals.subtotalCents)}</td>
+              </tr>
+              {checkedAddOns.map((o) => (
+                <tr key={o.code}>
+                  <td>{o.label}</td>
+                  <td className="t-n">{formatPeso(o.priceCents)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td>Taxes &amp; fees</td>
+                <td className="t-n">{formatPeso(totals.taxCents)}</td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Grand total</strong>
+                </td>
+                <td className="t-n">
+                  <strong>{formatPeso(totals.grandTotalCents)}</strong>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
           <div className="row">
             <div>
               <label>Suggested deposit</label>
@@ -1040,6 +1231,26 @@ export default function NewReservation() {
               server-side in lib/missingDepositField.js). */}
           {paymentMethod === 'BANK_TRANSFER' && (
             <>
+              {guestBankAccounts.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <label>Use a saved bank account</label>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const account = guestBankAccounts.find((a) => a.id === e.target.value);
+                      if (account) applySavedBankAccount(account);
+                    }}
+                  >
+                    <option value="">Type new details below…</option>
+                    {guestBankAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.bankName} •••• {a.accountNumberLast4} — {a.accountName}
+                        {a.isDefault ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="row" style={{ marginTop: 10 }}>
                 <div>
                   <label>Bank name</label>
@@ -1128,6 +1339,12 @@ export default function NewReservation() {
             <div className="label">Subtotal</div>
             <div className="value">{formatPeso(totals.subtotalCents)}</div>
           </div>
+          {totals.addOnsCents > 0 && (
+            <div className="wizard-total">
+              <div className="label">Add-ons</div>
+              <div className="value">{formatPeso(totals.addOnsCents)}</div>
+            </div>
+          )}
           <div className="wizard-total">
             <div className="label">Taxes</div>
             <div className="value">{formatPeso(totals.taxCents)}</div>

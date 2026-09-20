@@ -11,10 +11,12 @@ const { reservationListWhere, BadWindowError } = require('../lib/listQuery');
 const {
   pickAssignableRoom,
   freeRoomIds,
+  isRoomFree,
   normaliseRoomId,
   MAX_ASSIGN_ATTEMPTS,
 } = require('../lib/roomAssignment');
 const { makeFolioClient } = require('../lib/folioClient');
+const { makeStayClient } = require('../lib/stayClient');
 const { stampWindow, DEFAULT_SERVICE_TIMES } = require('../lib/stayWindow');
 const { send: sendMail, TEMPLATES } = require('../lib/notifier');
 const storage = require('../lib/storage');
@@ -33,6 +35,11 @@ const inventory = makeInventoryClient({ name: 'reservation', secret: JWT_SECRET 
 // booking's stored window so the no-double-booking range means what it says.
 // See lib/stayWindow.js.
 const folio = makeFolioClient({ name: 'reservation' });
+
+// A Stay lives in a different database, so "is this guest already checked
+// in?" isn't a question this service's own tables can answer — see
+// guestBookingConflict below.
+const stayClient = makeStayClient({ name: 'reservation' });
 
 // Cached for a minute. These change about once in the life of a property, and a
 // booking must not wait on a settings round trip — nor make one per attempt in
@@ -86,6 +93,47 @@ async function validatePromo(code) {
   } catch {
     return null;
   }
+}
+
+// A guest should not end up double-booked: already holding an overlapping
+// active reservation, or already standing in a room somewhere right now.
+// Returns a human-readable reason to refuse the booking, or null to allow it.
+//
+// The in-house check fails OPEN on a stay-service outage — refusing every
+// booking in the hotel because a read to another service timed out is a worse
+// failure than occasionally missing this one guard, which day-to-day desk
+// process (and the room-level occupancy check in isRoomFree) still backs up.
+async function guestBookingConflict({ guestId, checkIn, checkOut }) {
+  if (!guestId) return null;
+
+  const overlapping = await prisma.reservation.findFirst({
+    where: {
+      guestId,
+      status: { in: ['CONFIRMED', 'PENDING'] },
+      checkIn: { lt: checkOut },
+      checkOut: { gt: checkIn },
+    },
+  });
+  if (overlapping) {
+    return (
+      `This guest already has an overlapping reservation ` +
+      `(${overlapping.confirmationNumber || overlapping.id.slice(0, 8)}).`
+    );
+  }
+
+  let inHouse;
+  try {
+    inHouse = await stayClient.inHouseStaysForGuest(guestId);
+  } catch (err) {
+    console.error('[Reservation] Could not check in-house status for guest:', err.message);
+    return null;
+  }
+  const conflict = (inHouse || []).some((s) => {
+    const start = new Date(s.actualCheckInAt || s.expectedCheckIn || 0);
+    const end = s.expectedCheckOut ? new Date(s.expectedCheckOut) : null;
+    return start < checkOut && (!end || end > checkIn);
+  });
+  return conflict ? 'This guest is currently checked in and occupying a room for these dates.' : null;
 }
 
 async function depositFeeCentsFor(paymentType, depositCents) {
@@ -318,6 +366,24 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
     // IS NOT NULL guard and made unassigned bookings collide with each other.
     const requestedRoomId = normaliseRoomId(assignedRoomId);
 
+    // A room the STAFF picked (as opposed to auto-assign, which only ever
+    // proposes from this same free set) used to go straight into the
+    // reservation with no server-side check at all — the exclusion constraint
+    // below only catches a room another RESERVATION already holds, and has no
+    // idea a walk-in with no reservation row is standing in it right now. This
+    // is the actual bug behind "auto-assign still hands out an occupied room":
+    // it wasn't auto-assign, it was the explicit-pick path skipping validation
+    // entirely, most reachable through the wizard's per-pick dropdown while its
+    // own availability fetch was still in flight.
+    if (requestedRoomId && !(await isRoomFree({ inventory, prisma, roomTypeCode, checkIn: ci, checkOut: co, roomId: requestedRoomId }))) {
+      return res.status(409).json({ error: 'That room is no longer available for the selected dates.' });
+    }
+
+    // A guest shouldn't come away from this with two overlapping bookings, or
+    // a new reservation stacked on top of a stay they're already checked into.
+    const guestConflict = await guestBookingConflict({ guestId, checkIn: ci, checkOut: co });
+    if (guestConflict) return res.status(409).json({ error: guestConflict });
+
     // Authoritative pricing — never trust a client-supplied fee/total. The fee
     // percentage is read fresh here and frozen onto each add-on so a later
     // change to it never rewrites an already-booked guest's total.
@@ -535,35 +601,49 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
 // `from`/`to` describe a window of NIGHTS and select every booking that
 // overlaps it — see lib/listQuery.js for why a checkIn-only range was the wrong
 // question and made long stays vanish from the calendar.
-router.get('/reservations', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
-  try {
-    let where;
+//
+// HOUSEKEEPING_MAINTENANCE, on top of the usual DESK_AUDIT set, so the 14-day
+// outlook on that role's own dashboard (HousekeepingDashboard.jsx) can show
+// real occupancy instead of every future night reading as fully available.
+// navSections.json's "housekeeping" catalogue entry already listed
+// /api/reservations among this role's allowed prefixes — this guard just
+// catches up to that; it was documented but never actually enforced. Scoped
+// to this one LIST route on purpose: /reservations/:id and its cards/
+// documents/notes/activity siblings stay DESK_AUDIT-only, since those carry
+// more than an occupancy count needs.
+router.get(
+  '/reservations',
+  requireRole(...ROLE_GROUPS.DESK_AUDIT, 'HOUSEKEEPING_MAINTENANCE'),
+  async (req, res) => {
     try {
-      where = reservationListWhere(req.query);
+      let where;
+      try {
+        where = reservationListWhere(req.query);
+      } catch (err) {
+        if (err instanceof BadWindowError) return res.status(400).json({ error: err.message });
+        throw err;
+      }
+      const list = await prisma.reservation.findMany({
+        where,
+        orderBy: { checkIn: 'asc' },
+        take: LIST_LIMIT,
+      });
+      // Silently returning a truncated page to a calendar is how a booking goes
+      // missing without anything reporting it. The cap is generous enough that
+      // hitting it means the caller needs paging, not a bigger number.
+      if (list.length === LIST_LIMIT) {
+        console.warn(
+          `[Reservation] List hit the ${LIST_LIMIT}-row cap for ${JSON.stringify(req.query)}; ` +
+            'results are truncated and some bookings will be missing from the caller.'
+        );
+      }
+      res.json(list);
     } catch (err) {
-      if (err instanceof BadWindowError) return res.status(400).json({ error: err.message });
-      throw err;
+      console.error('[Reservation] List error:', err.message);
+      res.status(500).json({ error: 'Internal server error.' });
     }
-    const list = await prisma.reservation.findMany({
-      where,
-      orderBy: { checkIn: 'asc' },
-      take: LIST_LIMIT,
-    });
-    // Silently returning a truncated page to a calendar is how a booking goes
-    // missing without anything reporting it. The cap is generous enough that
-    // hitting it means the caller needs paging, not a bigger number.
-    if (list.length === LIST_LIMIT) {
-      console.warn(
-        `[Reservation] List hit the ${LIST_LIMIT}-row cap for ${JSON.stringify(req.query)}; ` +
-          'results are truncated and some bookings will be missing from the caller.'
-      );
-    }
-    res.json(list);
-  } catch (err) {
-    console.error('[Reservation] List error:', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
   }
-});
+);
 
 // GET /api/reservations/:id
 router.get('/reservations/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
@@ -672,7 +752,30 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
     if (ratePlanId !== undefined) data.ratePlanId = ratePlanId;
     // Same '' → null normalisation as the create path: an empty string is a
     // phantom room that the double-booking constraint treats as real.
-    if (assignedRoomId !== undefined) data.assignedRoomId = normaliseRoomId(assignedRoomId);
+    if (assignedRoomId !== undefined) {
+      const newRoomId = normaliseRoomId(assignedRoomId);
+      // Only a REAL reassignment needs checking — re-saving the same room (or
+      // clearing it) can't newly collide with anything. Same gap as the create
+      // path: this used to write straight through with no server-side check,
+      // so moving a reservation onto a room a walk-in is currently occupying
+      // (no reservation row to trip the exclusion constraint) went through
+      // silently.
+      if (newRoomId && newRoomId !== before.assignedRoomId) {
+        const free = await isRoomFree({
+          inventory,
+          prisma,
+          roomTypeCode: before.roomTypeCode,
+          checkIn: data.checkIn || before.checkIn,
+          checkOut: data.checkOut || before.checkOut,
+          excludeReservationId: before.id,
+          roomId: newRoomId,
+        });
+        if (!free) {
+          return res.status(409).json({ error: 'That room is no longer available for the selected dates.' });
+        }
+      }
+      data.assignedRoomId = newRoomId;
+    }
     if (expectedArrivalTime !== undefined) data.expectedArrivalTime = expectedArrivalTime;
     if (paymentType !== undefined) data.paymentType = paymentType;
     if (depositCents !== undefined) data.depositCents = BigInt(depositCents);

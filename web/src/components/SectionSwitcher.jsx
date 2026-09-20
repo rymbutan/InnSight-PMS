@@ -30,9 +30,13 @@ export default function SectionSwitcher({ options }) {
   );
 }
 
-// The Reports ⇄ Revenue pair, declared once so the two pages cannot drift apart
-// on labels, icons or role gating. Roles mirror the route guards in App.jsx.
+// The Reports ⇄ Revenue ⇄ Night Audit trio, declared once so the sibling pages
+// cannot drift apart on labels, icons or role gating. Roles mirror the route
+// guards in App.jsx. Night Audit joined this switcher rather than keeping its
+// own rail entry — same move Revenue made first — because "close out today"
+// is a sibling view of the property's numbers, not a separate destination.
 export const REPORTS_SECTIONS = [
   { to: '/reports', label: 'Reports', icon: 'bar-chart', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
   { to: '/revenue', label: 'Revenue', icon: 'coins', roles: ['ADMIN', 'MANAGER'] },
+  { to: '/audit', label: 'Night Audit', icon: 'sunrise', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
 ];

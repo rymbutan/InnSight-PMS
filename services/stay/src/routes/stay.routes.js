@@ -125,6 +125,43 @@ async function validateRoomAssignment(assignedRoomId, excludeStayId) {
   return { ok: true, room };
 }
 
+/**
+ * The first habitable, unoccupied room for a walk-in with no room preference
+ * — "Auto-assign" in WalkIn.jsx. A walk-in has no room-type step the way a
+ * reservation does, so unlike roomAssignment.js's pickAssignableRoom (scoped
+ * to one type, checked against the RESERVATION table) this scans every room
+ * and checks against THIS service's own Stay table, which is the only place
+ * "occupied by a walk-in" is recorded at all.
+ *
+ * Best-effort by the same design as reservation-service's version: a picked
+ * room is re-validated by validateRoomAssignment right after, so a race
+ * against a concurrent check-in still fails safely rather than double-booking
+ * the room — this just narrows the field the caller has to try.
+ *
+ * @returns {Promise<object|null>} the room, or null if none are free
+ */
+async function pickWalkInRoom() {
+  let rooms;
+  try {
+    rooms = await inventory.listRooms();
+  } catch (err) {
+    console.error('[Stay] Could not list rooms for walk-in auto-assign:', err.message);
+    return null;
+  }
+  // Same order front-desk staff pick from: lowest floor, then lowest number.
+  const habitable = (rooms || [])
+    .filter((r) => HABITABLE_ROOM_STATUSES.includes(r.status))
+    .sort((a, b) => a.floor - b.floor || String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
+  if (!habitable.length) return null;
+
+  const occupied = await prisma.stay.findMany({
+    where: { assignedRoomId: { in: habitable.map((r) => r.id) }, status: 'IN_HOUSE' },
+    select: { assignedRoomId: true },
+  });
+  const occupiedIds = new Set(occupied.map((o) => o.assignedRoomId));
+  return habitable.find((r) => !occupiedIds.has(r.id)) || null;
+}
+
 // Arrivals/departures are LOCAL business days. Delegated to the shared helper so
 // this service and the audit service agree on where a day starts — they used to
 // build day keys with different conventions and sat 8 hours out of phase.
@@ -525,29 +562,170 @@ router.post('/check-out/:stayId', requireRole(...STAFF), async (req, res) => {
   }
 });
 
+// Mirrors services/reservation/src/lib/missingDepositField.js exactly, so a
+// walk-in deposit the wizard lets through is never silently missing the one
+// field its payment method actually needs.
+function missingWalkInDepositField(method, detail) {
+  if (method === 'CARD') {
+    if (!/^\d{4}$/.test(detail.cardMasked || '')) return 'Enter the last 4 digits of the card.';
+    if (!(detail.cardholderName || '').trim()) return 'Cardholder name is required.';
+  }
+  if (method === 'BANK_TRANSFER') {
+    if (!(detail.bankName || '').trim()) return 'Enter the bank name.';
+    if (!(detail.senderName || '').trim()) return "Sender/account holder's name is required.";
+  }
+  return null;
+}
+
+// Mirrors services/reservation/src/lib/addOns.js's shape ({description,
+// costCents} -> the same plus a frozen totalCents) minus the admin fee
+// percentage — a walk-in has no equivalent "addon_fee_percent" setting to
+// read, since that lives on reservation-service's AppSetting table and isn't
+// worth a cross-service call for. Priced at face value instead.
+function computeWalkInAddOns(rawAddOns) {
+  if (!Array.isArray(rawAddOns)) return [];
+  return rawAddOns
+    .filter((a) => a && typeof a.description === 'string' && a.description.trim())
+    .map((a) => {
+      const costCents = Math.max(0, Math.round(Number(a.costCents) || 0));
+      return { description: a.description.trim(), costCents, totalCents: costCents };
+    });
+}
+
 // POST /api/walk-in
 router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
   try {
-    const { guestName, guestId, assignedRoomId, expectedCheckOut, depositAmount } = req.body;
+    const {
+      guestName,
+      guestId,
+      assignedRoomId,
+      expectedCheckOut,
+      depositAmount,
+      adults,
+      children,
+      nightlyRateCents: requestedRateCents,
+      specialRequests,
+      addOns: rawAddOns,
+      paymentType,
+      cardMasked,
+      cardholderName,
+      bankName,
+      transferNetwork,
+      senderName,
+      gatewayRef,
+      reference,
+      transferredAt,
+    } = req.body;
     if (!guestName) return res.status(400).json({ error: 'guestName is required.' });
+
+    if (paymentType) {
+      const missingDeposit = missingWalkInDepositField(paymentType, { cardMasked, cardholderName, bankName, senderName });
+      if (missingDeposit) return res.status(400).json({ error: missingDeposit });
+    }
+
+    // Mandatory Downpayment Constraint, walk-in's side of it. A reservation
+    // cannot reach CONFIRMED without one (see reservation.routes.js's own
+    // POST /reservations and POST /reservations/:id/confirm) and therefore
+    // cannot reach check-in without one either — but a walk-in has no
+    // reservation and no confirm step to gate, so nothing stopped a stay
+    // being opened with zero collected. depositAmount is pesos-as-cents from
+    // the client, same as everywhere else in this file.
+    if (!(Number(depositAmount) > 0)) {
+      return res.status(400).json({ error: 'A deposit is required before a walk-in guest can check in.' });
+    }
+
+    // A guest already occupying a room shouldn't be walked into a second one —
+    // this is local to this service's own table, unlike the reservation-side
+    // duplicate check (which has to ask this service, since a Stay is the only
+    // record of who is actually in-house).
+    if (guestId) {
+      const already = await prisma.stay.findFirst({ where: { guestId, status: 'IN_HOUSE' } });
+      if (already) {
+        return res.status(409).json({
+          error: `This guest is already checked in, in room ${already.assignedRoomId || 'unassigned'}.`,
+        });
+      }
+    }
+
+    // No room chosen means "Auto-assign" (WalkIn.jsx's default) rather than a
+    // missing field — pick the first habitable, unoccupied room ourselves
+    // instead of making the desk scan the list for one.
+    let effectiveRoomId = assignedRoomId;
+    if (!effectiveRoomId) {
+      const picked = await pickWalkInRoom();
+      if (!picked) return res.status(409).json({ error: 'No clean, vacant rooms are available right now.' });
+      effectiveRoomId = picked.id;
+    }
 
     // This route used to be a bare create() that trusted the client's roomId
     // entirely — WalkIn.jsx computed availability in the browser and the server
     // verified nothing. Two clerks with lists fetched seconds apart would both
-    // be offered the same room and both succeed.
-    const roomCheck = await validateRoomAssignment(assignedRoomId);
+    // be offered the same room and both succeed. Re-checked here even for an
+    // auto-assigned pick, since a concurrent check-in could have taken it in
+    // between pickWalkInRoom's read and this write.
+    const roomCheck = await validateRoomAssignment(effectiveRoomId);
     if (!roomCheck.ok) return res.status(roomCheck.status).json({ error: roomCheck.error });
+
+    // A walk-in has no Reservation to price it from, which is exactly what left
+    // its folio uncharged for the room (see the folio subscriber's room:checkin
+    // handler): the event carried no reservationId, so the room-charge block
+    // there — gated on one — never ran. The room type's base rate is the
+    // walk-in's price of record unless the desk overrides it for a negotiated
+    // rate; either way the rate now travels with the check-in event so the
+    // folio has something to charge against.
+    //
+    // The client-sent rate is only trusted for an EXPLICIT room pick. For
+    // Auto-assign, WalkIn.jsx previews a rate from whichever room it GUESSES
+    // will be picked (the first one in its own stale list) before it knows
+    // which room this request will actually land on — trusting that guess
+    // here would charge the wrong room type's rate whenever the real pick
+    // (fresh, made just above) differs from the guess. The room this route
+    // just assigned is always the authority in that case.
+    const baseRateCents = roomCheck.room?.roomType?.baseRate;
+    const nightlyRateCents =
+      assignedRoomId && Number(requestedRateCents) > 0
+        ? Math.round(Number(requestedRateCents))
+        : Number(baseRateCents) || 0;
+    const checkInAt = new Date();
+    const checkOutAt = expectedCheckOut ? new Date(expectedCheckOut) : null;
+    const nights =
+      checkOutAt && !Number.isNaN(checkOutAt.getTime())
+        ? Math.max(1, Math.round((checkOutAt - checkInAt) / 86400000))
+        : 1;
+
+    const enrichedAddOns = computeWalkInAddOns(rawAddOns);
 
     const stay = await prisma.stay.create({
       data: {
         guestName,
         guestId,
-        assignedRoomId,
+        assignedRoomId: effectiveRoomId,
         status: 'IN_HOUSE',
-        actualCheckInAt: new Date(),
-        expectedCheckOut: expectedCheckOut ? new Date(expectedCheckOut) : null,
+        actualCheckInAt: checkInAt,
+        expectedCheckOut: checkOutAt,
         depositAmount: depositAmount || 0,
         keyCardsIssued: 1,
+        nightlyRateCents,
+        adults: Number(adults) > 0 ? Math.round(Number(adults)) : 1,
+        children: Number(children) >= 0 ? Math.round(Number(children)) : 0,
+        specialRequests: specialRequests || undefined,
+        addOns: enrichedAddOns,
+        paymentType: paymentType || undefined,
+        // Only the sub-fields relevant to the chosen method are ever
+        // persisted — same discipline as Folio's own payment route and
+        // reservation.routes.js's POST /reservations.
+        depositCardMasked: paymentType === 'CARD' ? cardMasked : undefined,
+        depositCardholderName: paymentType === 'CARD' ? cardholderName : undefined,
+        depositBankName: paymentType === 'BANK_TRANSFER' ? bankName : undefined,
+        depositTransferNetwork: paymentType === 'BANK_TRANSFER' ? transferNetwork : undefined,
+        depositSenderName: paymentType === 'BANK_TRANSFER' ? senderName : undefined,
+        // NewReservation.jsx's wizard sends this as `gatewayRef` for both
+        // CARD and BANK_TRANSFER; `reference` is accepted too, same as
+        // reservation.routes.js's own POST /reservations.
+        depositGatewayRef:
+          paymentType === 'CARD' || paymentType === 'BANK_TRANSFER' ? gatewayRef || reference || undefined : undefined,
+        depositTransferredAt:
+          paymentType === 'BANK_TRANSFER' ? new Date(transferredAt || Date.now()) : undefined,
       },
     });
 
@@ -556,11 +734,14 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
       JSON.stringify({
         event: 'guest.checked_in',
         stayId: stay.id,
-        roomId: assignedRoomId,
+        roomId: effectiveRoomId,
         guestName,
         guestId,
         walkIn: true,
         depositAmount: stay.depositAmount,
+        nightlyRateCents,
+        nights,
+        addOns: enrichedAddOns,
       })
     );
 

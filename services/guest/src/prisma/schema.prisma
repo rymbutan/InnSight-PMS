@@ -21,12 +21,42 @@ model Guest {
   status        GuestStatus       @default(ACTIVE)
   mergedInto    String?
   tags          Json?
+  // Corporate-account info (Ms. Padilla, Lane A-07) — a guest billed through
+  // an employer rather than travelling as an individual. Plain fields, not a
+  // separate Company model: nothing else in this service references "the
+  // company" as an entity of its own, only these two facts about this one
+  // guest.
+  companyName   String?
+  employeeName  String?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   contacts      GuestContact[]
   preferences   GuestPreference[]
   consents      ConsentRecord[]
   loyalty       LoyaltyAccount?
+  bankAccounts  GuestBankAccount[]
+}
+
+// A guest's saved bank-transfer detail, reusable across reservations instead
+// of retyping bank/network/sender every time — the deposit step still records
+// its OWN copy on the Reservation at booking time (see
+// Reservation.depositBankName etc.), this only pre-fills it. Non-PCI-
+// compliant capstone build, same convention ReservationCard already uses for
+// cards: only what a receipt/slip already shows, masked, never a real
+// recoverable account number.
+model GuestBankAccount {
+  id                 String   @id @default(uuid())
+  guestId            String
+  bankName           String
+  accountName        String
+  accountNumberLast4 String
+  transferNetwork    String?
+  isDefault          Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  guest              Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  @@index([guestId])
 }
 
 model GuestContact {

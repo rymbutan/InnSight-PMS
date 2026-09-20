@@ -130,6 +130,10 @@ require.cache[require.resolve('../lib/inventoryClient')] = {
         if (!inventoryReachable) throw new Error('ECONNREFUSED');
         return rooms.get(id) || null;
       },
+      listRooms: async () => {
+        if (!inventoryReachable) throw new Error('ECONNREFUSED');
+        return [...rooms.values()];
+      },
       acquireHold: async () => ({ groupId: 'g1' }),
       attachHold: async () => ({}),
       releaseHold: async () => true,
@@ -184,22 +188,37 @@ function call(app, method, path, body) {
   });
 }
 
+// POST /api/walk-in now requires a deposit (Mandatory Downpayment
+// Constraint's walk-in side) — every test below is about room/guest
+// assignment, not that specific rule, so a default keeps them from all
+// having to repeat it. Tests that care about the deposit rule itself pass
+// their own depositAmount (including 0/absent, to test the rule).
+function walkIn(app, body) {
+  return call(app, 'POST', '/api/walk-in', { depositAmount: 100, ...body });
+}
+
 function reset() {
   memDb.stay.clear();
   rooms.clear();
   inventoryReachable = true;
-  rooms.set('room-101', { id: 'room-101', number: '101', status: 'CLEAN', typeCode: 'STD' });
-  rooms.set('room-102', { id: 'room-102', number: '102', status: 'CLEAN_INSPECTED', typeCode: 'STD' });
-  rooms.set('room-dirty', { id: 'room-dirty', number: '103', status: 'DIRTY', typeCode: 'STD' });
-  rooms.set('room-ooo', { id: 'room-ooo', number: '104', status: 'OUT_OF_ORDER', typeCode: 'STD' });
-  rooms.set('room-oos', { id: 'room-oos', number: '105', status: 'OUT_OF_SERVICE', typeCode: 'STD' });
+  rooms.set('room-101', {
+    id: 'room-101', number: '101', floor: 1, status: 'CLEAN', typeCode: 'STD',
+    roomType: { baseRate: 500000 },
+  });
+  rooms.set('room-102', {
+    id: 'room-102', number: '102', floor: 1, status: 'CLEAN_INSPECTED', typeCode: 'DLX',
+    roomType: { baseRate: 800000 },
+  });
+  rooms.set('room-dirty', { id: 'room-dirty', number: '103', floor: 1, status: 'DIRTY', typeCode: 'STD' });
+  rooms.set('room-ooo', { id: 'room-ooo', number: '104', floor: 1, status: 'OUT_OF_ORDER', typeCode: 'STD' });
+  rooms.set('room-oos', { id: 'room-oos', number: '105', floor: 1, status: 'OUT_OF_SERVICE', typeCode: 'STD' });
 }
 
 // ── Walk-in ─────────────────────────────────────────────────────────────────
 
 test('a walk-in into a clean, empty room succeeds', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-101',
   });
@@ -211,11 +230,11 @@ test('a walk-in into an ALREADY OCCUPIED room is refused', async () => {
   reset();
   const app = makeApp();
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
+    (await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
     201
   );
 
-  const second = await call(app, 'POST', '/api/walk-in', {
+  const second = await walkIn(app, {
     guestName: 'Ben Reyes',
     assignedRoomId: 'room-101',
   });
@@ -226,7 +245,7 @@ test('a walk-in into an ALREADY OCCUPIED room is refused', async () => {
 
 test('a walk-in into a DIRTY room is refused', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-dirty',
   });
@@ -238,18 +257,18 @@ test('a walk-in into an out-of-order or out-of-service room is refused', async (
   reset();
   const app = makeApp();
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'A', assignedRoomId: 'room-ooo' })).status,
+    (await walkIn(app, { guestName: 'A', assignedRoomId: 'room-ooo' })).status,
     409
   );
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'B', assignedRoomId: 'room-oos' })).status,
+    (await walkIn(app, { guestName: 'B', assignedRoomId: 'room-oos' })).status,
     409
   );
 });
 
 test('a walk-in into a room that does not exist is refused', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-does-not-exist',
   });
@@ -257,30 +276,173 @@ test('a walk-in into a room that does not exist is refused', async () => {
   assert.match(res.body.error, /does not exist/i);
 });
 
-test('a walk-in with no room at all is refused', async () => {
+test('a walk-in with no room chosen auto-assigns the first clean room', async () => {
   reset();
-  assert.strictEqual((await call(makeApp(), 'POST', '/api/walk-in', { guestName: 'Ana Cruz' })).status, 400);
+  const res = await walkIn(makeApp(), { guestName: 'Ana Cruz' });
+  assert.strictEqual(res.status, 201);
+  // Lowest floor, then lowest number — same order the picker's own dropdown
+  // lists, so what got assigned is the room a human would have picked first.
+  assert.strictEqual(res.body.assignedRoomId, 'room-101');
+});
+
+test('auto-assign skips a room another walk-in already occupies', async () => {
+  reset();
+  const app = makeApp();
+  assert.strictEqual(
+    (await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
+    201
+  );
+  const second = await walkIn(app, { guestName: 'Ben Reyes' });
+  assert.strictEqual(second.status, 201);
+  assert.strictEqual(second.body.assignedRoomId, 'room-102');
+});
+
+// Reservations & Walk-Ins item 8/6 overlap: WalkIn.jsx previews a rate from
+// whichever room its own (possibly stale) list guesses will be picked,
+// before it knows what this request will actually assign — trusting that
+// guess would charge the wrong room type's rate whenever the real pick
+// differs. Only an EXPLICIT room pick may set the rate; auto-assign always
+// prices from the room it actually assigns.
+test('auto-assign ignores a client-guessed rate and prices the room it actually assigns', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    depositAmount: 100,
+    // Guessing room-102's (DLX) rate while no room was actually chosen.
+    nightlyRateCents: 800000,
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.assignedRoomId, 'room-101', 'auto-assign still picks the first free room');
+  assert.strictEqual(res.body.nightlyRateCents, 500000, "room-101's own (STD) rate, not the guessed DLX one");
+});
+
+test('an explicit room pick still honours a staff-entered negotiated rate', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    depositAmount: 100,
+    nightlyRateCents: 450000,
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.nightlyRateCents, 450000);
+});
+
+test('auto-assign is refused when nothing is clean and vacant', async () => {
+  reset();
+  rooms.delete('room-101');
+  rooms.delete('room-102');
+  const res = await walkIn(makeApp(), { guestName: 'Ana Cruz' });
+  assert.strictEqual(res.status, 409);
+  assert.match(res.body.error, /no clean, vacant rooms/i);
 });
 
 test('a walk-in with no guest name is refused', async () => {
   reset();
   assert.strictEqual(
-    (await call(makeApp(), 'POST', '/api/walk-in', { assignedRoomId: 'room-101' })).status,
+    (await walkIn(makeApp(), { assignedRoomId: 'room-101' })).status,
     400
   );
+});
+
+test('a walk-in with no deposit is refused', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /deposit is required/i);
+  assert.strictEqual(memDb.stay.size, 0);
+});
+
+test('a walk-in with a zero deposit is refused', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    depositAmount: 0,
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /deposit is required/i);
+});
+
+// ── Special requests, add-ons, and per-method deposit detail ────────────────
+//
+// A walk-in has no backing Reservation, so it used to have nowhere to carry
+// the same detail NewReservation.jsx's wizard already collects for a reserved
+// booking. These mirror Reservation's own persisted fields.
+
+test('special requests and add-ons are persisted, add-ons priced at face value', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    specialRequests: 'High floor room, Extra pillows',
+    addOns: [
+      { description: 'Airport transfer', costCents: 80000 },
+      { description: '', costCents: 5000 }, // blank description dropped, same as reservation-service
+    ],
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.specialRequests, 'High floor room, Extra pillows');
+  assert.deepStrictEqual(res.body.addOns, [
+    { description: 'Airport transfer', costCents: 80000, totalCents: 80000 },
+  ]);
+});
+
+test('a CARD deposit missing the card detail is refused', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    paymentType: 'CARD',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /card/i);
+  assert.strictEqual(memDb.stay.size, 0, 'a refused deposit must not create a stay');
+});
+
+test('a BANK_TRANSFER deposit missing the sender name is refused', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    paymentType: 'BANK_TRANSFER',
+    bankName: 'BDO',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /sender/i);
+});
+
+test('a complete CARD deposit is accepted and its detail persisted', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    paymentType: 'CARD',
+    cardMasked: '4242',
+    cardholderName: 'Ana Cruz',
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.paymentType, 'CARD');
+  assert.strictEqual(res.body.depositCardMasked, '4242');
+  assert.strictEqual(res.body.depositCardholderName, 'Ana Cruz');
+  // Bank fields belong to a different method and must not leak in.
+  assert.strictEqual(res.body.depositBankName, undefined);
 });
 
 test('a room freed by checkout can be reused', async () => {
   reset();
   const app = makeApp();
-  const first = await call(app, 'POST', '/api/walk-in', {
+  const first = await walkIn(app, {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-101',
   });
 
   memDb.stay.get(first.body.id).status = 'DEPARTED';
 
-  const second = await call(app, 'POST', '/api/walk-in', {
+  const second = await walkIn(app, {
     guestName: 'Ben Reyes',
     assignedRoomId: 'room-101',
   });
@@ -291,7 +453,7 @@ test('when inventory is unreachable the walk-in FAILS CLOSED', async () => {
   reset();
   inventoryReachable = false;
 
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-101',
   });
@@ -304,7 +466,7 @@ test('when inventory is unreachable the walk-in FAILS CLOSED', async () => {
 test('check-in into an occupied room is refused', async () => {
   reset();
   const app = makeApp();
-  await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
 
   const res = await call(app, 'POST', '/api/check-in', {
     reservationId: 'res-1',
@@ -361,8 +523,8 @@ test('re-checking-in the same reservation does not clash with itself', async () 
 test('moving a guest into an occupied room is refused', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
-  await call(app, 'POST', '/api/walk-in', { guestName: 'Ben Reyes', assignedRoomId: 'room-102' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  await walkIn(app, { guestName: 'Ben Reyes', assignedRoomId: 'room-102' });
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-102' });
   assert.strictEqual(res.status, 409);
@@ -376,7 +538,7 @@ test('moving a guest into an occupied room is refused', async () => {
 test('moving a guest into a clean empty room succeeds', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-102' });
   assert.strictEqual(res.status, 200);
@@ -386,7 +548,7 @@ test('moving a guest into a clean empty room succeeds', async () => {
 test('moving a guest into their own current room is allowed (no self-clash)', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-101' });
   assert.strictEqual(res.status, 200, 'a stay must not be treated as its own blocker');
@@ -395,7 +557,7 @@ test('moving a guest into their own current room is allowed (no self-clash)', as
 test('a stay that is not in-house cannot be moved', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
   memDb.stay.get(a.body.id).status = 'DEPARTED';
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-102' });

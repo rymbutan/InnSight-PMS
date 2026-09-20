@@ -122,7 +122,11 @@ export default function Layout() {
   // The desk roles. Drives both the top-bar "create" menu and the calendar
   // shortcut, which are the two top-bar controls whose every destination is
   // guarded to exactly these three.
-  const canCreate = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
+  // MANAGER dropped from this set as part of the Manager Role Logic redesign:
+  // strict oversight of existing bookings/guests/facilities, not creating new
+  // ones — every item this flag gates (reservation, walk-in, guest, facility
+  // booking) is exactly the "creation, booking" scope that redesign strips.
+  const canCreate = hasRole('ADMIN', 'FRONT_DESK');
   const { theme, toggle: toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -194,6 +198,12 @@ export default function Layout() {
   const [searchQ, setSearchQ] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  // Shown in the popover BEFORE anything is typed, so opening the box is not a
+  // dead end — the soonest arrivals are already the thing someone reaching for
+  // this box during a shift is most often after. Loaded once, quietly: a role
+  // that cannot see reservations just gets an empty default, same as a search
+  // that turns up nothing.
+  const [defaultReservations, setDefaultReservations] = useState([]);
   const createMenuRef = useRef(null);
   const acctMenuRef = useRef(null);
   const acctTriggerRef = useRef(null);
@@ -294,6 +304,17 @@ export default function Layout() {
       .then(({ data }) => applyAccent(data))
       .catch(() => {
         /* keep whatever the cached/shipped palette already painted */
+      });
+  }, []);
+
+  // Upcoming arrivals for the search popover's empty state — soonest check-in
+  // first, same ordering the calendar and arrivals list use.
+  useEffect(() => {
+    api
+      .get(`/api/reservations?checkInFrom=${new Date().toISOString()}`)
+      .then(({ data }) => setDefaultReservations((data || []).slice(0, 5)))
+      .catch(() => {
+        /* a role with no reservations access just sees an empty default */
       });
   }, []);
 
@@ -410,6 +431,20 @@ export default function Layout() {
     setUser({ ...user, hasSeenTutorial: true });
   }
 
+  // Feature/page matches are local (the catalogue is already in memory) and
+  // gated by the same `reachable` check the rail uses, so the box never
+  // suggests a page this role — or an admin's Sidebar Visibility choice —
+  // has already closed off. Computed synchronously, unlike the guest/
+  // reservation calls below, so a page match shows up before the debounce
+  // even fires.
+  function matchFeatures(v) {
+    const needle = v.trim().toLowerCase();
+    if (!needle) return [];
+    return searchableFeatures.filter(
+      (n) => n.label.toLowerCase().includes(needle) || n.group.toLowerCase().includes(needle)
+    );
+  }
+
   function onSearchChange(v) {
     setSearchQ(v);
     setSearchOpen(true);
@@ -418,6 +453,11 @@ export default function Layout() {
       setSearchResults(null);
       return;
     }
+    const pages = matchFeatures(v);
+    // Painted immediately, ahead of the debounce below — a page match is
+    // already-loaded data, so there is no reason to make it wait on the
+    // network round trip the guest/reservation lookups need.
+    setSearchResults((prev) => ({ pages, guests: prev?.guests || [], reservations: prev?.reservations || [] }));
     const seq = ++searchSeq.current;
     searchTimer.current = setTimeout(async () => {
       try {
@@ -428,6 +468,7 @@ export default function Layout() {
         // Ignore a slow response that a newer query has superseded.
         if (seq !== searchSeq.current) return;
         setSearchResults({
+          pages,
           guests: (g.data || []).slice(0, 5),
           reservations: (r.data || []).slice(0, 5),
         });
@@ -460,6 +501,20 @@ export default function Layout() {
   // this role cannot reach it.
   const messagesEntry = NAV_SECTIONS.flatMap((s) => s.items).find(
     (n) => n.key === 'messages' && n.chrome === 'topbar' && reachable(n)
+  );
+
+  // Every reachable feature, flattened for the search box — unlike `sections`
+  // above, chrome:'topbar' entries (Messages) stay in: the box is a way to
+  // FIND a feature, not a second copy of the rail, and Messages is reachable
+  // whether or not it happens to also have a rail row.
+  const searchableFeatures = NAV_SECTIONS.flatMap((s) =>
+    s.items.filter(reachable).map((n) => ({
+      key: n.key,
+      to: n.to,
+      icon: n.icon,
+      group: s.label,
+      label: n.nonAdminLabel && !hasRole('ADMIN') ? n.nonAdminLabel : n.label,
+    }))
   );
 
   const initial = (user?.displayName || '?').slice(0, 1).toUpperCase();
@@ -629,8 +684,28 @@ export default function Layout() {
             />
             {searchOpen &&
             searchResults &&
-            (searchResults.guests.length || searchResults.reservations.length) ? (
+            (searchResults.pages.length || searchResults.guests.length || searchResults.reservations.length) ? (
               <div className="cb-search-pop">
+                {searchResults.pages.length > 0 && (
+                  <>
+                    <div className="cb-search-section">Pages</div>
+                    {searchResults.pages.map((n) => (
+                      <button
+                        key={n.key}
+                        className="cb-search-item"
+                        onClick={() => {
+                          setSearchOpen(false);
+                          navigate(n.to);
+                        }}
+                      >
+                        <span>
+                          <Icon name={n.icon} size={14} strokeWidth={2} /> {n.label}
+                        </span>
+                        <span className="muted">{n.group}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
                 {searchResults.guests.length > 0 && (
                   <>
                     <div className="cb-search-section">Guests</div>
@@ -667,6 +742,25 @@ export default function Layout() {
                     ))}
                   </>
                 )}
+              </div>
+            ) : searchOpen && !searchQ.trim() && defaultReservations.length > 0 ? (
+              // Nothing typed yet — show the soonest arrivals instead of an
+              // empty box, so opening the search is not itself a dead end.
+              <div className="cb-search-pop">
+                <div className="cb-search-section">Upcoming reservations</div>
+                {defaultReservations.map((r) => (
+                  <button
+                    key={r.id}
+                    className="cb-search-item"
+                    onClick={() => {
+                      setSearchOpen(false);
+                      navigate(`/reservations/${r.id}`);
+                    }}
+                  >
+                    <span>{r.guestName || r.confirmationNumber || r.id.slice(0, 8)}</span>
+                    <span className="muted">{new Date(r.checkIn).toLocaleDateString()}</span>
+                  </button>
+                ))}
               </div>
             ) : null}
           </div>

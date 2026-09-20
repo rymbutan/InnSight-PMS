@@ -26,7 +26,7 @@ BigInt.prototype.toJSON = function () {
 
 // ── In-memory store ─────────────────────────────────────────────────────────
 
-const memDb = { folioTransaction: new Map() };
+const memDb = { folioTransaction: new Map(), folioTransactionDispute: new Map() };
 let seq = 0;
 // The object handed to prisma.folioTransaction.create for the most recent void,
 // inspected directly so the assertions below see what is stored rather than a
@@ -48,6 +48,14 @@ const mockPrisma = {
     },
   },
   payment: { updateMany: async () => ({ count: 0 }) },
+  folioTransactionDispute: {
+    upsert: async ({ where: { transactionId }, create }) => {
+      const row = { id: `d${(seq += 1)}`, transactionId, ...create };
+      memDb.folioTransactionDispute.set(transactionId, row);
+      return row;
+    },
+    findUnique: async ({ where: { transactionId } }) => memDb.folioTransactionDispute.get(transactionId) || null,
+  },
 };
 
 // ── Stubs, installed before the route module loads ──────────────────────────
@@ -126,6 +134,7 @@ const TAXED_BREAKDOWN = [
 
 function seedCharge(overrides = {}) {
   memDb.folioTransaction.clear();
+  memDb.folioTransactionDispute.clear();
   seq = 0;
   lastCreateData = null;
   const row = {
@@ -142,7 +151,7 @@ function seedCharge(overrides = {}) {
 
 test('voiding a taxed charge writes the NEGATED breakdown, not a null', async () => {
   seedCharge();
-  const res = await call('POST', '/api/folios/f1/void-transaction/orig');
+  const res = await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   assert.equal(res.status, 200);
 
   assert.ok(
@@ -158,7 +167,7 @@ test('voiding a taxed charge writes the NEGATED breakdown, not a null', async ()
 
 test('the reversed breakdown sums to the reversed taxAmountCents', async () => {
   seedCharge();
-  await call('POST', '/api/folios/f1/void-transaction/orig');
+  await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   const sum = lastCreateData.taxBreakdown.reduce((a, b) => a + BigInt(b.amountCents), 0n);
   // taxAmountCents stays the single source of truth for every total; the
   // breakdown is presentational and must never disagree with it.
@@ -169,7 +178,7 @@ test('the reversed breakdown sums to the reversed taxAmountCents', async () => {
 
 test('breakdown amounts stay decimal STRINGS, never BigInt', async () => {
   seedCharge();
-  await call('POST', '/api/folios/f1/void-transaction/orig');
+  await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   for (const entry of lastCreateData.taxBreakdown) {
     assert.equal(typeof entry.amountCents, 'string', `${entry.key} must be JSON-safe`);
   }
@@ -183,7 +192,7 @@ test('voiding a charge that has NO breakdown still writes none — nothing is in
   // would put a fabricated component figure on a guest's bill; the print model
   // handles this pair by falling both rows back to VAT, where they net to zero.
   seedCharge({ taxBreakdown: null });
-  const res = await call('POST', '/api/folios/f1/void-transaction/orig');
+  const res = await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   assert.equal(res.status, 200);
   assert.equal(lastCreateData.taxBreakdown, null);
   assert.equal(lastCreateData.taxAmountCents, -220000n);
@@ -191,28 +200,67 @@ test('voiding a charge that has NO breakdown still writes none — nothing is in
 
 test('voiding an untaxed charge is unaffected', async () => {
   seedCharge({ taxAmountCents: 0n, taxBreakdown: null });
-  await call('POST', '/api/folios/f1/void-transaction/orig');
+  await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   assert.equal(lastCreateData.taxAmountCents, 0n);
   assert.equal(lastCreateData.taxBreakdown, null);
 });
 
 test('the reversal still points at its original and keeps the existing guards', async () => {
   seedCharge();
-  const first = await call('POST', '/api/folios/f1/void-transaction/orig');
+  const first = await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   assert.equal(first.status, 200);
   assert.equal(lastCreateData.reversalOf, 'orig');
 
   // A second void is refused, and a reversal is itself un-voidable.
-  const second = await call('POST', '/api/folios/f1/void-transaction/orig');
+  const second = await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'test reason' });
   assert.equal(second.status, 409);
 
   const reversalId = [...memDb.folioTransaction.values()].find((r) => r.reversalOf === 'orig').id;
-  const third = await call('POST', `/api/folios/f1/void-transaction/${reversalId}`);
+  const third = await call('POST', `/api/folios/f1/void-transaction/${reversalId}`, { reason: 'test reason' });
   assert.equal(third.status, 400);
 });
 
 test('a cross-folio void is still refused', async () => {
   seedCharge();
-  const res = await call('POST', '/api/folios/OTHER/void-transaction/orig');
+  const res = await call('POST', '/api/folios/OTHER/void-transaction/orig', { reason: 'test reason' });
   assert.equal(res.status, 400);
+});
+
+// ── Dispute/cancel: reason + evidence (Reservations & Walk-Ins item 1) ──────
+
+test('a void with no reason is refused', async () => {
+  seedCharge();
+  const res = await call('POST', '/api/folios/f1/void-transaction/orig');
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /reason is required/i);
+  assert.equal(memDb.folioTransaction.size, 1, 'a refused void must not post a reversal');
+});
+
+test('a void with a blank reason is refused', async () => {
+  seedCharge();
+  const res = await call('POST', '/api/folios/f1/void-transaction/orig', { reason: '   ' });
+  assert.equal(res.status, 400);
+});
+
+test('the reversal is stamped with who posted it', async () => {
+  // Previously null on every void — an anonymous reversal in a ledger
+  // otherwise stamped with who posted every other line.
+  seedCharge();
+  await call('POST', '/api/folios/f1/void-transaction/orig', { reason: 'Guest disputes this charge' });
+  assert.equal(lastCreateData.postedBy, 'tester');
+});
+
+test('disputing a charge files a dispute record with the reason and reversal id', async () => {
+  seedCharge();
+  const res = await call('POST', '/api/folios/f1/void-transaction/orig', {
+    reason: 'Guest showed a screenshot proving they were never charged this at the desk.',
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dispute.reason, 'Guest showed a screenshot proving they were never charged this at the desk.');
+  assert.equal(res.body.dispute.filedBy, 'tester');
+  assert.equal(res.body.dispute.transactionId, 'orig');
+  assert.equal(res.body.dispute.reversalTransactionId, res.body.id);
+
+  const stored = memDb.folioTransactionDispute.get('orig');
+  assert.ok(stored, 'the dispute must be findable by the ORIGINAL transaction id');
 });

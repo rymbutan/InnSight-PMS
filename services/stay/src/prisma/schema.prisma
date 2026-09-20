@@ -20,8 +20,28 @@ model Stay {
   idVerification    Json?
   depositAmount     Int         @default(0)
   guestName         String?
+  // Set on walk-ins (which have no backing Reservation to source a rate/party
+  // size from) so the folio subscriber can post room charges the same way it
+  // does for a reserved stay, and so occupancy displays consistently.
+  nightlyRateCents  Int?
+  adults            Int?
+  children          Int?
   expectedCheckIn   DateTime?
   expectedCheckOut  DateTime?
+  // A walk-in has no backing Reservation, so nowhere else to record what
+  // NewReservation.jsx's wizard already collects for a reserved booking —
+  // these mirror Reservation's own fields (services/reservation/src/prisma/
+  // schema.prisma) so a walk-in can carry the same detail.
+  specialRequests        String?
+  addOns                 Json?
+  paymentType            String?
+  depositCardMasked      String?
+  depositCardholderName  String?
+  depositBankName        String?
+  depositTransferNetwork String?
+  depositSenderName      String?
+  depositGatewayRef      String?
+  depositTransferredAt   DateTime?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   tasks             CheckInTask[]
