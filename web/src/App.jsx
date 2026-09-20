@@ -69,7 +69,7 @@ export default function App() {
         <Route
           path="/reservations/new"
           element={
-            <ProtectedRoute section="reservations" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="reservations" roles={['ADMIN', 'FRONT_DESK']}>
               <NewReservation />
             </ProtectedRoute>
           }
@@ -104,7 +104,7 @@ export default function App() {
         <Route
           path="/walk-in"
           element={
-            <ProtectedRoute section="arrivals" roles={['ADMIN', 'MANAGER', 'FRONT_DESK']}>
+            <ProtectedRoute section="arrivals" roles={['ADMIN', 'FRONT_DESK']}>
               <WalkIn />
             </ProtectedRoute>
           }
@@ -201,7 +201,11 @@ export default function App() {
         <Route
           path="/audit"
           element={
-            <ProtectedRoute section="audit" roles={['ADMIN', 'AUDITOR', 'MANAGER']}>
+            // section="reports", not "audit": Night Audit no longer has its own
+            // catalogue entry (navSections.json) — it is a sibling of /reports and
+            // /revenue behind the same Sidebar Visibility toggle. See the
+            // _mergeComment on the "reports" item in navSections.json.
+            <ProtectedRoute section="reports" roles={['ADMIN', 'AUDITOR', 'MANAGER']}>
               <Audit />
             </ProtectedRoute>
           }

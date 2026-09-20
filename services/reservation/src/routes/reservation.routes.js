@@ -601,35 +601,49 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
 // `from`/`to` describe a window of NIGHTS and select every booking that
 // overlaps it — see lib/listQuery.js for why a checkIn-only range was the wrong
 // question and made long stays vanish from the calendar.
-router.get('/reservations', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
-  try {
-    let where;
+//
+// HOUSEKEEPING_MAINTENANCE, on top of the usual DESK_AUDIT set, so the 14-day
+// outlook on that role's own dashboard (HousekeepingDashboard.jsx) can show
+// real occupancy instead of every future night reading as fully available.
+// navSections.json's "housekeeping" catalogue entry already listed
+// /api/reservations among this role's allowed prefixes — this guard just
+// catches up to that; it was documented but never actually enforced. Scoped
+// to this one LIST route on purpose: /reservations/:id and its cards/
+// documents/notes/activity siblings stay DESK_AUDIT-only, since those carry
+// more than an occupancy count needs.
+router.get(
+  '/reservations',
+  requireRole(...ROLE_GROUPS.DESK_AUDIT, 'HOUSEKEEPING_MAINTENANCE'),
+  async (req, res) => {
     try {
-      where = reservationListWhere(req.query);
+      let where;
+      try {
+        where = reservationListWhere(req.query);
+      } catch (err) {
+        if (err instanceof BadWindowError) return res.status(400).json({ error: err.message });
+        throw err;
+      }
+      const list = await prisma.reservation.findMany({
+        where,
+        orderBy: { checkIn: 'asc' },
+        take: LIST_LIMIT,
+      });
+      // Silently returning a truncated page to a calendar is how a booking goes
+      // missing without anything reporting it. The cap is generous enough that
+      // hitting it means the caller needs paging, not a bigger number.
+      if (list.length === LIST_LIMIT) {
+        console.warn(
+          `[Reservation] List hit the ${LIST_LIMIT}-row cap for ${JSON.stringify(req.query)}; ` +
+            'results are truncated and some bookings will be missing from the caller.'
+        );
+      }
+      res.json(list);
     } catch (err) {
-      if (err instanceof BadWindowError) return res.status(400).json({ error: err.message });
-      throw err;
+      console.error('[Reservation] List error:', err.message);
+      res.status(500).json({ error: 'Internal server error.' });
     }
-    const list = await prisma.reservation.findMany({
-      where,
-      orderBy: { checkIn: 'asc' },
-      take: LIST_LIMIT,
-    });
-    // Silently returning a truncated page to a calendar is how a booking goes
-    // missing without anything reporting it. The cap is generous enough that
-    // hitting it means the caller needs paging, not a bigger number.
-    if (list.length === LIST_LIMIT) {
-      console.warn(
-        `[Reservation] List hit the ${LIST_LIMIT}-row cap for ${JSON.stringify(req.query)}; ` +
-          'results are truncated and some bookings will be missing from the caller.'
-      );
-    }
-    res.json(list);
-  } catch (err) {
-    console.error('[Reservation] List error:', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
   }
-});
+);
 
 // GET /api/reservations/:id
 router.get('/reservations/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, res) => {
