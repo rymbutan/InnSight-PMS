@@ -1183,10 +1183,13 @@ router.post('/housekeeping-calls', requireRole(...CALLERS), async (req, res) => 
     // who is not on that room without reassigning it first — which is a change
     // everyone can see, rather than a private choice inside one phone call.
     //
-    // Unassigned rooms still ring the whole team. Refusing to place the call
-    // would be worse: the moment somebody most needs housekeeping is not the
-    // moment to be told to fill in a dropdown first.
-    const targetUserId = room.assignedTo || null;
+    // An unassigned room has no "whose job it is" to ring, so there is no one
+    // call target — the call is refused rather than fanned out to the whole
+    // team. Assign the room first (a change everyone can see, same as above).
+    if (!room.assignedTo) {
+      return res.status(409).json({ error: 'Room is unassigned. Assign a housekeeper before calling.' });
+    }
+    const targetUserId = room.assignedTo;
     // Written down BEFORE it is published, and the row's own id is the callId.
     // The call used to exist only as a Redis message, so the moment it had been
     // delivered there was no trace of it: a housekeeper coming on shift could

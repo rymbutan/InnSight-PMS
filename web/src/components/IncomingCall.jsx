@@ -114,6 +114,12 @@ export default function IncomingCall() {
         // Never ring the person who placed it. An admin is on both audiences,
         // and without this they call themselves.
         if (data.callerId && data.callerId === user?.id) return;
+        // Belt-and-suspenders on top of the server's own per-connection
+        // targeting (services/inventory/src/index.js directedTargetOf): every
+        // call now has a targetUserId (unassigned rooms can no longer be
+        // called), so a frame that somehow reaches this screen for someone
+        // else's room must not ring here either.
+        if (data.targetUserId && data.targetUserId !== user?.id) return;
         setCall(data);
         return;
       }

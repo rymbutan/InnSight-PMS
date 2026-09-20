@@ -622,7 +622,8 @@ export default function Housekeeping() {
                     <button
                       type="button"
                       className="btn-primary hk-call-btn"
-                      disabled={calling}
+                      disabled={calling || !selected.assignedTo}
+                      title={!selected.assignedTo ? 'Assign the room to a housekeeper before calling' : undefined}
                       onClick={() => callHousekeeping(selected)}
                     >
                       <Icon name="phone" size={14} />
@@ -639,7 +640,10 @@ export default function Housekeeping() {
                   {/* Says who will actually hear it BEFORE the button is
                       pressed. The target comes from the room's assignment, so
                       without this the same button quietly means two different
-                      things depending on a field further up the panel. */}
+                      things depending on a field further up the panel. An
+                      unassigned room has no one call target any more — see
+                      POST /housekeeping-calls — so the button above is disabled
+                      rather than fanning the ring out to the whole team. */}
                   <p className="hk-call-who">
                     {selected.assignedToName ? (
                       <>
@@ -647,8 +651,7 @@ export default function Housekeeping() {
                       </>
                     ) : (
                       <>
-                        Unassigned — rings <strong>every housekeeper on shift</strong>. Assign the room above
-                        to ring one person.
+                        Unassigned — assign the room above before you can call.
                       </>
                     )}
                   </p>
