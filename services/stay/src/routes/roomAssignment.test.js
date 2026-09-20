@@ -188,6 +188,15 @@ function call(app, method, path, body) {
   });
 }
 
+// POST /api/walk-in now requires a deposit (Mandatory Downpayment
+// Constraint's walk-in side) — every test below is about room/guest
+// assignment, not that specific rule, so a default keeps them from all
+// having to repeat it. Tests that care about the deposit rule itself pass
+// their own depositAmount (including 0/absent, to test the rule).
+function walkIn(app, body) {
+  return call(app, 'POST', '/api/walk-in', { depositAmount: 100, ...body });
+}
+
 function reset() {
   memDb.stay.clear();
   rooms.clear();
@@ -203,7 +212,7 @@ function reset() {
 
 test('a walk-in into a clean, empty room succeeds', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-101',
   });
@@ -215,11 +224,11 @@ test('a walk-in into an ALREADY OCCUPIED room is refused', async () => {
   reset();
   const app = makeApp();
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
+    (await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
     201
   );
 
-  const second = await call(app, 'POST', '/api/walk-in', {
+  const second = await walkIn(app, {
     guestName: 'Ben Reyes',
     assignedRoomId: 'room-101',
   });
@@ -230,7 +239,7 @@ test('a walk-in into an ALREADY OCCUPIED room is refused', async () => {
 
 test('a walk-in into a DIRTY room is refused', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-dirty',
   });
@@ -242,18 +251,18 @@ test('a walk-in into an out-of-order or out-of-service room is refused', async (
   reset();
   const app = makeApp();
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'A', assignedRoomId: 'room-ooo' })).status,
+    (await walkIn(app, { guestName: 'A', assignedRoomId: 'room-ooo' })).status,
     409
   );
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'B', assignedRoomId: 'room-oos' })).status,
+    (await walkIn(app, { guestName: 'B', assignedRoomId: 'room-oos' })).status,
     409
   );
 });
 
 test('a walk-in into a room that does not exist is refused', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-does-not-exist',
   });
@@ -263,7 +272,7 @@ test('a walk-in into a room that does not exist is refused', async () => {
 
 test('a walk-in with no room chosen auto-assigns the first clean room', async () => {
   reset();
-  const res = await call(makeApp(), 'POST', '/api/walk-in', { guestName: 'Ana Cruz' });
+  const res = await walkIn(makeApp(), { guestName: 'Ana Cruz' });
   assert.strictEqual(res.status, 201);
   // Lowest floor, then lowest number — same order the picker's own dropdown
   // lists, so what got assigned is the room a human would have picked first.
@@ -274,10 +283,10 @@ test('auto-assign skips a room another walk-in already occupies', async () => {
   reset();
   const app = makeApp();
   assert.strictEqual(
-    (await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
+    (await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
     201
   );
-  const second = await call(app, 'POST', '/api/walk-in', { guestName: 'Ben Reyes' });
+  const second = await walkIn(app, { guestName: 'Ben Reyes' });
   assert.strictEqual(second.status, 201);
   assert.strictEqual(second.body.assignedRoomId, 'room-102');
 });
@@ -286,7 +295,7 @@ test('auto-assign is refused when nothing is clean and vacant', async () => {
   reset();
   rooms.delete('room-101');
   rooms.delete('room-102');
-  const res = await call(makeApp(), 'POST', '/api/walk-in', { guestName: 'Ana Cruz' });
+  const res = await walkIn(makeApp(), { guestName: 'Ana Cruz' });
   assert.strictEqual(res.status, 409);
   assert.match(res.body.error, /no clean, vacant rooms/i);
 });
@@ -294,22 +303,44 @@ test('auto-assign is refused when nothing is clean and vacant', async () => {
 test('a walk-in with no guest name is refused', async () => {
   reset();
   assert.strictEqual(
-    (await call(makeApp(), 'POST', '/api/walk-in', { assignedRoomId: 'room-101' })).status,
+    (await walkIn(makeApp(), { assignedRoomId: 'room-101' })).status,
     400
   );
+});
+
+test('a walk-in with no deposit is refused', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /deposit is required/i);
+  assert.strictEqual(memDb.stay.size, 0);
+});
+
+test('a walk-in with a zero deposit is refused', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    depositAmount: 0,
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /deposit is required/i);
 });
 
 test('a room freed by checkout can be reused', async () => {
   reset();
   const app = makeApp();
-  const first = await call(app, 'POST', '/api/walk-in', {
+  const first = await walkIn(app, {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-101',
   });
 
   memDb.stay.get(first.body.id).status = 'DEPARTED';
 
-  const second = await call(app, 'POST', '/api/walk-in', {
+  const second = await walkIn(app, {
     guestName: 'Ben Reyes',
     assignedRoomId: 'room-101',
   });
@@ -320,7 +351,7 @@ test('when inventory is unreachable the walk-in FAILS CLOSED', async () => {
   reset();
   inventoryReachable = false;
 
-  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+  const res = await walkIn(makeApp(), {
     guestName: 'Ana Cruz',
     assignedRoomId: 'room-101',
   });
@@ -333,7 +364,7 @@ test('when inventory is unreachable the walk-in FAILS CLOSED', async () => {
 test('check-in into an occupied room is refused', async () => {
   reset();
   const app = makeApp();
-  await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
 
   const res = await call(app, 'POST', '/api/check-in', {
     reservationId: 'res-1',
@@ -390,8 +421,8 @@ test('re-checking-in the same reservation does not clash with itself', async () 
 test('moving a guest into an occupied room is refused', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
-  await call(app, 'POST', '/api/walk-in', { guestName: 'Ben Reyes', assignedRoomId: 'room-102' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  await walkIn(app, { guestName: 'Ben Reyes', assignedRoomId: 'room-102' });
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-102' });
   assert.strictEqual(res.status, 409);
@@ -405,7 +436,7 @@ test('moving a guest into an occupied room is refused', async () => {
 test('moving a guest into a clean empty room succeeds', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-102' });
   assert.strictEqual(res.status, 200);
@@ -415,7 +446,7 @@ test('moving a guest into a clean empty room succeeds', async () => {
 test('moving a guest into their own current room is allowed (no self-clash)', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-101' });
   assert.strictEqual(res.status, 200, 'a stay must not be treated as its own blocker');
@@ -424,7 +455,7 @@ test('moving a guest into their own current room is allowed (no self-clash)', as
 test('a stay that is not in-house cannot be moved', async () => {
   reset();
   const app = makeApp();
-  const a = await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
+  const a = await walkIn(app, { guestName: 'Ana Cruz', assignedRoomId: 'room-101' });
   memDb.stay.get(a.body.id).status = 'DEPARTED';
 
   const res = await call(app, 'POST', `/api/stays/${a.body.id}/room-change`, { newRoomId: 'room-102' });

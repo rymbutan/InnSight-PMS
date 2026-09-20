@@ -577,6 +577,17 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
     } = req.body;
     if (!guestName) return res.status(400).json({ error: 'guestName is required.' });
 
+    // Mandatory Downpayment Constraint, walk-in's side of it. A reservation
+    // cannot reach CONFIRMED without one (see reservation.routes.js's own
+    // POST /reservations and POST /reservations/:id/confirm) and therefore
+    // cannot reach check-in without one either — but a walk-in has no
+    // reservation and no confirm step to gate, so nothing stopped a stay
+    // being opened with zero collected. depositAmount is pesos-as-cents from
+    // the client, same as everywhere else in this file.
+    if (!(Number(depositAmount) > 0)) {
+      return res.status(400).json({ error: 'A deposit is required before a walk-in guest can check in.' });
+    }
+
     // A guest already occupying a room shouldn't be walked into a second one —
     // this is local to this service's own table, unlike the reservation-side
     // duplicate check (which has to ask this service, since a Stay is the only
