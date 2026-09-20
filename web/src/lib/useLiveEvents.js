@@ -48,6 +48,12 @@ export const LIVE_CHANNELS = [
   'folio:transferred',
   'folio:dispute_filed',
   'folio:dispute_resolved',
+  // Night-audit sign-off approve/revoke — the server already published this,
+  // but it was never whitelisted here (or forwarded by the gateway), so
+  // Folios.jsx's own useLiveRefresh had nothing to fire on.
+  'folio:audit',
+  // A charge/payment disputed or cancelled via void-transaction.
+  'folio:transaction_voided',
   'guest:profile_created',
   'guest:profile_updated',
   'guest:flagged',
@@ -99,6 +105,13 @@ export const CHANNEL_GROUPS = {
     // resolves one, or two cashiers work from two different pictures of it.
     'folio:dispute_filed',
     'folio:dispute_resolved',
+    // Another screen watching this same folio (or the checkout guard) needs
+    // to see an approve/revoke without a manual refresh, same as any other
+    // folio event above.
+    'folio:audit',
+    // A charge/payment disputed or cancelled — the ledger changed under
+    // whoever else has this folio open.
+    'folio:transaction_voided',
   ],
   guests: ['guest:profile_created', 'guest:profile_updated', 'guest:flagged'],
   maintenance: [
