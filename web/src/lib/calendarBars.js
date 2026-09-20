@@ -51,7 +51,7 @@ export function buildBars({ reservations = [], stays = [], rooms = [], days }) {
   const winStart = dayIndexOf(days[0]);
   const winEnd = dayIndexOf(addDays(days[days.length - 1], 1));
 
-  function makeBar({ roomId, key, label, status, ci, co, balanceDue, guestId }) {
+  function makeBar({ roomId, key, label, status, ci, co, balanceDue, guestId, adults, children }) {
     const start = dayIndexOf(new Date(ci));
     const end = dayIndexOf(new Date(co));
     // A same-day arrival and departure is still one night on the board.
@@ -73,6 +73,8 @@ export function buildBars({ reservations = [], stays = [], rooms = [], days }) {
       ci,
       co,
       balanceDue,
+      adults: adults ?? null,
+      children: children ?? null,
       // True when the stay is cut off by an edge, so the bar can show that it
       // continues rather than looking like it ends there.
       continuesBefore: start < winStart,
@@ -97,6 +99,8 @@ export function buildBars({ reservations = [], stays = [], rooms = [], days }) {
       co: s.expectedCheckOut,
       balanceDue: false,
       guestId: s.guestId,
+      adults: s.adults,
+      children: s.children,
     });
     if (!bar) continue;
     if (s.assignedRoomId) place(bar);
@@ -117,6 +121,8 @@ export function buildBars({ reservations = [], stays = [], rooms = [], days }) {
       co: r.checkOut,
       balanceDue: Number(r.depositCents || 0) === 0,
       guestId: r.guestId,
+      adults: r.adults,
+      children: r.children,
     });
     if (!bar) continue;
     // An empty string is not a room id — see normaliseRoomId in the reservation

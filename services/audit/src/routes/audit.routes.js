@@ -200,7 +200,11 @@ router.post('/audit/run', requireRole(...AUDIT_ROLES), async (req, res) => {
           /* lookup failed — fall through and attempt the post */
         }
         // Look up the originating reservation to compute that stay's nightly rate.
-        let nightlyForStayCents = fallbackRateCents;
+        // A walk-in has no reservation to look up — it carries its own rate
+        // (set at check-in from the room type's base rate, see stay.routes.js's
+        // POST /api/walk-in) — so that is the fallback before the manual,
+        // applies-to-everyone rate.
+        let nightlyForStayCents = Number(s.nightlyRateCents) > 0 ? s.nightlyRateCents : fallbackRateCents;
         if (s.reservationId) {
           try {
             const r = await callService(`${RESERVATION_URL}/api/reservations/${s.reservationId}`);

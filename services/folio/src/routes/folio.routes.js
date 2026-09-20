@@ -815,7 +815,12 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
     const audit = auditApprovalOf(folio, folio.transactions);
     res.json({
       ...folio,
-      adults: reservation?.adults ?? null,
+      // A walk-in has no reservation, so its party size lives on the stay
+      // itself instead (see stay.routes.js's POST /api/walk-in) — falling
+      // back to it here is what keeps a walk-in folio's guest count from
+      // reading as unknown next to every reservation-backed one.
+      adults: reservation?.adults ?? stay?.adults ?? null,
+      children: reservation?.children ?? stay?.children ?? null,
       guestName: reservation?.guestName ?? null,
       auditApproved: audit.approved,
       auditApprovalStale: audit.stale,

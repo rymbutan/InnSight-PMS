@@ -198,6 +198,47 @@ function startSubscriber() {
                 },
               });
             }
+          } else if (data.walkIn && Number(data.nightlyRateCents) > 0) {
+            // A walk-in has no reservationId, so the branch above never runs for
+            // it — that was the whole bug: the deposit posted as a PAYMENT
+            // above, but the offsetting room CHARGE never did. The rate and
+            // night count travel on the check-in event itself (see
+            // stay.routes.js's POST /api/walk-in) since there is no reservation
+            // to fetch them from. Same per-night loop, same `AUDIT-<day>-<stayId>`
+            // reference the night audit checks before charging a stay for that
+            // day, so a walk-in that runs through the audit later is never
+            // double-charged for a night this already posted.
+            const nights = Math.max(1, Math.round(Number(data.nights) || 1));
+            const nightlyCents = Math.round(Number(data.nightlyRateCents));
+            const cc = await prisma.chargeCode.findUnique({ where: { code: ROOM_CHARGE_CODE } });
+            const rates = await getTaxRates();
+            let day = localDay(new Date());
+            for (let i = 0; i < nights; i += 1) {
+              const reference = `AUDIT-${day}-${data.stayId}`;
+              const already = await prisma.folioTransaction.findFirst({ where: { reference } });
+              if (!already) {
+                const { taxCents, breakdown } = computeTax({
+                  subtotalCents: nightlyCents,
+                  category: cc?.category || 'ROOM',
+                  rates,
+                });
+                await prisma.folioTransaction.create({
+                  data: {
+                    folioId: folio.id,
+                    type: 'CHARGE',
+                    chargeCode: ROOM_CHARGE_CODE,
+                    description: `Room charge for ${day}`,
+                    amountCents: BigInt(nightlyCents),
+                    taxAmountCents: taxCents,
+                    taxBreakdown: breakdown.map((b) => ({ ...b, amountCents: b.amountCents.toString() })),
+                    postedBy: 'system.stay-checkin',
+                    sourceSystem: 'stay',
+                    reference,
+                  },
+                });
+              }
+              day = addDaysToDayKey(day, 1);
+            }
           }
         }
       }

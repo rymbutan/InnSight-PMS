@@ -395,6 +395,12 @@ export default function PublicBooking() {
             <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'monospace', margin: '8px 0 16px' }}>
               {confirmed.confirmationNumber}
             </div>
+            <p className="muted" style={{ margin: '0 0 8px' }}>
+              {new Date(confirmed.checkIn).toLocaleDateString()} → {new Date(confirmed.checkOut).toLocaleDateString()}
+              {' · '}
+              {(confirmed.adults ?? adults) + (confirmed.children ?? children)} guest
+              {(confirmed.adults ?? adults) + (confirmed.children ?? children) === 1 ? '' : 's'}
+            </p>
             <p className="muted">
               We'll send a confirmation email to <strong>{guest.email}</strong> once our front
               desk confirms your booking.

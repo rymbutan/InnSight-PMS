@@ -528,7 +528,16 @@ router.post('/check-out/:stayId', requireRole(...STAFF), async (req, res) => {
 // POST /api/walk-in
 router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
   try {
-    const { guestName, guestId, assignedRoomId, expectedCheckOut, depositAmount } = req.body;
+    const {
+      guestName,
+      guestId,
+      assignedRoomId,
+      expectedCheckOut,
+      depositAmount,
+      adults,
+      children,
+      nightlyRateCents: requestedRateCents,
+    } = req.body;
     if (!guestName) return res.status(400).json({ error: 'guestName is required.' });
 
     // This route used to be a bare create() that trusted the client's roomId
@@ -538,16 +547,36 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
     const roomCheck = await validateRoomAssignment(assignedRoomId);
     if (!roomCheck.ok) return res.status(roomCheck.status).json({ error: roomCheck.error });
 
+    // A walk-in has no Reservation to price it from, which is exactly what left
+    // its folio uncharged for the room (see the folio subscriber's room:checkin
+    // handler): the event carried no reservationId, so the room-charge block
+    // there — gated on one — never ran. The room type's base rate is the
+    // walk-in's price of record unless the desk overrides it for a negotiated
+    // rate; either way the rate now travels with the check-in event so the
+    // folio has something to charge against.
+    const baseRateCents = roomCheck.room?.roomType?.baseRate;
+    const nightlyRateCents =
+      Number(requestedRateCents) > 0 ? Math.round(Number(requestedRateCents)) : Number(baseRateCents) || 0;
+    const checkInAt = new Date();
+    const checkOutAt = expectedCheckOut ? new Date(expectedCheckOut) : null;
+    const nights =
+      checkOutAt && !Number.isNaN(checkOutAt.getTime())
+        ? Math.max(1, Math.round((checkOutAt - checkInAt) / 86400000))
+        : 1;
+
     const stay = await prisma.stay.create({
       data: {
         guestName,
         guestId,
         assignedRoomId,
         status: 'IN_HOUSE',
-        actualCheckInAt: new Date(),
-        expectedCheckOut: expectedCheckOut ? new Date(expectedCheckOut) : null,
+        actualCheckInAt: checkInAt,
+        expectedCheckOut: checkOutAt,
         depositAmount: depositAmount || 0,
         keyCardsIssued: 1,
+        nightlyRateCents,
+        adults: Number(adults) > 0 ? Math.round(Number(adults)) : 1,
+        children: Number(children) >= 0 ? Math.round(Number(children)) : 0,
       },
     });
 
@@ -561,6 +590,8 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
         guestId,
         walkIn: true,
         depositAmount: stay.depositAmount,
+        nightlyRateCents,
+        nights,
       })
     );
 
