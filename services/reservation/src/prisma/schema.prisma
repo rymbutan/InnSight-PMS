@@ -177,6 +177,30 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 }
 
+// A priced, admin-managed extra a reservation can carry — "Extra bed",
+// "Airport transfer", and the like. Kept separate from Reservation.specialRequests,
+// which is free-text guest preference with no cost of its own (a quiet room, a
+// high floor). Before this existed, both were typed into the same "Add-ons"
+// box with a freeform cost field, so a plain preference like "quiet room" got
+// billed to the folio as an add-on charge, and the same paid extra could be
+// priced differently reservation to reservation depending on what the desk
+// happened to type. priceCents is the price of record; a reservation's own
+// addOns JSON freezes it at the price current when the booking was made, so
+// changing it here never rewrites an already-booked guest's total.
+model AddOnCatalogItem {
+  // A short slug ("EXTRA_BED"), not a uuid — same convention as Folio's
+  // ChargeCode ("RM", "AO"). Human-readable in the API and, critically, lets
+  // the seed rows below be idempotent: a fixed code is exactly what
+  // ON CONFLICT needs, where a generated uuid would insert a duplicate row on
+  // every container start (see db-init.sh's re-apply behaviour).
+  code       String   @id
+  label      String
+  priceCents Int
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 enum ReservationStatus {
   PENDING
   CONFIRMED
