@@ -10,6 +10,26 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
 
+// Standardized, unpriced guest preferences — "Add-on information" moved here
+// from the reservation wizard, which used to let staff type a one-off item
+// and a cost for it. A free preference (extra pillows, an early check-in)
+// isn't a billing event, and the same guest wants the same things on every
+// stay, so it belongs on the profile, set once, rather than re-entered (and
+// re-priced, inconsistently) at every booking. Backed by GuestPreference
+// (category 'addon'), which already existed for exactly this shape of data
+// and had no UI anywhere.
+const ADDON_PREFERENCE_OPTIONS = [
+  { code: 'EXTRA_PILLOWS', label: 'Extra pillows' },
+  { code: 'EXTRA_TOWELS', label: 'Extra towels' },
+  { code: 'EXTRA_BED', label: 'Extra bed' },
+  { code: 'BABY_COT', label: 'Baby cot' },
+  { code: 'HYPOALLERGENIC_BEDDING', label: 'Hypoallergenic bedding' },
+  { code: 'AIRPORT_TRANSFER', label: 'Airport transfer' },
+  { code: 'EARLY_CHECKIN', label: 'Early check-in' },
+  { code: 'LATE_CHECKOUT', label: 'Late checkout' },
+];
+const ADDON_PREFERENCE_CATEGORY = 'addon';
+
 export default function Guests() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
@@ -17,6 +37,20 @@ export default function Guests() {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [history, setHistory] = useState({ loading: false, stays: [], reservations: [] });
+  // { [code]: true } for whichever standardized add-on preferences this
+  // guest has set — see ADDON_PREFERENCE_OPTIONS above.
+  const [addonPrefs, setAddonPrefs] = useState({});
+  const [savingPref, setSavingPref] = useState(null);
+  // Saved bank-transfer details (Ms. Padilla, Lane A-07) — reusable across
+  // reservations instead of retyping bank/network/sender every time.
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [newBankAccount, setNewBankAccount] = useState({
+    bankName: '',
+    accountName: '',
+    accountNumberLast4: '',
+    transferNetwork: '',
+  });
+  const [savingBankAccount, setSavingBankAccount] = useState(false);
   const [form, setForm] = useState({ firstName: '', lastName: '', nationality: '', vipLevel: 'NONE' });
   const toast = useToast();
   const confirm = useConfirm();
@@ -172,26 +206,126 @@ export default function Guests() {
   async function openGuest(id) {
     setEditing(false);
     setHistory({ loading: true, stays: [], reservations: [] });
+    setAddonPrefs({});
+    setBankAccounts([]);
     try {
       const { data } = await api.get(`/api/guests/${id}`);
       setSelected(data);
       // Stay and reservation history come from other services, so they load
       // alongside rather than blocking the profile. Either failing leaves that
       // section empty instead of losing the whole panel.
-      const [st, rv] = await Promise.all([
+      const [st, rv, prefs, banks] = await Promise.all([
         api.get(`/api/stays?guestId=${id}`).catch(() => ({ data: [] })),
         api.get(`/api/reservations?guestId=${id}`).catch(() => ({ data: [] })),
+        api.get(`/api/guests/${id}/preferences`).catch(() => ({ data: [] })),
+        api.get(`/api/guests/${id}/bank-accounts`).catch(() => ({ data: [] })),
       ]);
       setHistory({
         loading: false,
         stays: Array.isArray(st.data) ? st.data : [],
         reservations: Array.isArray(rv.data) ? rv.data : [],
       });
+      setAddonPrefs(
+        Object.fromEntries(
+          (Array.isArray(prefs.data) ? prefs.data : [])
+            .filter((p) => p.category === ADDON_PREFERENCE_CATEGORY && p.value)
+            .map((p) => [p.key, true])
+        )
+      );
+      setBankAccounts(Array.isArray(banks.data) ? banks.data : []);
     } catch (err) {
       setHistory({ loading: false, stays: [], reservations: [] });
       toast.error(errMsg(err));
     }
   }
+
+  // Each toggle saves immediately — these are independent preference rows,
+  // not fields on the guest record itself, so there is nothing for a
+  // separate "Save" click to batch them with.
+  async function toggleAddonPref(code, checked) {
+    if (!selected) return;
+    setSavingPref(code);
+    // Optimistic: a toggle that fails flips back below, but the desk should
+    // not wait on a round trip to see the checkbox respond.
+    setAddonPrefs((m) => ({ ...m, [code]: checked || undefined }));
+    try {
+      await api.put(`/api/guests/${selected.id}/preferences/${code}`, {
+        category: ADDON_PREFERENCE_CATEGORY,
+        value: checked,
+      });
+    } catch (err) {
+      setAddonPrefs((m) => ({ ...m, [code]: !checked || undefined }));
+      toast.error(errMsg(err));
+    } finally {
+      setSavingPref(null);
+    }
+  }
+
+  async function refreshBankAccounts() {
+    if (!selected) return;
+    try {
+      const { data } = await api.get(`/api/guests/${selected.id}/bank-accounts`);
+      setBankAccounts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
+  async function addBankAccount() {
+    if (!selected) return;
+    const { bankName, accountName, accountNumberLast4, transferNetwork } = newBankAccount;
+    if (!bankName.trim() || !accountName.trim() || !/^\d{4}$/.test(accountNumberLast4)) {
+      return toast.error('Bank, account name, and the last 4 digits (exactly 4) are required.');
+    }
+    setSavingBankAccount(true);
+    try {
+      await api.post(`/api/guests/${selected.id}/bank-accounts`, {
+        bankName: bankName.trim(),
+        accountName: accountName.trim(),
+        accountNumberLast4,
+        transferNetwork: transferNetwork.trim() || undefined,
+        // The first saved account becomes the default automatically — nothing
+        // to pre-fill from otherwise.
+        isDefault: bankAccounts.length === 0,
+      });
+      setNewBankAccount({ bankName: '', accountName: '', accountNumberLast4: '', transferNetwork: '' });
+      await refreshBankAccounts();
+      toast.success('Bank account saved.');
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setSavingBankAccount(false);
+    }
+  }
+
+  async function setDefaultBankAccount(accountId) {
+    if (!selected) return;
+    try {
+      await api.patch(`/api/guests/${selected.id}/bank-accounts/${accountId}`, { isDefault: true });
+      await refreshBankAccounts();
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
+  async function deleteBankAccount(accountId) {
+    if (!selected) return;
+    const ok = await confirm({
+      title: 'Remove bank account',
+      message: 'Remove this saved bank account?',
+      detail: 'Reservations already booked keep their own recorded deposit detail — this only removes it from future use.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/guests/${selected.id}/bank-accounts/${accountId}`);
+      await refreshBankAccounts();
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+
   // The in-house stay, if any. IN_HOUSE is the only status that means "here
   // now", so anything else counts as history below.
   const currentStay = history.stays.find((s) => s.status === 'IN_HOUSE') || null;
@@ -239,6 +373,8 @@ export default function Guests() {
         lastName: selected.lastName,
         nationality: selected.nationality,
         vipLevel: selected.vipLevel,
+        companyName: selected.companyName || '',
+        employeeName: selected.employeeName || '',
       });
       toast.success('Guest details saved.');
       setEditing(false);
@@ -512,7 +648,36 @@ export default function Guests() {
               <span className="guest-fact-label">Past stays</span>
               <span className="guest-fact-value">{pastStays.length}</span>
             </div>
+            {selected.companyName && (
+              <div className="guest-fact">
+                <span className="guest-fact-label">Company</span>
+                <span className="guest-fact-value">
+                  {selected.companyName}
+                  {selected.employeeName ? ` (${selected.employeeName})` : ''}
+                </span>
+              </div>
+            )}
+            {bankAccounts.length > 0 && (
+              <div className="guest-fact">
+                <span className="guest-fact-label">Bank on file</span>
+                <span className="guest-fact-value">
+                  {(() => {
+                    const b = bankAccounts.find((a) => a.isDefault) || bankAccounts[0];
+                    return `${b.bankName} •••• ${b.accountNumberLast4}`;
+                  })()}
+                </span>
+              </div>
+            )}
           </div>
+
+          <h4 className="guest-sub">Add-on preferences</h4>
+          <p className="muted" style={{ marginTop: -4 }}>
+            {ADDON_PREFERENCE_OPTIONS.some((o) => addonPrefs[o.code])
+              ? ADDON_PREFERENCE_OPTIONS.filter((o) => addonPrefs[o.code])
+                  .map((o) => o.label)
+                  .join(', ')
+              : 'None set — edit this profile to add some.'}
+          </p>
 
           <h4 className="guest-sub">Booked reservations</h4>
           {history.loading ? (
@@ -626,7 +791,136 @@ export default function Guests() {
               </select>
             </div>
           </div>
-          <button onClick={saveGuest}>Save</button>{' '}
+
+          {/* Corporate-account info (Ms. Padilla, Lane A-07) — a guest billed
+              through an employer rather than travelling as an individual. */}
+          <h4 className="guest-sub" style={{ marginTop: 18 }}>
+            Company details
+          </h4>
+          <div className="row">
+            <div>
+              <label>Company name</label>
+              <input
+                value={selected.companyName || ''}
+                onChange={(e) => setSelected({ ...selected, companyName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Employee name</label>
+              <input
+                value={selected.employeeName || ''}
+                onChange={(e) => setSelected({ ...selected, employeeName: e.target.value })}
+                placeholder="If different from the guest booking the room"
+              />
+            </div>
+          </div>
+
+          {/* Each row saves itself immediately (add/remove/set-default) —
+              same reasoning as the preference checkboxes below: these are
+              their own GuestBankAccount rows, not part of the guest record
+              Save writes. A saved account is offered to auto-fill the
+              BANK_TRANSFER deposit step on a NEW reservation for this guest
+              — see NewReservation.jsx — never used to move money on its own. */}
+          <h4 className="guest-sub" style={{ marginTop: 18 }}>
+            Banking details
+          </h4>
+          {bankAccounts.length === 0 && <p className="muted">No saved bank accounts.</p>}
+          {bankAccounts.map((a) => (
+            <div className="row" key={a.id} style={{ alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                {a.bankName} •••• {a.accountNumberLast4} — {a.accountName}
+                {a.transferNetwork ? ` (${a.transferNetwork})` : ''}
+                {a.isDefault && <span className="badge confirmed" style={{ marginLeft: 8 }}>Default</span>}
+              </div>
+              {!a.isDefault && (
+                <button className="secondary small" onClick={() => setDefaultBankAccount(a.id)}>
+                  Make default
+                </button>
+              )}
+              <button className="secondary small" onClick={() => deleteBankAccount(a.id)}>
+                Remove
+              </button>
+            </div>
+          ))}
+          <div className="row" style={{ marginTop: 8 }}>
+            <div>
+              <label>Bank</label>
+              <input
+                value={newBankAccount.bankName}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, bankName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Account holder</label>
+              <input
+                value={newBankAccount.accountName}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, accountName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Last 4 digits</label>
+              <input
+                maxLength={4}
+                value={newBankAccount.accountNumberLast4}
+                onChange={(e) =>
+                  setNewBankAccount({ ...newBankAccount, accountNumberLast4: e.target.value.replace(/\D/g, '') })
+                }
+              />
+            </div>
+            <div>
+              <label>Network (optional)</label>
+              <input
+                placeholder="InstaPay, PESONet, ..."
+                value={newBankAccount.transferNetwork}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, transferNetwork: e.target.value })}
+              />
+            </div>
+            <div className="row-action">
+              <button
+                type="button"
+                className="secondary"
+                disabled={savingBankAccount}
+                onClick={addBankAccount}
+              >
+                Add account
+              </button>
+            </div>
+          </div>
+
+          {/* Each checkbox saves itself the moment it's clicked (see
+              toggleAddonPref) — these are independent GuestPreference rows,
+              not part of the guest record Save below writes. */}
+          <h4 className="guest-sub" style={{ marginTop: 18 }}>
+            Add-on preferences
+          </h4>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            {ADDON_PREFERENCE_OPTIONS.map((o) => (
+              <label
+                key={o.code}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: 'auto',
+                  textTransform: 'none',
+                  fontWeight: 400,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  style={{ width: 'auto' }}
+                  checked={Boolean(addonPrefs[o.code])}
+                  disabled={savingPref === o.code}
+                  onChange={(e) => toggleAddonPref(o.code, e.target.checked)}
+                />
+                {o.label}
+              </label>
+            ))}
+          </div>
+
+          <button style={{ marginTop: 18 }} onClick={saveGuest}>
+            Save
+          </button>{' '}
           {/* Cancel returns to the profile, not to nothing — the guest you were
               looking at is still the one you want on screen. */}
           <button className="secondary" onClick={() => setEditing(false)}>
