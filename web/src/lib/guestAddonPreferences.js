@@ -1,20 +1,24 @@
-// Standardized, unpriced guest preferences — "Add-on information" lives on
-// the guest's own profile (Guests.jsx), not re-entered per booking. Shared
-// between Guests.jsx (where they're set) and NewReservation.jsx (where
-// they're shown, read-only, so the desk sees what this guest usually wants
-// without leaving the wizard) so the two can never drift out of sync.
-//
-// Backed by GuestPreference (category 'addon'), a generic key/value store
-// that already existed for exactly this shape of data.
-export const ADDON_PREFERENCE_OPTIONS = [
-  { code: 'EXTRA_PILLOWS', label: 'Extra pillows' },
-  { code: 'EXTRA_TOWELS', label: 'Extra towels' },
-  { code: 'EXTRA_BED', label: 'Extra bed' },
-  { code: 'BABY_COT', label: 'Baby cot' },
-  { code: 'HYPOALLERGENIC_BEDDING', label: 'Hypoallergenic bedding' },
-  { code: 'AIRPORT_TRANSFER', label: 'Airport transfer' },
-  { code: 'EARLY_CHECKIN', label: 'Early check-in' },
-  { code: 'LATE_CHECKOUT', label: 'Late checkout' },
-];
+import { useEffect, useState } from 'react';
+import api from '../api';
 
+// Standardized guest preferences (extra pillows, and the like) — the option
+// list itself is now admin-managed, priced catalog data (inventory-service's
+// AddOnCatalogItem, edited from Amenities & Facilities), not a hardcoded
+// frontend list. Which of these a given guest wants stays as-is: a
+// GuestPreference row (category 'addon') keyed on the catalog item's `code`,
+// so the two can never drift into their own per-booking copy.
 export const ADDON_PREFERENCE_CATEGORY = 'addon';
+
+// Shared by Guests.jsx (where prefs are set) and NewReservation.jsx (where
+// they're shown AND editable, so a booking never needs a trip to the guest
+// profile) so both always render the same live prices.
+export function useAddOnCatalog() {
+  const [catalog, setCatalog] = useState([]);
+  useEffect(() => {
+    api
+      .get('/api/addon-catalog', { params: { active: true } })
+      .then(({ data }) => setCatalog(Array.isArray(data) ? data : []))
+      .catch(() => setCatalog([])); // an empty checklist is safer than a stale hardcoded one
+  }, []);
+  return catalog;
+}

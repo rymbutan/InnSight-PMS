@@ -12,7 +12,8 @@ import { useAuth } from '../auth';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
-import { ADDON_PREFERENCE_OPTIONS, ADDON_PREFERENCE_CATEGORY } from '../lib/guestAddonPreferences';
+import { ADDON_PREFERENCE_CATEGORY, useAddOnCatalog } from '../lib/guestAddonPreferences';
+import { formatPeso } from '../lib/money';
 
 export default function Guests() {
   const [q, setQ] = useState('');
@@ -30,8 +31,9 @@ export default function Guests() {
   const [searchParams] = useSearchParams();
   const [history, setHistory] = useState({ loading: false, stays: [], reservations: [] });
   // { [code]: true } for whichever standardized add-on preferences this
-  // guest has set — see ADDON_PREFERENCE_OPTIONS above.
+  // guest has set — codes come from the live priced catalog below.
   const [addonPrefs, setAddonPrefs] = useState({});
+  const addonCatalog = useAddOnCatalog();
   const [savingPref, setSavingPref] = useState(null);
   // Saved bank-transfer details (Ms. Padilla, Lane A-07) — reusable across
   // reservations instead of retyping bank/network/sender every time.
@@ -694,9 +696,10 @@ export default function Guests() {
 
           <h4 className="guest-sub">Add-on preferences</h4>
           <p className="muted" style={{ marginTop: -4 }}>
-            {ADDON_PREFERENCE_OPTIONS.some((o) => addonPrefs[o.code])
-              ? ADDON_PREFERENCE_OPTIONS.filter((o) => addonPrefs[o.code])
-                  .map((o) => o.label)
+            {addonCatalog.some((o) => addonPrefs[o.code])
+              ? addonCatalog
+                  .filter((o) => addonPrefs[o.code])
+                  .map((o) => (o.priceCents > 0 ? `${o.label} (${formatPeso(o.priceCents)})` : o.label))
                   .join(', ')
               : 'None set — edit this profile to add some.'}
           </p>
@@ -916,7 +919,7 @@ export default function Guests() {
             Add-on preferences
           </h4>
           <div className="row" style={{ flexWrap: 'wrap' }}>
-            {ADDON_PREFERENCE_OPTIONS.map((o) => (
+            {addonCatalog.map((o) => (
               <label
                 key={o.code}
                 style={{
@@ -936,6 +939,7 @@ export default function Guests() {
                   onChange={(e) => toggleAddonPref(o.code, e.target.checked)}
                 />
                 {o.label}
+                {o.priceCents > 0 && <span className="muted"> ({formatPeso(o.priceCents)})</span>}
               </label>
             ))}
           </div>
