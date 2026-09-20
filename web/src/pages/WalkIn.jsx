@@ -48,8 +48,33 @@ export default function WalkIn() {
     (r) => ['CLEAN', 'CLEAN_INSPECTED'].includes(r.status) && !occupied.has(r.id)
   );
 
+  // The picker's onChange never fires if the desk just accepts the default
+  // "Auto-assign" — without this, the rate stayed blank until they touched
+  // the dropdown at all, even though a valid preview (the room auto-assign
+  // would pick first) is already known once the room list loads.
+  useEffect(() => {
+    if (rateTouched || form.assignedRoomId || form.nightlyRate) return;
+    const first = [...available].sort(
+      (a, b) => a.floor - b.floor || String(a.number).localeCompare(String(b.number), undefined, { numeric: true })
+    )[0];
+    if (first?.roomType?.baseRate != null) {
+      setForm((f) => ({ ...f, nightlyRate: centsToPesos(first.roomType.baseRate) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, inHouse]);
+
+  // Sorted the same way the server picks for "Auto-assign" (lowest floor,
+  // then lowest number) so the rate preview below matches what submitting is
+  // actually likely to assign — see stay.routes.js's pickWalkInRoom.
+  const availableSorted = [...available].sort(
+    (a, b) => a.floor - b.floor || String(a.number).localeCompare(String(b.number), undefined, { numeric: true })
+  );
+
   function pickRoom(roomId) {
-    const room = available.find((r) => r.id === roomId);
+    // '' is "Auto-assign" — preview the rate from whichever room the server
+    // would pick first, since the desk still needs a number for the deposit
+    // before submitting.
+    const room = roomId ? available.find((r) => r.id === roomId) : availableSorted[0];
     setForm((f) => ({
       ...f,
       assignedRoomId: roomId,
@@ -67,14 +92,20 @@ export default function WalkIn() {
       const { data } = await api.post('/api/walk-in', {
         guestName,
         guestId: pickedGuest?.id || undefined,
-        assignedRoomId: form.assignedRoomId,
+        // '' means "Auto-assign" — the server picks a room itself rather
+        // than requiring the desk to scan the list for a free one.
+        assignedRoomId: form.assignedRoomId || undefined,
         expectedCheckOut: checkout.toISOString(),
         depositAmount: pesosToCents(form.deposit),
         adults: Number(form.adults) || 1,
         children: Number(form.children) || 0,
         nightlyRateCents: pesosToCents(form.nightlyRate),
       });
-      toast.success(`Walk-in checked in — stay ${data.id.slice(0, 8)}`);
+      const assignedRoom = rooms.find((r) => r.id === data.assignedRoomId);
+      toast.success(
+        `Walk-in checked in — stay ${data.id.slice(0, 8)}` +
+          (assignedRoom ? `, room ${assignedRoom.number}` : '')
+      );
       navigate('/arrivals');
     } catch (e) {
       toast.error(errMsg(e));
@@ -132,13 +163,9 @@ export default function WalkIn() {
           <div className="row">
             <div>
               <label>Assign room</label>
-              <select
-                required
-                value={form.assignedRoomId}
-                onChange={(e) => pickRoom(e.target.value)}
-              >
-                <option value="">— Select —</option>
-                {available.map((r) => (
+              <select value={form.assignedRoomId} onChange={(e) => pickRoom(e.target.value)}>
+                <option value="">Auto-assign (first available room)</option>
+                {availableSorted.map((r) => (
                   <option key={r.id} value={r.id}>
                     Room {r.number} · {r.typeCode} · Floor {r.floor}
                   </option>

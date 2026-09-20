@@ -130,6 +130,10 @@ require.cache[require.resolve('../lib/inventoryClient')] = {
         if (!inventoryReachable) throw new Error('ECONNREFUSED');
         return rooms.get(id) || null;
       },
+      listRooms: async () => {
+        if (!inventoryReachable) throw new Error('ECONNREFUSED');
+        return [...rooms.values()];
+      },
       acquireHold: async () => ({ groupId: 'g1' }),
       attachHold: async () => ({}),
       releaseHold: async () => true,
@@ -188,11 +192,11 @@ function reset() {
   memDb.stay.clear();
   rooms.clear();
   inventoryReachable = true;
-  rooms.set('room-101', { id: 'room-101', number: '101', status: 'CLEAN', typeCode: 'STD' });
-  rooms.set('room-102', { id: 'room-102', number: '102', status: 'CLEAN_INSPECTED', typeCode: 'STD' });
-  rooms.set('room-dirty', { id: 'room-dirty', number: '103', status: 'DIRTY', typeCode: 'STD' });
-  rooms.set('room-ooo', { id: 'room-ooo', number: '104', status: 'OUT_OF_ORDER', typeCode: 'STD' });
-  rooms.set('room-oos', { id: 'room-oos', number: '105', status: 'OUT_OF_SERVICE', typeCode: 'STD' });
+  rooms.set('room-101', { id: 'room-101', number: '101', floor: 1, status: 'CLEAN', typeCode: 'STD' });
+  rooms.set('room-102', { id: 'room-102', number: '102', floor: 1, status: 'CLEAN_INSPECTED', typeCode: 'STD' });
+  rooms.set('room-dirty', { id: 'room-dirty', number: '103', floor: 1, status: 'DIRTY', typeCode: 'STD' });
+  rooms.set('room-ooo', { id: 'room-ooo', number: '104', floor: 1, status: 'OUT_OF_ORDER', typeCode: 'STD' });
+  rooms.set('room-oos', { id: 'room-oos', number: '105', floor: 1, status: 'OUT_OF_SERVICE', typeCode: 'STD' });
 }
 
 // ── Walk-in ─────────────────────────────────────────────────────────────────
@@ -257,9 +261,34 @@ test('a walk-in into a room that does not exist is refused', async () => {
   assert.match(res.body.error, /does not exist/i);
 });
 
-test('a walk-in with no room at all is refused', async () => {
+test('a walk-in with no room chosen auto-assigns the first clean room', async () => {
   reset();
-  assert.strictEqual((await call(makeApp(), 'POST', '/api/walk-in', { guestName: 'Ana Cruz' })).status, 400);
+  const res = await call(makeApp(), 'POST', '/api/walk-in', { guestName: 'Ana Cruz' });
+  assert.strictEqual(res.status, 201);
+  // Lowest floor, then lowest number — same order the picker's own dropdown
+  // lists, so what got assigned is the room a human would have picked first.
+  assert.strictEqual(res.body.assignedRoomId, 'room-101');
+});
+
+test('auto-assign skips a room another walk-in already occupies', async () => {
+  reset();
+  const app = makeApp();
+  assert.strictEqual(
+    (await call(app, 'POST', '/api/walk-in', { guestName: 'Ana Cruz', assignedRoomId: 'room-101' })).status,
+    201
+  );
+  const second = await call(app, 'POST', '/api/walk-in', { guestName: 'Ben Reyes' });
+  assert.strictEqual(second.status, 201);
+  assert.strictEqual(second.body.assignedRoomId, 'room-102');
+});
+
+test('auto-assign is refused when nothing is clean and vacant', async () => {
+  reset();
+  rooms.delete('room-101');
+  rooms.delete('room-102');
+  const res = await call(makeApp(), 'POST', '/api/walk-in', { guestName: 'Ana Cruz' });
+  assert.strictEqual(res.status, 409);
+  assert.match(res.body.error, /no clean, vacant rooms/i);
 });
 
 test('a walk-in with no guest name is refused', async () => {
