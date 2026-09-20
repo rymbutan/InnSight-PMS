@@ -876,6 +876,13 @@ export default function Folios() {
                   <div className="folio-summary-sub">
                     Folio {folio.folioNumber}
                     <span className={`badge ${folio.status.toLowerCase()}`}>{labelize(folio.status)}</span>
+                    {folio.adults != null && (
+                      <span className="muted">
+                        {' · '}
+                        {folio.adults + (folio.children || 0)} guest
+                        {folio.adults + (folio.children || 0) === 1 ? '' : 's'}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

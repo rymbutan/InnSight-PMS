@@ -323,6 +323,7 @@ export default function Reservations() {
                     onClick={toggleSort}
                   />
                   <SortableTh field="guestName" label="Guest" sortBy={sortBy} onClick={toggleSort} />
+                  <th className="t-c">Guests</th>
                   <SortableTh field="createdAt" label="Date Booked" sortBy={sortBy} onClick={toggleSort} />
                   <th className="t-c">Room(s)</th>
                   <SortableTh field="checkIn" label="Check-In" sortBy={sortBy} onClick={toggleSort} />
@@ -356,6 +357,9 @@ export default function Reservations() {
                   <tr key={r.id} onClick={() => navigate(`/reservations/${r.id}`)}>
                     <td className="table-link">{r.confirmationNumber || r.id?.slice(0, 8)}</td>
                     <td>{r.guestName || '—'}</td>
+                    <td className="t-c">
+                      {r.adults == null ? '—' : r.adults + (r.children || 0)}
+                    </td>
                     <td>{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—'}</td>
                     <td className="t-c">{r.assignedRoomId || r.roomTypeCode || 'N/A'}</td>
                     <td>{new Date(r.checkIn).toLocaleDateString()}</td>

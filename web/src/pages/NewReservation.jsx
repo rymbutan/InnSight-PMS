@@ -113,6 +113,8 @@ export default function NewReservation() {
   // Step 3
   const [guestQ, setGuestQ] = useState('');
   const [pickedGuest, setPickedGuest] = useState(null);
+  const [adults, setAdults] = useState(2);
+  const [children, setChildren] = useState(0);
   const [newGuest, setNewGuest] = useState({
     firstName: '',
     lastName: '',
@@ -420,8 +422,8 @@ export default function NewReservation() {
         assignedRoomId: first.assignedRoomId || undefined,
         checkIn,
         checkOut,
-        adults: 2,
-        children: 0,
+        adults: Number(adults) || 1,
+        children: Number(children) || 0,
         source,
         totalEstimateCents: totals.grandTotalCents,
         depositCents: pesosToCents(depositPesos),
@@ -699,6 +701,27 @@ export default function NewReservation() {
       {step === 3 && (
         <div className="panel">
           <h3>Guest information</h3>
+          <div className="row" style={{ marginBottom: 16 }}>
+            <div>
+              <label>Adults</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={adults}
+                onChange={(e) => setAdults(e.target.value)}
+              />
+            </div>
+            <div>
+              <label>Children</label>
+              <input
+                type="number"
+                min="0"
+                value={children}
+                onChange={(e) => setChildren(e.target.value)}
+              />
+            </div>
+          </div>
           {pickedGuest ? (
             <div
               style={{
