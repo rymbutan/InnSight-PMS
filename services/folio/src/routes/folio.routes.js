@@ -836,7 +836,11 @@ router.get('/folios/:id', requireRole(...ROLE_GROUPS.DESK_AUDIT), async (req, re
       // reading as unknown next to every reservation-backed one.
       adults: reservation?.adults ?? stay?.adults ?? null,
       children: reservation?.children ?? stay?.children ?? null,
-      guestName: reservation?.guestName ?? null,
+      // Same walk-in gap as adults/children above: a walk-in's guest name
+      // lives only on the Stay (there is no reservation to source it from),
+      // so leaving this reservation-only meant every walk-in folio showed
+      // "no guest on file" even when the desk had typed a name at check-in.
+      guestName: reservation?.guestName ?? stay?.guestName ?? null,
       auditApproved: audit.approved,
       auditApprovalStale: audit.stale,
     });

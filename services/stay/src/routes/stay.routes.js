@@ -627,9 +627,19 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
     // walk-in's price of record unless the desk overrides it for a negotiated
     // rate; either way the rate now travels with the check-in event so the
     // folio has something to charge against.
+    //
+    // The client-sent rate is only trusted for an EXPLICIT room pick. For
+    // Auto-assign, WalkIn.jsx previews a rate from whichever room it GUESSES
+    // will be picked (the first one in its own stale list) before it knows
+    // which room this request will actually land on — trusting that guess
+    // here would charge the wrong room type's rate whenever the real pick
+    // (fresh, made just above) differs from the guess. The room this route
+    // just assigned is always the authority in that case.
     const baseRateCents = roomCheck.room?.roomType?.baseRate;
     const nightlyRateCents =
-      Number(requestedRateCents) > 0 ? Math.round(Number(requestedRateCents)) : Number(baseRateCents) || 0;
+      assignedRoomId && Number(requestedRateCents) > 0
+        ? Math.round(Number(requestedRateCents))
+        : Number(baseRateCents) || 0;
     const checkInAt = new Date();
     const checkOutAt = expectedCheckOut ? new Date(expectedCheckOut) : null;
     const nights =

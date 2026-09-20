@@ -201,8 +201,14 @@ function reset() {
   memDb.stay.clear();
   rooms.clear();
   inventoryReachable = true;
-  rooms.set('room-101', { id: 'room-101', number: '101', floor: 1, status: 'CLEAN', typeCode: 'STD' });
-  rooms.set('room-102', { id: 'room-102', number: '102', floor: 1, status: 'CLEAN_INSPECTED', typeCode: 'STD' });
+  rooms.set('room-101', {
+    id: 'room-101', number: '101', floor: 1, status: 'CLEAN', typeCode: 'STD',
+    roomType: { baseRate: 500000 },
+  });
+  rooms.set('room-102', {
+    id: 'room-102', number: '102', floor: 1, status: 'CLEAN_INSPECTED', typeCode: 'DLX',
+    roomType: { baseRate: 800000 },
+  });
   rooms.set('room-dirty', { id: 'room-dirty', number: '103', floor: 1, status: 'DIRTY', typeCode: 'STD' });
   rooms.set('room-ooo', { id: 'room-ooo', number: '104', floor: 1, status: 'OUT_OF_ORDER', typeCode: 'STD' });
   rooms.set('room-oos', { id: 'room-oos', number: '105', floor: 1, status: 'OUT_OF_SERVICE', typeCode: 'STD' });
@@ -289,6 +295,37 @@ test('auto-assign skips a room another walk-in already occupies', async () => {
   const second = await walkIn(app, { guestName: 'Ben Reyes' });
   assert.strictEqual(second.status, 201);
   assert.strictEqual(second.body.assignedRoomId, 'room-102');
+});
+
+// Reservations & Walk-Ins item 8/6 overlap: WalkIn.jsx previews a rate from
+// whichever room its own (possibly stale) list guesses will be picked,
+// before it knows what this request will actually assign — trusting that
+// guess would charge the wrong room type's rate whenever the real pick
+// differs. Only an EXPLICIT room pick may set the rate; auto-assign always
+// prices from the room it actually assigns.
+test('auto-assign ignores a client-guessed rate and prices the room it actually assigns', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    depositAmount: 100,
+    // Guessing room-102's (DLX) rate while no room was actually chosen.
+    nightlyRateCents: 800000,
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.assignedRoomId, 'room-101', 'auto-assign still picks the first free room');
+  assert.strictEqual(res.body.nightlyRateCents, 500000, "room-101's own (STD) rate, not the guessed DLX one");
+});
+
+test('an explicit room pick still honours a staff-entered negotiated rate', async () => {
+  reset();
+  const res = await call(makeApp(), 'POST', '/api/walk-in', {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    depositAmount: 100,
+    nightlyRateCents: 450000,
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.nightlyRateCents, 450000);
 });
 
 test('auto-assign is refused when nothing is clean and vacant', async () => {
