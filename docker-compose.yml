@@ -384,6 +384,9 @@ services:
       TZ: ${TZ:-Asia/Manila}
       INVENTORY_URL: http://inventory-service:3005
       FOLIO_URL: http://folio-service:3007
+      # Whether a guest is already checked in somewhere — see lib/stayClient.js
+      # and guestBookingConflict in routes/reservation.routes.js.
+      STAY_URL: http://stay-service:3006
       # Reservation documents (guest IDs, signed registration cards) — see
       # lib/storage.js. Same root credential MinIO's own container requires.
       MINIO_ENDPOINT: minio
