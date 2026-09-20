@@ -72,6 +72,11 @@ export default function Amenities() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('ADMIN');
   const canSell = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
+  // A promotion is a commercial decision, not property configuration — the
+  // manager running a shoulder-season rate should not need an administrator
+  // to type it in. Mirrors the MGMT guard on POST/PATCH /api/promo-codes;
+  // gating it any tighter here would hide a form the API would accept anyway.
+  const canManagePromos = hasRole('ADMIN', 'MANAGER');
   const toast = useToast();
   const confirm = useConfirm();
   const [facilities, setFacilities] = useState([]);
@@ -199,6 +204,59 @@ export default function Amenities() {
     saveAddOnField(item.code, { active: !item.active }, item.active ? 'deactivated' : 'activated');
   }
 
+  // Promo codes — moved here from the room information editor: a promotion is
+  // a commercial decision, not room configuration, and this is where every
+  // other priced, guest-facing extra (facilities, add-ons) is already
+  // managed. Auto-applies at booking time: NewReservation.jsx sends whatever
+  // code the desk types, and reservation.routes.js's POST /reservations looks
+  // it up here (GET /api/public/promo/:code) and discounts the total by
+  // percentOff — nothing further to wire up, this is just the admin side.
+  const [promos, setPromos] = useState([]);
+  const [newPromo, setNewPromo] = useState({ code: '', percentOff: '', description: '' });
+
+  async function loadPromos() {
+    try {
+      const { data } = await api.get('/api/promo-codes');
+      setPromos(data);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function createPromo(e) {
+    e.preventDefault();
+    try {
+      await api.post('/api/promo-codes', {
+        code: newPromo.code,
+        percentOff: Number(newPromo.percentOff),
+        description: newPromo.description || undefined,
+      });
+      toast.success(`Promo ${newPromo.code.toUpperCase()} created.`);
+      setNewPromo({ code: '', percentOff: '', description: '' });
+      loadPromos();
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  }
+  async function togglePromo(code, active) {
+    // Only deactivation asks. Turning a promo back on is harmless; turning it
+    // off stops it working for every guest mid-booking.
+    if (!active) {
+      const ok = await confirm({
+        title: 'Deactivate promo code',
+        message: `Are you sure you want to deactivate ${code}?`,
+        detail: 'Guests will no longer be able to apply this code. You can reactivate it later.',
+        confirmLabel: 'Deactivate',
+      });
+      if (!ok) return;
+    }
+    try {
+      await api.patch(`/api/promo-codes/${code}`, { active });
+      loadPromos();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   async function load() {
     try {
       const { data } = await api.get('/api/facilities');
@@ -219,6 +277,7 @@ export default function Amenities() {
   useEffect(() => {
     load();
     loadAddOnCatalog();
+    if (canManagePromos) loadPromos();
     // Who is checked in, for the hotel-guest branch of the booking form. Fails
     // quietly: a desk clerk taking a walk-in booking should not be blocked by
     // the stay service being down.
@@ -867,6 +926,20 @@ export default function Amenities() {
                   Add-ons
                 </button>
               )}
+              {canManagePromos && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={amTab === 'promos'}
+                  className={amTab === 'promos' ? 'is-on' : ''}
+                  onClick={() => {
+                    setAmTab('promos');
+                    setAddOpen(false);
+                  }}
+                >
+                  Promo Codes
+                </button>
+              )}
             </div>
             {!addOpen && amTab === 'catalog' && (
               <div className="filter-bar">
@@ -894,7 +967,7 @@ export default function Amenities() {
                 </span>
               </div>
             )}
-            {isAdmin && amTab !== 'laundry' && (
+            {((amTab === 'promos' && canManagePromos) || (amTab !== 'laundry' && amTab !== 'promos' && isAdmin)) && (
               <button
                 type="button"
                 className="rt-add"
@@ -903,17 +976,53 @@ export default function Amenities() {
                 aria-expanded={addOpen}
                 aria-label={
                   addOpen
-                    ? `Close the add-${amTab === 'addons' ? 'add-on' : 'amenity'} form`
-                    : `Add ${amTab === 'addons' ? 'an add-on' : 'an amenity'}`
+                    ? `Close the add-${amTab === 'addons' ? 'add-on' : amTab === 'promos' ? 'promo' : 'amenity'} form`
+                    : `Add ${amTab === 'addons' ? 'an add-on' : amTab === 'promos' ? 'a promo code' : 'an amenity'}`
                 }
-                title={addOpen ? 'Close' : amTab === 'addons' ? 'Add add-on' : 'Add amenity'}
+                title={addOpen ? 'Close' : amTab === 'addons' ? 'Add add-on' : amTab === 'promos' ? 'Add promo code' : 'Add amenity'}
               >
                 <Icon name={addOpen ? 'x' : 'plus'} size={15} strokeWidth={2.6} />
               </button>
             )}
           </div>
 
-          {addOpen && amTab === 'addons' ? (
+          {addOpen && amTab === 'promos' ? (
+            <form onSubmit={createPromo}>
+              <div className="row row-split">
+                <div>
+                  <label>Code</label>
+                  <input
+                    required
+                    value={newPromo.code}
+                    onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value.toUpperCase() })}
+                  />
+                </div>
+                <div>
+                  <label>% off</label>
+                  <input
+                    required
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={newPromo.percentOff}
+                    onChange={(e) => setNewPromo({ ...newPromo, percentOff: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="row">
+                <div>
+                  <label>Description</label>
+                  <input
+                    value={newPromo.description}
+                    onChange={(e) => setNewPromo({ ...newPromo, description: e.target.value })}
+                  />
+                </div>
+                <div className="row-action">
+                  <button>Add promo</button>
+                </div>
+              </div>
+            </form>
+          ) : addOpen && amTab === 'addons' ? (
             <form onSubmit={createAddOnCatalogItem}>
               <div className="row">
                 <div>
@@ -1041,6 +1150,34 @@ export default function Amenities() {
                 </div>
               </div>
             </form>
+          ) : amTab === 'promos' ? (
+            promos.length === 0 ? (
+              <EmptyState
+                kind="search"
+                title="No promo codes yet"
+                hint="Use the + button above to add one."
+              />
+            ) : (
+              <div className="rt-list">
+                {promos.map((p) => (
+                  <div key={p.code} className="rt-item" style={{ opacity: p.active ? 1 : 0.55 }}>
+                    <div className="rt-head">
+                      <span className="rt-name">{p.code}</span>
+                      <span className="rt-rate">{p.percentOff}% off</span>
+                    </div>
+                    <div className="rt-meta">{p.description || 'No description'}</div>
+                    <div className="rt-edit">
+                      <button
+                        className={`small secondary${p.active ? '' : ' outline-success'}`}
+                        onClick={() => togglePromo(p.code, !p.active)}
+                      >
+                        {p.active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
           ) : amTab === 'addons' ? (
             addOnCatalog.length === 0 ? (
               <EmptyState
