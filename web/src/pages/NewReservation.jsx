@@ -59,14 +59,14 @@ function missingDepositField(method, detail) {
   return null;
 }
 
-// Built-in special requests for the Add-ons step's dropdown — the common
-// ones a front desk gets asked for repeatedly, so staff pick one instead of
-// re-typing it every time. Phrased as a billed line-item description (not
-// the guest-facing wording on the public booking page's own checklist),
-// since this becomes what prints on the folio. "Other" keeps the free-text
-// input for anything not on the list — a cake brand, a specific chocolate,
-// whatever the guest actually asked for that isn't one of these.
-const BUILT_IN_ADDON_REQUESTS = [
+// Quick-insert chips for the Special Requests note in Stay details — the
+// common FREE preferences a front desk hears repeatedly, so staff click one
+// instead of re-typing it every time. Purely informational text with no cost
+// of its own: a paid extra (a baby cot, an airport transfer) belongs in
+// Add-ons instead, priced from the catalog there — the two used to be the
+// same freeform box, which is how "quiet room" ended up billed to the folio
+// like a paid add-on.
+const SPECIAL_REQUEST_QUICK_PICKS = [
   'High floor room',
   'Quiet room',
   'Luggage storage',
@@ -74,8 +74,6 @@ const BUILT_IN_ADDON_REQUESTS = [
   'Near elevator',
   'Car parking',
   'Honeymoon arrangements',
-  'Baby cot (additional charges may apply)',
-  'Airport transfer',
 ];
 
 export default function NewReservation() {
@@ -92,6 +90,9 @@ export default function NewReservation() {
   const [checkIn, setCheckIn] = useState(params.get('checkIn') || '');
   const [checkOut, setCheckOut] = useState('');
   const [promoCode, setPromoCode] = useState('');
+  // Free-text guest preference, no cost — see Stay details in Step 2. Kept
+  // apart from Step 4's Add-ons, which is money.
+  const [specialRequests, setSpecialRequests] = useState('');
   // Per the Terms & Conditions' "Promotional / Non-Refundable Tier": flagged
   // bookings forfeit the full amount on cancellation regardless of timing.
   const [isNonRefundable, setIsNonRefundable] = useState(false);
@@ -127,13 +128,20 @@ export default function NewReservation() {
     postal: '',
   });
 
-  // Step 4 — Add-ons
-  const [addOns, setAddOns] = useState([]); // [{ description, costCents }]
+  // Step 4 — Add-ons: paid extras only, priced from the catalog below. A
+  // free preference with no cost is a Special Request (Step 2), not this.
+  const [addOns, setAddOns] = useState([]); // [{ code?, description, costCents }]
+  // The catalog dropdown's current selection: '' (none chosen), a catalog
+  // code, or 'OTHER' for a one-off item with no catalog price.
+  const [addOnCode, setAddOnCode] = useState('');
   const [addOnDesc, setAddOnDesc] = useState('');
   const [addOnCostPesos, setAddOnCostPesos] = useState('');
-  // Which built-in request the dropdown has selected, if any — '' (none
-  // chosen yet) or 'OTHER' both fall through to the free-text input below it.
-  const [addOnPreset, setAddOnPreset] = useState('');
+  const [addOnCatalog, setAddOnCatalog] = useState([]);
+  // Admin-only catalog management: a pending price edit per code, and the
+  // "add a new add-on" mini-form.
+  const [catalogPriceEdits, setCatalogPriceEdits] = useState({});
+  const [newCatalogLabel, setNewCatalogLabel] = useState('');
+  const [newCatalogPricePesos, setNewCatalogPricePesos] = useState('');
   const [feePercent, setFeePercent] = useState(10);
   const [feeEditPesos, setFeeEditPesos] = useState('');
   // Defaults mirror DEFAULT_TAX_RATES in services/_shared/policies.js, so a
@@ -154,23 +162,46 @@ export default function NewReservation() {
       .catch(() => {}); // defaults already set; a failed fetch just keeps them
   }, []);
 
-  // costCents alone can't tell "0" (a free special request — allowed) apart
-  // from "" (nothing typed yet — not allowed), since both round to 0. Read
-  // the raw field instead: entered and non-negative is valid, empty or
-  // negative/non-numeric is not.
+  function loadAddOnCatalog() {
+    // `all=1` so an admin managing prices also sees anything they've
+    // deactivated; the picker below filters back down to active-only.
+    api
+      .get('/api/settings/addon-catalog', { params: { all: 1 } })
+      .then(({ data }) => setAddOnCatalog(data))
+      .catch(() => {}); // the picker just falls back to "Other" if this fails
+  }
+  useEffect(loadAddOnCatalog, []);
+
+  const activeAddOnCatalog = useMemo(() => addOnCatalog.filter((c) => c.active), [addOnCatalog]);
+  const selectedCatalogItem = activeAddOnCatalog.find((c) => c.code === addOnCode);
+
+  // costCents alone can't tell "0" (a free custom item — allowed) apart from
+  // "" (nothing typed yet — not allowed), since both round to 0. Read the raw
+  // field instead: entered and non-negative is valid, empty or
+  // negative/non-numeric is not. Only reachable for a custom ("OTHER") item —
+  // a catalog pick's cost comes from the catalog, never typed.
   function addOnCostEntered() {
     const trimmed = addOnCostPesos.trim();
     if (trimmed === '') return false;
     const n = Number(trimmed);
     return Number.isFinite(n) && n >= 0;
   }
+  const canAddAddOn = selectedCatalogItem
+    ? true
+    : addOnCode === 'OTHER' && addOnDesc.trim() && addOnCostEntered();
   function addAddOn() {
-    if (!addOnDesc.trim() || !addOnCostEntered()) return;
-    const costCents = pesosToCents(addOnCostPesos);
-    setAddOns((list) => [...list, { description: addOnDesc.trim(), costCents }]);
+    if (selectedCatalogItem) {
+      setAddOns((list) => [
+        ...list,
+        { code: selectedCatalogItem.code, description: selectedCatalogItem.label, costCents: selectedCatalogItem.priceCents },
+      ]);
+    } else {
+      if (!addOnDesc.trim() || !addOnCostEntered()) return;
+      setAddOns((list) => [...list, { description: addOnDesc.trim(), costCents: pesosToCents(addOnCostPesos) }]);
+    }
+    setAddOnCode('');
     setAddOnDesc('');
     setAddOnCostPesos('');
-    setAddOnPreset('');
   }
   function removeAddOn(idx) {
     setAddOns((list) => list.filter((_, i) => i !== idx));
@@ -183,6 +214,46 @@ export default function NewReservation() {
       setFeePercent(data.feePercent);
       setFeeEditPesos('');
       toast.success('Add-on fee updated.');
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function saveCatalogPrice(code) {
+    const pesos = catalogPriceEdits[code];
+    if (pesos === undefined || pesos.trim() === '' || !(Number(pesos) >= 0)) return;
+    const priceCents = pesosToCents(pesos);
+    try {
+      await api.patch(`/api/settings/addon-catalog/${encodeURIComponent(code)}`, { priceCents });
+      setCatalogPriceEdits((m) => {
+        const next = { ...m };
+        delete next[code];
+        return next;
+      });
+      loadAddOnCatalog();
+      toast.success('Add-on price updated.');
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function toggleCatalogActive(item) {
+    try {
+      await api.patch(`/api/settings/addon-catalog/${encodeURIComponent(item.code)}`, { active: !item.active });
+      loadAddOnCatalog();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+  async function addCatalogItem() {
+    if (!newCatalogLabel.trim() || !(Number(newCatalogPricePesos) >= 0)) return;
+    try {
+      await api.post('/api/settings/addon-catalog', {
+        label: newCatalogLabel.trim(),
+        priceCents: pesosToCents(newCatalogPricePesos),
+      });
+      setNewCatalogLabel('');
+      setNewCatalogPricePesos('');
+      loadAddOnCatalog();
+      toast.success('Add-on added to the catalog.');
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -372,14 +443,13 @@ export default function NewReservation() {
       }
     }
     // Add-ons is deliberately skippable — "no add-ons yet" is a valid
-    // finished state, not a missing field. What is NOT allowed is leaving
-    // half of the "add a request" mini-form filled in and silently moving on,
-    // since that discards what was typed without any signal that it never
-    // got added — require it to be finished (via Add) or cleared first.
-    if (step === 4 && (addOnDesc.trim() || addOnCostPesos.trim() !== '')) {
-      return toast.error(
-        'Finish adding this special request (click Add), or clear the special request and cost fields before continuing.'
-      );
+    // finished state, not a missing field. What is NOT allowed is leaving a
+    // chosen-but-unadded add-on (a picked catalog item, or a half-filled
+    // custom line) and silently moving on, since that discards it with no
+    // signal it never got added — require it to be finished (via Add) or
+    // cleared first.
+    if (step === 4 && (addOnCode || addOnDesc.trim() || addOnCostPesos.trim() !== '')) {
+      return toast.error('Finish adding this add-on (click Add), or clear it before continuing.');
     }
     setStep(Math.min(STEPS.length, step + 1));
   }
@@ -458,8 +528,15 @@ export default function NewReservation() {
         // discount and charged full price. It also used to OVERWRITE whatever
         // the guest had typed into Special Requests; the server now appends.
         ...(promoCode ? { promoCode: promoCode.trim().toUpperCase() } : {}),
+        ...(specialRequests.trim() ? { specialRequests: specialRequests.trim() } : {}),
         ...(addOns.length
-          ? { addOns: addOns.map((a) => ({ description: a.description, costCents: a.costCents })) }
+          ? {
+              // `code` travels along for a catalog pick so the server prices
+              // it authoritatively from the catalog rather than trusting this
+              // costCents — see computeAddOns. A custom ("OTHER") line has no
+              // code and keeps the staff-entered cost.
+              addOns: addOns.map((a) => ({ code: a.code, description: a.description, costCents: a.costCents })),
+            }
           : {}),
       };
       const { data: r } = await api.post('/api/reservations', payload);
@@ -704,6 +781,35 @@ export default function NewReservation() {
               ))}
             </tbody>
           </table>
+
+          {/* Free-text guest preference, no cost of its own — a paid extra
+              belongs in Add-ons (Step 4) instead, priced from its catalog.
+              The two used to be one freeform box, which is how a plain
+              preference like "quiet room" ended up billed to the folio. */}
+          <h3 style={{ marginTop: 18 }}>Special requests</h3>
+          <textarea
+            rows={3}
+            value={specialRequests}
+            onChange={(e) => setSpecialRequests(e.target.value)}
+            placeholder="e.g. Honeymoon trip — please set the room up for a couple."
+          />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {SPECIAL_REQUEST_QUICK_PICKS.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                className="secondary small"
+                onClick={() =>
+                  setSpecialRequests((prev) => {
+                    if (prev.split(/,\s*/).includes(opt)) return prev;
+                    return prev.trim() ? `${prev.trim()}, ${opt}` : opt;
+                  })
+                }
+              >
+                + {opt}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -856,9 +962,12 @@ export default function NewReservation() {
       {step === 4 && (
         <div className="panel">
           <h3>Add-ons</h3>
+          <p className="muted" style={{ marginTop: -8 }}>
+            Paid extras only — a free preference with no cost belongs in Special requests (Step 2).
+          </p>
           {addOns.length === 0 && (
             <div className="muted" style={{ padding: 12 }}>
-              No add-ons yet. Add a special request below, or skip to the next step to take payment.
+              No add-ons yet. Add one below, or skip to the next step to take payment.
             </div>
           )}
           {addOns.map((a, i) => {
@@ -877,50 +986,62 @@ export default function NewReservation() {
           })}
           <div className="row" style={{ marginTop: 12 }}>
             <div>
-              <label>Special request</label>
+              <label>Add-on</label>
               <select
-                value={addOnPreset}
+                value={addOnCode}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setAddOnPreset(val);
-                  setAddOnDesc(val === 'OTHER' ? '' : val);
+                  setAddOnCode(e.target.value);
+                  setAddOnDesc('');
+                  setAddOnCostPesos('');
                 }}
               >
-                <option value="">Choose a built-in request…</option>
-                {BUILT_IN_ADDON_REQUESTS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
+                <option value="">Choose an add-on…</option>
+                {activeAddOnCatalog.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label} — {formatPeso(c.priceCents)}
                   </option>
                 ))}
                 <option value="OTHER">Other — type your own…</option>
               </select>
             </div>
-            <div>
-              <label>Cost (₱)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={addOnCostPesos}
-                onChange={(e) => setAddOnCostPesos(e.target.value)}
-              />
-            </div>
+            {/* A catalog pick's cost is fixed and shown, not typed — that's
+                the whole point of the catalog (Reservations & Walk-Ins #7):
+                the same add-on can no longer be priced differently booking to
+                booking. Only "Other" gets a cost field, since there is no
+                catalog price for a one-off item to show instead. */}
+            {addOnCode === 'OTHER' ? (
+              <div>
+                <label>Cost (₱)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={addOnCostPesos}
+                  onChange={(e) => setAddOnCostPesos(e.target.value)}
+                />
+              </div>
+            ) : (
+              <div>
+                <label>Cost (₱)</label>
+                <input value={selectedCatalogItem ? formatPeso(selectedCatalogItem.priceCents) : '—'} disabled />
+              </div>
+            )}
             <div className="row-action">
-              <button onClick={addAddOn} disabled={!addOnDesc.trim() || !addOnCostEntered()}>
+              <button onClick={addAddOn} disabled={!canAddAddOn}>
                 Add
               </button>
             </div>
           </div>
           {/* Kept OUT of the row above on purpose: it used to live inside the
-              "Special request" cell, and that cell growing to fit a second
-              input stretched the whole row — Cost's input floated near the
-              top of a now-much-taller cell while Add sank to the bottom,
-              visibly disconnected from both. A full-width row of its own
-              can't distort anything beside it. */}
-          {addOnPreset === 'OTHER' && (
+              "Add-on" cell, and that cell growing to fit a second input
+              stretched the whole row — Cost's input floated near the top of a
+              now-much-taller cell while Add sank to the bottom, visibly
+              disconnected from both. A full-width row of its own can't
+              distort anything beside it. */}
+          {addOnCode === 'OTHER' && (
             <div className="row" style={{ marginTop: -4 }}>
               <div style={{ flex: 1 }}>
-                <label>Custom request</label>
+                <label>Custom item</label>
                 <input
                   value={addOnDesc}
                   placeholder="e.g. specific brand of cake"
@@ -936,24 +1057,84 @@ export default function NewReservation() {
             </div>
           )}
           {isAdmin && (
-            <div
-              className="row"
-              style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}
-            >
-              <div className="muted">Current add-on fee: {feePercent}%</div>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="100"
-                style={{ width: 100 }}
-                placeholder={String(feePercent)}
-                value={feeEditPesos}
-                onChange={(e) => setFeeEditPesos(e.target.value)}
-              />
-              <button className="secondary" disabled={feeEditPesos === ''} onClick={saveFeePercent}>
-                Save fee %
-              </button>
+            <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <div className="row" style={{ alignItems: 'center' }}>
+                <div className="muted">Current add-on fee: {feePercent}%</div>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="100"
+                  style={{ width: 100 }}
+                  placeholder={String(feePercent)}
+                  value={feeEditPesos}
+                  onChange={(e) => setFeeEditPesos(e.target.value)}
+                />
+                <button className="secondary" disabled={feeEditPesos === ''} onClick={saveFeePercent}>
+                  Save fee %
+                </button>
+              </div>
+
+              {/* Standardized costing: every add-on's price lives here, not in
+                  whatever a clerk types at booking time. Changing a price
+                  never touches an existing reservation — see computeAddOns. */}
+              <h3 style={{ marginTop: 16 }}>Manage add-on prices</h3>
+              {addOnCatalog.map((c) => (
+                <div key={c.code} className="row" style={{ alignItems: 'center' }}>
+                  <div style={{ flex: 1 }} className={c.active ? undefined : 'muted'}>
+                    {c.label}
+                    {!c.active && ' (inactive)'}
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    style={{ width: 110 }}
+                    placeholder={(c.priceCents / 100).toFixed(2)}
+                    value={catalogPriceEdits[c.code] ?? ''}
+                    onChange={(e) => setCatalogPriceEdits((m) => ({ ...m, [c.code]: e.target.value }))}
+                  />
+                  <button
+                    className="secondary"
+                    disabled={!catalogPriceEdits[c.code]?.trim() || !(Number(catalogPriceEdits[c.code]) >= 0)}
+                    onClick={() => saveCatalogPrice(c.code)}
+                  >
+                    Save price
+                  </button>
+                  <button className="secondary" onClick={() => toggleCatalogActive(c)}>
+                    {c.active ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
+              ))}
+              <div className="row" style={{ marginTop: 8 }}>
+                <div>
+                  <label>New add-on label</label>
+                  <input
+                    value={newCatalogLabel}
+                    placeholder="e.g. Poolside cabana"
+                    onChange={(e) => setNewCatalogLabel(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label>Price (₱)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={newCatalogPricePesos}
+                    onChange={(e) => setNewCatalogPricePesos(e.target.value)}
+                  />
+                </div>
+                <div className="row-action">
+                  <button
+                    className="secondary"
+                    disabled={!newCatalogLabel.trim() || !(Number(newCatalogPricePesos) >= 0)}
+                    onClick={addCatalogItem}
+                  >
+                    Add to catalog
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

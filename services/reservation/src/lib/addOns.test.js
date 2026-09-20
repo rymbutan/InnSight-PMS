@@ -31,3 +31,19 @@ test('non-array input returns an empty list', () => {
   assert.deepEqual(computeAddOns(null, 10), []);
   assert.deepEqual(computeAddOns(undefined, 10), []);
 });
+
+test('a catalog-backed line is priced from the catalog, never the client-sent cost', () => {
+  const catalog = { EXTRA_BED: { code: 'EXTRA_BED', label: 'Extra bed', priceCents: 50000 } };
+  // A tampered/stale client sends 1 peso for something that actually costs 500.
+  const result = computeAddOns([{ code: 'EXTRA_BED', description: 'whatever', costCents: 100 }], 10, catalog);
+  assert.deepEqual(result, [
+    { code: 'EXTRA_BED', description: 'Extra bed', costCents: 50000, feePercent: 10, totalCents: 55000 },
+  ]);
+});
+
+test('a code that is not in the catalog falls back to the staff-entered line, same as no code at all', () => {
+  const result = computeAddOns([{ code: 'UNKNOWN', description: 'Custom thing', costCents: 1000 }], 10, {});
+  assert.deepEqual(result, [
+    { description: 'Custom thing', costCents: 1000, feePercent: 10, totalCents: 1100 },
+  ]);
+});
