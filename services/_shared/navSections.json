@@ -166,7 +166,7 @@
           "label": "Booking & Reservations",
           "icon": "book-marked",
           "matchPaths": ["/calendar"],
-          "roles": ["ADMIN", "MANAGER", "FRONT_DESK"],
+          "roles": ["ADMIN", "MANAGER", "FRONT_DESK", "AUDITOR"],
           "api": [
             "/api/reservations",
             "/api/room-types",
