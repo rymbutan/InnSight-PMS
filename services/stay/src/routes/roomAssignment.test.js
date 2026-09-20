@@ -367,6 +367,71 @@ test('a walk-in with a zero deposit is refused', async () => {
   assert.match(res.body.error, /deposit is required/i);
 });
 
+// ── Special requests, add-ons, and per-method deposit detail ────────────────
+//
+// A walk-in has no backing Reservation, so it used to have nowhere to carry
+// the same detail NewReservation.jsx's wizard already collects for a reserved
+// booking. These mirror Reservation's own persisted fields.
+
+test('special requests and add-ons are persisted, add-ons priced at face value', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    specialRequests: 'High floor room, Extra pillows',
+    addOns: [
+      { description: 'Airport transfer', costCents: 80000 },
+      { description: '', costCents: 5000 }, // blank description dropped, same as reservation-service
+    ],
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.specialRequests, 'High floor room, Extra pillows');
+  assert.deepStrictEqual(res.body.addOns, [
+    { description: 'Airport transfer', costCents: 80000, totalCents: 80000 },
+  ]);
+});
+
+test('a CARD deposit missing the card detail is refused', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    paymentType: 'CARD',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /card/i);
+  assert.strictEqual(memDb.stay.size, 0, 'a refused deposit must not create a stay');
+});
+
+test('a BANK_TRANSFER deposit missing the sender name is refused', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    paymentType: 'BANK_TRANSFER',
+    bankName: 'BDO',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /sender/i);
+});
+
+test('a complete CARD deposit is accepted and its detail persisted', async () => {
+  reset();
+  const res = await walkIn(makeApp(), {
+    guestName: 'Ana Cruz',
+    assignedRoomId: 'room-101',
+    paymentType: 'CARD',
+    cardMasked: '4242',
+    cardholderName: 'Ana Cruz',
+  });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.paymentType, 'CARD');
+  assert.strictEqual(res.body.depositCardMasked, '4242');
+  assert.strictEqual(res.body.depositCardholderName, 'Ana Cruz');
+  // Bank fields belong to a different method and must not leak in.
+  assert.strictEqual(res.body.depositBankName, undefined);
+});
+
 test('a room freed by checkout can be reused', async () => {
   reset();
   const app = makeApp();
