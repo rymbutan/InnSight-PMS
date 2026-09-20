@@ -540,6 +540,19 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
     } = req.body;
     if (!guestName) return res.status(400).json({ error: 'guestName is required.' });
 
+    // A guest already occupying a room shouldn't be walked into a second one —
+    // this is local to this service's own table, unlike the reservation-side
+    // duplicate check (which has to ask this service, since a Stay is the only
+    // record of who is actually in-house).
+    if (guestId) {
+      const already = await prisma.stay.findFirst({ where: { guestId, status: 'IN_HOUSE' } });
+      if (already) {
+        return res.status(409).json({
+          error: `This guest is already checked in, in room ${already.assignedRoomId || 'unassigned'}.`,
+        });
+      }
+    }
+
     // This route used to be a bare create() that trusted the client's roomId
     // entirely — WalkIn.jsx computed availability in the browser and the server
     // verified nothing. Two clerks with lists fetched seconds apart would both

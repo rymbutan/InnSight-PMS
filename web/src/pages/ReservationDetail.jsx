@@ -343,10 +343,6 @@ export default function ReservationDetail() {
               <div className="res-field-label">Estimated Arrival Time</div>
               <div className="res-field-value">{res.expectedArrivalTime || 'Unknown'}</div>
             </div>
-            <div>
-              <div className="res-field-label">Special Requests</div>
-              <div className="res-field-value">{res.specialRequests || '—'}</div>
-            </div>
             {res.status === 'CANCELLED' && (
               <>
                 <div>
@@ -574,6 +570,14 @@ function AccommodationsTab({ res, stay, onQuickEdit, navigate }) {
           </tr>
         </tbody>
       </table>
+      {/* Moved here from the reservation header's "Show more" section — this
+          is a fact about the STAY (what the guest needs once they're in the
+          room), not about the booking record itself, so it belongs on the
+          stay-details tab rather than buried in the reservation summary. */}
+      <div style={{ marginTop: 16 }}>
+        <div className="res-field-label">Special Requests</div>
+        <div className="res-field-value">{res.specialRequests || '—'}</div>
+      </div>
     </div>
   );
 }
