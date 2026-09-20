@@ -974,7 +974,16 @@ export default function Folios() {
                   </button>
                 )}
                 {folio.status === 'OPEN' && (
-                  <button className="danger" onClick={closeFolio}>
+                  <button
+                    className="danger"
+                    onClick={closeFolio}
+                    disabled={Number(statement?.balanceCents || 0) > 0}
+                    title={
+                      Number(statement?.balanceCents || 0) > 0
+                        ? 'Settle the outstanding balance before closing this folio.'
+                        : undefined
+                    }
+                  >
                     Close folio
                   </button>
                 )}
