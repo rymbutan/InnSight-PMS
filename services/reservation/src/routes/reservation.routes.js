@@ -388,15 +388,7 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
     // percentage is read fresh here and frozen onto each add-on so a later
     // change to it never rewrites an already-booked guest's total.
     const feeSetting = await prisma.appSetting.findUnique({ where: { key: 'addon_fee_percent' } });
-    // Look up the authoritative price for every catalog-backed line — never
-    // the client-sent costCents (see computeAddOns). A line with no `code` is
-    // the wizard's free-text "Other" and has no catalog price to look up.
-    const addOnCodes = [...new Set((rawAddOns || []).map((a) => a?.code).filter(Boolean))];
-    const addOnCatalogRows = addOnCodes.length
-      ? await prisma.addOnCatalogItem.findMany({ where: { code: { in: addOnCodes } } })
-      : [];
-    const addOnCatalogByCode = Object.fromEntries(addOnCatalogRows.map((c) => [c.code, c]));
-    const enrichedAddOns = computeAddOns(rawAddOns, Number(feeSetting?.value ?? 10), addOnCatalogByCode);
+    const enrichedAddOns = computeAddOns(rawAddOns, Number(feeSetting?.value ?? 10));
 
     // ── PHASE 1: claim capacity ──────────────────────────────────────────────
     // This route previously inserted the reservation with NO availability check
@@ -1448,101 +1440,6 @@ router.put('/settings/addon-fee-percent', requireRole(...ROLE_GROUPS.MGMT), asyn
     res.json({ feePercent: Number(row.value) });
   } catch (err) {
     console.error('[Reservation] Set setting error:', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// Turn a label into a stable, human-readable code ("Airport transfer" →
-// "AIRPORT_TRANSFER"), the same convention the seeded catalog rows use.
-// Collisions are handled by the caller checking uniqueness before insert.
-function slugifyAddOnCode(label) {
-  return String(label)
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 64);
-}
-
-// ── Add-on catalog ───────────────────────────────────────────────────────────
-// Priced, admin-managed extras — see the AddOnCatalogItem model comment for
-// why this is separate from Reservation.specialRequests.
-
-// GET /api/settings/addon-catalog — active items, for the wizard's Add-ons
-// step. DESK, not MGMT: every front-desk booking reads this, only editing it
-// is a manager action.
-router.get('/settings/addon-catalog', requireRole(...ROLE_GROUPS.DESK), async (req, res) => {
-  try {
-    const items = await prisma.addOnCatalogItem.findMany({
-      where: req.query.all ? {} : { active: true },
-      orderBy: { label: 'asc' },
-    });
-    res.json(items);
-  } catch (err) {
-    console.error('[Reservation] List add-on catalog error:', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// POST /api/settings/addon-catalog — admin/manager only.
-router.post('/settings/addon-catalog', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
-  try {
-    const { label, priceCents } = req.body;
-    if (!label || !String(label).trim()) return res.status(400).json({ error: 'label is required.' });
-    if (!Number.isFinite(Number(priceCents)) || Number(priceCents) < 0) {
-      return res.status(400).json({ error: 'priceCents must be a non-negative number.' });
-    }
-    const code = slugifyAddOnCode(label);
-    if (!code) return res.status(400).json({ error: 'label must contain at least one letter or digit.' });
-    const existing = await prisma.addOnCatalogItem.findUnique({ where: { code } });
-    if (existing) return res.status(409).json({ error: `An add-on with a matching code (${code}) already exists.` });
-    const item = await prisma.addOnCatalogItem.create({
-      data: { code, label: String(label).trim(), priceCents: Math.round(Number(priceCents)) },
-    });
-    res.status(201).json(item);
-  } catch (err) {
-    console.error('[Reservation] Create add-on catalog item error:', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// PATCH /api/settings/addon-catalog/:code — admin/manager only. Changing a
-// price here never touches a reservation already booked — see computeAddOns,
-// which freezes the price at booking time.
-router.patch('/settings/addon-catalog/:code', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
-  try {
-    const { label, priceCents, active } = req.body;
-    const data = {};
-    if (label !== undefined) {
-      if (!String(label).trim()) return res.status(400).json({ error: 'label cannot be blank.' });
-      data.label = String(label).trim();
-    }
-    if (priceCents !== undefined) {
-      if (!Number.isFinite(Number(priceCents)) || Number(priceCents) < 0) {
-        return res.status(400).json({ error: 'priceCents must be a non-negative number.' });
-      }
-      data.priceCents = Math.round(Number(priceCents));
-    }
-    if (active !== undefined) data.active = Boolean(active);
-    const item = await prisma.addOnCatalogItem.update({ where: { code: req.params.code }, data });
-    res.json(item);
-  } catch (err) {
-    if (err.code === 'P2025') return res.status(404).json({ error: 'Not found.' });
-    console.error('[Reservation] Update add-on catalog item error:', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// DELETE /api/settings/addon-catalog/:code — admin/manager only. Safe at any
-// time: a reservation's own addOns are a frozen JSON copy (description,
-// costCents), never a live reference to this row.
-router.delete('/settings/addon-catalog/:code', requireRole(...ROLE_GROUPS.MGMT), async (req, res) => {
-  try {
-    await prisma.addOnCatalogItem.delete({ where: { code: req.params.code } });
-    res.status(204).end();
-  } catch (err) {
-    if (err.code === 'P2025') return res.status(404).json({ error: 'Not found.' });
-    console.error('[Reservation] Delete add-on catalog item error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

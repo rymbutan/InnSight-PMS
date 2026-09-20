@@ -1063,6 +1063,11 @@ test('a patched checkout is stamped too, so windows stay comparable', async () =
 test('back-to-back bookings in the same room do not collide', async () => {
   const app = makeApp();
   inventoryStub.reset();
+  // An explicitly-picked room is now re-validated against the same free-room
+  // check auto-assign uses (see isRoomFree in lib/roomAssignment.js), which
+  // reads its candidates from here — an empty list would refuse the pick
+  // outright, same as a room the type genuinely doesn't have.
+  inventoryStub.rooms = [{ id: 'room-1', typeCode: 'STD', floor: 1, number: '101' }];
   const first = await call(app, 'POST', '/api/reservations', {
     ...sample,
     assignedRoomId: 'room-1',
