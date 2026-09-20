@@ -8,74 +8,12 @@ import { formatPeso, pesosToCents } from '../lib/money';
 import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 
-import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
+import { SOURCES, SOURCE_LABELS, SPECIAL_REQUEST_QUICK_PICKS, BANK_NAMES, TRANSFER_NETWORKS } from '../lib/reservationOptions';
+import { CARD_BRANDS, EMPTY_DEPOSIT_DETAIL, nowForDateTimeLocal, missingDepositField } from '../lib/depositDetail';
 import { paymentMethodGroups } from '../lib/paymentMethods';
 import { ADDON_PREFERENCE_CATEGORY, useAddOnCatalog } from '../lib/guestAddonPreferences';
 
 const STEPS = ['Availability', 'Details', 'Guests', 'Payment'];
-
-// Same per-method deposit detail Folios.jsx's "Post payment" modal collects,
-// minus amount (that's depositPesos) and proof upload (out of scope here — no
-// folio/payment id exists yet at booking time to attach a document to).
-const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'JCB', 'OTHER'];
-const BANK_NAMES = ['BDO', 'BPI', 'Metrobank', 'UnionBank', 'Landbank', 'OTHER'];
-const TRANSFER_NETWORKS = ['InstaPay', 'PESONet', 'Direct OTC Deposit', 'Wire Transfer', 'OTHER'];
-const EMPTY_DEPOSIT_DETAIL = {
-  cardBrand: 'VISA',
-  cardLast4: '',
-  cardholderName: '',
-  gatewayRef: '',
-  bankName: 'BDO',
-  bankNameOther: '',
-  transferNetwork: 'InstaPay',
-  transferNetworkOther: '',
-  senderName: '',
-  bankRef: '',
-  transferredAt: '',
-};
-
-// 'YYYY-MM-DDTHH:mm' in LOCAL time, what <input type="datetime-local"> both
-// accepts and returns — toISOString() would shift this to UTC.
-function nowForDateTimeLocal() {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
-}
-
-// Mirrors services/reservation/src/lib/missingDepositField.js exactly, so a
-// deposit the wizard lets through is never rejected by the server.
-function missingDepositField(method, detail) {
-  if (method === 'CARD') {
-    if (!/^\d{4}$/.test(detail.cardLast4)) return 'Enter the last 4 digits of the card.';
-    if (!detail.cardholderName.trim()) return 'Cardholder name is required.';
-  }
-  if (method === 'BANK_TRANSFER') {
-    if (detail.bankName === 'OTHER' && !detail.bankNameOther.trim()) return 'Enter the bank name.';
-    if (detail.transferNetwork === 'OTHER' && !detail.transferNetworkOther.trim()) {
-      return 'Enter the transfer network/channel.';
-    }
-    if (!detail.senderName.trim()) return "Sender/account holder's name is required.";
-    if (!detail.bankRef.trim()) return 'Bank reference/control number is required.';
-  }
-  return null;
-}
-
-// Quick-insert chips for the Special Requests note in Stay details — the
-// common FREE preferences a front desk hears repeatedly, so staff click one
-// instead of re-typing it every time. Purely informational text with no cost
-// of its own: a paid extra (a baby cot, an airport transfer) belongs in
-// Add-ons instead, priced from the catalog there — the two used to be the
-// same freeform box, which is how "quiet room" ended up billed to the folio
-// like a paid add-on.
-const SPECIAL_REQUEST_QUICK_PICKS = [
-  'High floor room',
-  'Quiet room',
-  'Luggage storage',
-  'Away from elevator',
-  'Near elevator',
-  'Car parking',
-  'Honeymoon arrangements',
-];
 
 export default function NewReservation() {
   const [params] = useSearchParams();
