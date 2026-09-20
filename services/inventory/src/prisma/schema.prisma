@@ -118,6 +118,22 @@ model Facility {
   bookings     FacilityBooking[]
 }
 
+// Priced, admin-managed catalog of reservation add-ons (extra pillows, airport
+// transfer, late checkout…). Lives here alongside Facility — same "priced
+// extra the front desk can sell" shape — so admins manage both from the one
+// Amenities & Facilities page instead of a separate settings screen. `code`
+// is what GuestPreference (guest-service, category 'addon') keys a guest's
+// standing checklist against, so it must stay stable once in use.
+model AddOnCatalogItem {
+  id         String   @id @default(uuid())
+  code       String   @unique
+  label      String
+  priceCents Int
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 // A time-slot reservation for a reservable facility (event hall, meeting room).
 model FacilityBooking {
   id         String   @id @default(uuid())
