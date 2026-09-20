@@ -84,7 +84,8 @@ export default function WalkIn() {
 
   async function submit(e) {
     e.preventDefault();
-    const guestName = pickedGuest?.displayName || guestQ.trim();
+    const typedName = guestQ.trim();
+    const guestName = pickedGuest?.displayName || typedName;
     if (!guestName) return toast.error('Guest name is required.');
     // Mandatory Downpayment Constraint, same as the reservation wizard — this
     // catches it before the round trip, the server enforces it regardless.
@@ -94,9 +95,26 @@ export default function WalkIn() {
     const checkout = new Date();
     checkout.setDate(checkout.getDate() + Number(form.nights || 1));
     try {
+      // A typed name with no picked profile is a genuinely new guest — same
+      // as NewReservation.jsx, which creates one rather than leaving the stay
+      // linked to nothing but a free-text name. Without this, a new walk-in
+      // guest was invisible to the Guests section and every later lookup
+      // (repeat-guest search, loyalty accrual, "already checked in" guard)
+      // that keys off guestId instead of the name string.
+      let guest = pickedGuest;
+      if (!guest && typedName) {
+        // Same first/last split ReservationDetail.jsx's Quick Edit uses to
+        // seed its own fields from a single guestName string.
+        const { data } = await api.post('/api/guests', {
+          firstName: typedName.split(' ')[0] || '',
+          lastName: typedName.split(' ').slice(1).join(' ') || '',
+          displayName: typedName,
+        });
+        guest = data;
+      }
       const { data } = await api.post('/api/walk-in', {
         guestName,
-        guestId: pickedGuest?.id || undefined,
+        guestId: guest?.id || undefined,
         // '' means "Auto-assign" — the server picks a room itself rather
         // than requiring the desk to scan the list for a free one.
         assignedRoomId: form.assignedRoomId || undefined,
