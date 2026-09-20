@@ -125,6 +125,43 @@ async function validateRoomAssignment(assignedRoomId, excludeStayId) {
   return { ok: true, room };
 }
 
+/**
+ * The first habitable, unoccupied room for a walk-in with no room preference
+ * — "Auto-assign" in WalkIn.jsx. A walk-in has no room-type step the way a
+ * reservation does, so unlike roomAssignment.js's pickAssignableRoom (scoped
+ * to one type, checked against the RESERVATION table) this scans every room
+ * and checks against THIS service's own Stay table, which is the only place
+ * "occupied by a walk-in" is recorded at all.
+ *
+ * Best-effort by the same design as reservation-service's version: a picked
+ * room is re-validated by validateRoomAssignment right after, so a race
+ * against a concurrent check-in still fails safely rather than double-booking
+ * the room — this just narrows the field the caller has to try.
+ *
+ * @returns {Promise<object|null>} the room, or null if none are free
+ */
+async function pickWalkInRoom() {
+  let rooms;
+  try {
+    rooms = await inventory.listRooms();
+  } catch (err) {
+    console.error('[Stay] Could not list rooms for walk-in auto-assign:', err.message);
+    return null;
+  }
+  // Same order front-desk staff pick from: lowest floor, then lowest number.
+  const habitable = (rooms || [])
+    .filter((r) => HABITABLE_ROOM_STATUSES.includes(r.status))
+    .sort((a, b) => a.floor - b.floor || String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
+  if (!habitable.length) return null;
+
+  const occupied = await prisma.stay.findMany({
+    where: { assignedRoomId: { in: habitable.map((r) => r.id) }, status: 'IN_HOUSE' },
+    select: { assignedRoomId: true },
+  });
+  const occupiedIds = new Set(occupied.map((o) => o.assignedRoomId));
+  return habitable.find((r) => !occupiedIds.has(r.id)) || null;
+}
+
 // Arrivals/departures are LOCAL business days. Delegated to the shared helper so
 // this service and the audit service agree on where a day starts — they used to
 // build day keys with different conventions and sat 8 hours out of phase.
@@ -553,11 +590,23 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
       }
     }
 
+    // No room chosen means "Auto-assign" (WalkIn.jsx's default) rather than a
+    // missing field — pick the first habitable, unoccupied room ourselves
+    // instead of making the desk scan the list for one.
+    let effectiveRoomId = assignedRoomId;
+    if (!effectiveRoomId) {
+      const picked = await pickWalkInRoom();
+      if (!picked) return res.status(409).json({ error: 'No clean, vacant rooms are available right now.' });
+      effectiveRoomId = picked.id;
+    }
+
     // This route used to be a bare create() that trusted the client's roomId
     // entirely — WalkIn.jsx computed availability in the browser and the server
     // verified nothing. Two clerks with lists fetched seconds apart would both
-    // be offered the same room and both succeed.
-    const roomCheck = await validateRoomAssignment(assignedRoomId);
+    // be offered the same room and both succeed. Re-checked here even for an
+    // auto-assigned pick, since a concurrent check-in could have taken it in
+    // between pickWalkInRoom's read and this write.
+    const roomCheck = await validateRoomAssignment(effectiveRoomId);
     if (!roomCheck.ok) return res.status(roomCheck.status).json({ error: roomCheck.error });
 
     // A walk-in has no Reservation to price it from, which is exactly what left
@@ -581,7 +630,7 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
       data: {
         guestName,
         guestId,
-        assignedRoomId,
+        assignedRoomId: effectiveRoomId,
         status: 'IN_HOUSE',
         actualCheckInAt: checkInAt,
         expectedCheckOut: checkOutAt,
@@ -598,7 +647,7 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
       JSON.stringify({
         event: 'guest.checked_in',
         stayId: stay.id,
-        roomId: assignedRoomId,
+        roomId: effectiveRoomId,
         guestName,
         guestId,
         walkIn: true,
