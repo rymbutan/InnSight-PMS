@@ -10,7 +10,7 @@ import Autocomplete from '../components/Autocomplete';
 
 import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
 import { paymentMethodGroups } from '../lib/paymentMethods';
-import { ADDON_PREFERENCE_OPTIONS, ADDON_PREFERENCE_CATEGORY } from '../lib/guestAddonPreferences';
+import { ADDON_PREFERENCE_CATEGORY, useAddOnCatalog } from '../lib/guestAddonPreferences';
 
 const STEPS = ['Availability', 'Details', 'Guests', 'Payment'];
 
@@ -95,6 +95,7 @@ export default function NewReservation() {
   // Standardized preferences (extra pillows, etc.) live on the guest's own
   // profile now instead of being re-entered per booking — see Guests.jsx.
   const [specialRequests, setSpecialRequests] = useState('');
+  const [otherSpecialRequest, setOtherSpecialRequest] = useState('');
   // Per the Terms & Conditions' "Promotional / Non-Refundable Tier": flagged
   // bookings forfeit the full amount on cancellation regardless of timing.
   const [isNonRefundable, setIsNonRefundable] = useState(false);
@@ -137,6 +138,7 @@ export default function NewReservation() {
   // Guests.jsx itself uses, so the two are always the same data and neither
   // can drift into its own per-booking copy.
   const [guestAddonPrefs, setGuestAddonPrefs] = useState({}); // { [code]: true }
+  const addonCatalog = useAddOnCatalog();
   const [savingAddonPref, setSavingAddonPref] = useState(null);
   useEffect(() => {
     if (!pickedGuest?.id) return setGuestAddonPrefs({});
@@ -371,8 +373,16 @@ export default function NewReservation() {
     return Math.max(0, Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000));
   }, [checkIn, checkOut]);
 
+  // Checked add-ons, priced from the live catalog — same rows toggleGuestAddonPref
+  // writes to the guest's profile, just also charged onto THIS reservation.
+  const checkedAddOns = useMemo(
+    () => addonCatalog.filter((o) => guestAddonPrefs[o.code]),
+    [addonCatalog, guestAddonPrefs]
+  );
+
   const totals = useMemo(() => {
     const subtotalCents = picks.reduce((s, p) => s + p.ratePerNightCents * p.qty * nights, 0);
+    const addOnsCents = checkedAddOns.reduce((s, o) => s + (o.priceCents || 0), 0);
     // Mirrors computeTax() in services/_shared/policies.js: four named
     // components at the hotel's configured rates, not a hardcoded VAT-only
     // guess — this is the same total the night audit will eventually charge.
@@ -381,10 +391,10 @@ export default function NewReservation() {
         (taxRates.vat + taxRates.serviceCharge + taxRates.localTax + taxRates.realPropertyTax)) /
         100
     );
-    const grandTotalCents = subtotalCents + taxCents;
+    const grandTotalCents = subtotalCents + addOnsCents + taxCents;
     const suggestedDepositCents = Math.round(grandTotalCents * 0.5);
-    return { subtotalCents, taxCents, grandTotalCents, suggestedDepositCents };
-  }, [picks, nights, taxRates]);
+    return { subtotalCents, addOnsCents, taxCents, grandTotalCents, suggestedDepositCents };
+  }, [picks, nights, taxRates, checkedAddOns]);
 
   const balanceDueCents = useMemo(() => {
     return Math.max(0, totals.grandTotalCents - pesosToCents(depositPesos));
@@ -481,6 +491,23 @@ export default function NewReservation() {
         });
         guest = data;
       }
+      // A bank account typed into Step 2 before a guest existed (or left
+      // un-saved for a picked guest) — save it now that guest.id is known.
+      // "+ Add account" already saves immediately once a guest is picked, so
+      // this only ever fires for what that button couldn't reach yet.
+      if (guest?.id && newBankAccount.bankName.trim() && newBankAccount.accountName.trim() && /^\d{4}$/.test(newBankAccount.accountNumberLast4)) {
+        try {
+          await api.post(`/api/guests/${guest.id}/bank-accounts`, {
+            bankName: newBankAccount.bankName.trim(),
+            accountName: newBankAccount.accountName.trim(),
+            accountNumberLast4: newBankAccount.accountNumberLast4,
+            transferNetwork: newBankAccount.transferNetwork.trim() || undefined,
+            isDefault: guestBankAccounts.length === 0,
+          });
+        } catch (e) {
+          toast.error(`Reservation created, but the bank account could not be saved: ${errMsg(e)}`);
+        }
+      }
       const first = picks[0];
       const payload = {
         guestId: guest?.id,
@@ -499,6 +526,9 @@ export default function NewReservation() {
         children: Number(children) || 0,
         source,
         totalEstimateCents: totals.grandTotalCents,
+        // Priced from the catalog at submit time, in the shape the server's
+        // computeAddOns() already expects.
+        addOns: checkedAddOns.map((o) => ({ description: o.label, costCents: o.priceCents })),
         depositCents: pesosToCents(depositPesos),
         paymentType: paymentMethod,
         isNonRefundable,
@@ -804,6 +834,38 @@ export default function NewReservation() {
               </button>
             ))}
           </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <div style={{ flex: 1 }}>
+              <input
+                value={otherSpecialRequest}
+                onChange={(e) => setOtherSpecialRequest(e.target.value)}
+                placeholder="Other — type a request not listed above"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  const text = otherSpecialRequest.trim();
+                  if (!text) return;
+                  setSpecialRequests((prev) => (prev.trim() ? `${prev.trim()}, ${text}` : text));
+                  setOtherSpecialRequest('');
+                }}
+              />
+            </div>
+            <div style={{ alignSelf: 'flex-end' }}>
+              <button
+                type="button"
+                className="secondary small"
+                disabled={!otherSpecialRequest.trim()}
+                onClick={() => {
+                  const text = otherSpecialRequest.trim();
+                  if (!text) return;
+                  setSpecialRequests((prev) => (prev.trim() ? `${prev.trim()}, ${text}` : text));
+                  setOtherSpecialRequest('');
+                }}
+              >
+                + Add
+              </button>
+            </div>
+          </div>
 
           {/* Company/banking live on the guest's own profile (Guests.jsx) —
               editable here too so the desk doesn't have to leave the wizard
@@ -821,91 +883,88 @@ export default function NewReservation() {
           </div>
 
           <h3 style={{ marginTop: 18 }}>Banking details</h3>
+          {pickedGuest && guestBankAccounts.length > 0 && (
+            <table style={{ marginBottom: 12 }}>
+              <thead>
+                <tr>
+                  <th>Bank</th>
+                  <th>Account</th>
+                  <th>Last 4</th>
+                  <th>Network</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {guestBankAccounts.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.bankName}</td>
+                    <td>{a.accountName}</td>
+                    <td>{a.accountNumberLast4}</td>
+                    <td>{a.transferNetwork || '—'}</td>
+                    <td className="t-c">{a.isDefault ? 'Default' : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="row">
+            <div>
+              <label>Bank</label>
+              <select
+                value={newBankAccount.bankName}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, bankName: e.target.value })}
+              >
+                <option value="">Select...</option>
+                {BANK_NAMES.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Account holder</label>
+              <input
+                value={newBankAccount.accountName}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, accountName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Last 4 digits</label>
+              <input
+                value={newBankAccount.accountNumberLast4}
+                maxLength={4}
+                onChange={(e) =>
+                  setNewBankAccount({ ...newBankAccount, accountNumberLast4: e.target.value.replace(/\D/g, '') })
+                }
+              />
+            </div>
+            <div>
+              <label>Network</label>
+              <select
+                value={newBankAccount.transferNetwork}
+                onChange={(e) => setNewBankAccount({ ...newBankAccount, transferNetwork: e.target.value })}
+              >
+                <option value="">Select...</option>
+                {TRANSFER_NETWORKS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {pickedGuest && (
+              <div style={{ alignSelf: 'flex-end' }}>
+                <button type="button" className="secondary small" disabled={savingBankAccount} onClick={addGuestBankAccount}>
+                  + Add account
+                </button>
+              </div>
+            )}
+          </div>
           {!pickedGuest && (
             <p className="hint">
-              Pick an existing guest in the Guests step, or save this booking with a new guest first, to add a bank
-              account. Company/employee name above is kept either way.
+              Saved automatically for this guest once the reservation is created below.
             </p>
-          )}
-          {pickedGuest && (
-            <>
-              {guestBankAccounts.length > 0 && (
-                <table style={{ marginBottom: 12 }}>
-                  <thead>
-                    <tr>
-                      <th>Bank</th>
-                      <th>Account</th>
-                      <th>Last 4</th>
-                      <th>Network</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {guestBankAccounts.map((a) => (
-                      <tr key={a.id}>
-                        <td>{a.bankName}</td>
-                        <td>{a.accountName}</td>
-                        <td>{a.accountNumberLast4}</td>
-                        <td>{a.transferNetwork || '—'}</td>
-                        <td className="t-c">{a.isDefault ? 'Default' : ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              <div className="row">
-                <div>
-                  <label>Bank</label>
-                  <select
-                    value={newBankAccount.bankName}
-                    onChange={(e) => setNewBankAccount({ ...newBankAccount, bankName: e.target.value })}
-                  >
-                    <option value="">Select...</option>
-                    {BANK_NAMES.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label>Account holder</label>
-                  <input
-                    value={newBankAccount.accountName}
-                    onChange={(e) => setNewBankAccount({ ...newBankAccount, accountName: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label>Last 4 digits</label>
-                  <input
-                    value={newBankAccount.accountNumberLast4}
-                    maxLength={4}
-                    onChange={(e) =>
-                      setNewBankAccount({ ...newBankAccount, accountNumberLast4: e.target.value.replace(/\D/g, '') })
-                    }
-                  />
-                </div>
-                <div>
-                  <label>Network</label>
-                  <select
-                    value={newBankAccount.transferNetwork}
-                    onChange={(e) => setNewBankAccount({ ...newBankAccount, transferNetwork: e.target.value })}
-                  >
-                    <option value="">Select...</option>
-                    {TRANSFER_NETWORKS.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ alignSelf: 'flex-end' }}>
-                  <button type="button" className="secondary small" disabled={savingBankAccount} onClick={addGuestBankAccount}>
-                    + Add account
-                  </button>
-                </div>
-              </div>
-            </>
           )}
         </div>
       )}
@@ -967,7 +1026,7 @@ export default function NewReservation() {
                   every future stay too, not just this reservation. */}
               <label>Add-on preferences</label>
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                {ADDON_PREFERENCE_OPTIONS.map((o) => (
+                {addonCatalog.map((o) => (
                   <label
                     key={o.code}
                     style={{
@@ -987,6 +1046,7 @@ export default function NewReservation() {
                       onChange={(e) => toggleGuestAddonPref(o.code, e.target.checked)}
                     />
                     {o.label}
+                    {o.priceCents > 0 && <span className="muted"> ({formatPeso(o.priceCents)})</span>}
                   </label>
                 ))}
               </div>
@@ -1094,6 +1154,35 @@ export default function NewReservation() {
       {step === 4 && (
         <div className="panel">
           <h3>Payment</h3>
+
+          <h3 style={{ marginTop: 0 }}>Total breakdown</h3>
+          <table style={{ marginBottom: 18 }}>
+            <tbody>
+              <tr>
+                <td>Room charges ({nights} night{nights === 1 ? '' : 's'})</td>
+                <td className="t-n">{formatPeso(totals.subtotalCents)}</td>
+              </tr>
+              {checkedAddOns.map((o) => (
+                <tr key={o.code}>
+                  <td>{o.label}</td>
+                  <td className="t-n">{formatPeso(o.priceCents)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td>Taxes &amp; fees</td>
+                <td className="t-n">{formatPeso(totals.taxCents)}</td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Grand total</strong>
+                </td>
+                <td className="t-n">
+                  <strong>{formatPeso(totals.grandTotalCents)}</strong>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
           <div className="row">
             <div>
               <label>Suggested deposit</label>
@@ -1312,6 +1401,12 @@ export default function NewReservation() {
             <div className="label">Subtotal</div>
             <div className="value">{formatPeso(totals.subtotalCents)}</div>
           </div>
+          {totals.addOnsCents > 0 && (
+            <div className="wizard-total">
+              <div className="label">Add-ons</div>
+              <div className="value">{formatPeso(totals.addOnsCents)}</div>
+            </div>
+          )}
           <div className="wizard-total">
             <div className="label">Taxes</div>
             <div className="value">{formatPeso(totals.taxCents)}</div>
