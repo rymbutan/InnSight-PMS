@@ -593,7 +593,17 @@ export default function NewReservation() {
                                 (r) =>
                                   availableRoomIds[p.typeCode].includes(r.id) || r.id === p.assignedRoomId
                               )
-                            : allRooms.filter((r) => r.typeCode === p.typeCode && r.status !== 'OUT_OF_ORDER')
+                            : // While the availability fetch is still in flight, don't
+                              // offer a room that's plainly unusable or occupied right
+                              // now — the server re-checks this on submit regardless
+                              // (see reservation.routes.js's isRoomFree), but a choice
+                              // this list shouldn't have suggested in the first place
+                              // is worse UX than a shorter list for a moment.
+                              allRooms.filter(
+                                (r) =>
+                                  r.typeCode === p.typeCode &&
+                                  !['OUT_OF_ORDER', 'OUT_OF_SERVICE', 'OCCUPIED'].includes(r.status)
+                              )
                           ).map((r) => (
                             <option key={r.id} value={r.id}>
                               Room {r.number}
