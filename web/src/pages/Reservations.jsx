@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -16,6 +17,11 @@ const STATUS_OPTIONS = ['CONFIRMED', 'PENDING', 'CANCELLED', 'IN_HOUSE', 'CHECKE
 export default function Reservations() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { hasRole } = useAuth();
+  // AUDITOR reaches this list for oversight (server already allows the read —
+  // ROLE_GROUPS.DESK_AUDIT on GET /reservations), not to create bookings —
+  // /reservations/new stays out of their reach at the route level too.
+  const canCreate = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   const [list, setList] = useState([]);
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -143,14 +149,16 @@ export default function Reservations() {
           <h1>Reservations</h1>
           <FilterPill open={filtersOpen} onClick={() => setFiltersOpen((o) => !o)} />
         </div>
-        <button
-          className="btn-cta"
-          data-tour="tour-process-reservations"
-          onClick={() => navigate('/reservations/new')}
-        >
-          <Icon name="plus" size={14} style={{ marginRight: 6 }} />
-          Create new reservation
-        </button>
+        {canCreate && (
+          <button
+            className="btn-cta"
+            data-tour="tour-process-reservations"
+            onClick={() => navigate('/reservations/new')}
+          >
+            <Icon name="plus" size={14} style={{ marginRight: 6 }} />
+            Create new reservation
+          </button>
+        )}
       </div>
 
       <FilterPanel
