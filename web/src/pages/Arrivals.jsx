@@ -352,6 +352,7 @@ export default function Arrivals() {
                 <th className="t-c"></th>
                 <th>Stay</th>
                 <th>Guest</th>
+                <th className="t-c">Guests</th>
                 <th className="t-c">Guest status</th>
                 <th className="t-c">Room</th>
                 <th>Checked in</th>
@@ -367,6 +368,7 @@ export default function Arrivals() {
                   </td>
                   <td>{s.id.slice(0, 8)}</td>
                   <td>{s.guestName || <span className="muted">—</span>}</td>
+                  <td className="t-c">{s.adults == null ? '—' : s.adults + (s.children || 0)}</td>
                   <td className="t-c">
                     <StatusPill status={s.status} />
                   </td>

@@ -194,6 +194,12 @@ export default function Layout() {
   const [searchQ, setSearchQ] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  // Shown in the popover BEFORE anything is typed, so opening the box is not a
+  // dead end — the soonest arrivals are already the thing someone reaching for
+  // this box during a shift is most often after. Loaded once, quietly: a role
+  // that cannot see reservations just gets an empty default, same as a search
+  // that turns up nothing.
+  const [defaultReservations, setDefaultReservations] = useState([]);
   const createMenuRef = useRef(null);
   const acctMenuRef = useRef(null);
   const acctTriggerRef = useRef(null);
@@ -294,6 +300,17 @@ export default function Layout() {
       .then(({ data }) => applyAccent(data))
       .catch(() => {
         /* keep whatever the cached/shipped palette already painted */
+      });
+  }, []);
+
+  // Upcoming arrivals for the search popover's empty state — soonest check-in
+  // first, same ordering the calendar and arrivals list use.
+  useEffect(() => {
+    api
+      .get(`/api/reservations?checkInFrom=${new Date().toISOString()}`)
+      .then(({ data }) => setDefaultReservations((data || []).slice(0, 5)))
+      .catch(() => {
+        /* a role with no reservations access just sees an empty default */
       });
   }, []);
 
@@ -627,9 +644,7 @@ export default function Layout() {
               onChange={(e) => onSearchChange(e.target.value)}
               onFocus={() => setSearchOpen(true)}
             />
-            {searchOpen &&
-            searchResults &&
-            (searchResults.guests.length || searchResults.reservations.length) ? (
+            {searchOpen && searchResults && (searchResults.guests.length || searchResults.reservations.length) ? (
               <div className="cb-search-pop">
                 {searchResults.guests.length > 0 && (
                   <>
@@ -667,6 +682,25 @@ export default function Layout() {
                     ))}
                   </>
                 )}
+              </div>
+            ) : searchOpen && !searchQ.trim() && defaultReservations.length > 0 ? (
+              // Nothing typed yet — show the soonest arrivals instead of an
+              // empty box, so opening the search is not itself a dead end.
+              <div className="cb-search-pop">
+                <div className="cb-search-section">Upcoming reservations</div>
+                {defaultReservations.map((r) => (
+                  <button
+                    key={r.id}
+                    className="cb-search-item"
+                    onClick={() => {
+                      setSearchOpen(false);
+                      navigate(`/reservations/${r.id}`);
+                    }}
+                  >
+                    <span>{r.guestName || r.confirmationNumber || r.id.slice(0, 8)}</span>
+                    <span className="muted">{new Date(r.checkIn).toLocaleDateString()}</span>
+                  </button>
+                ))}
               </div>
             ) : null}
           </div>

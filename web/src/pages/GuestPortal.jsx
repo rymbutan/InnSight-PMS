@@ -113,6 +113,16 @@ export default function GuestPortal() {
                   <label>Room type</label>
                   <div>{res.roomTypeCode}</div>
                 </div>
+                <div>
+                  <label>Guests</label>
+                  <div>
+                    {res.adults == null
+                      ? '—'
+                      : `${res.adults + (res.children || 0)} (${res.adults} adult${res.adults === 1 ? '' : 's'}${
+                          res.children ? `, ${res.children} child${res.children === 1 ? '' : 'ren'}` : ''
+                        })`}
+                  </div>
+                </div>
               </div>
               <div className="row">
                 <div>

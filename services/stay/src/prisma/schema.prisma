@@ -20,6 +20,12 @@ model Stay {
   idVerification    Json?
   depositAmount     Int         @default(0)
   guestName         String?
+  // Set on walk-ins (which have no backing Reservation to source a rate/party
+  // size from) so the folio subscriber can post room charges the same way it
+  // does for a reserved stay, and so occupancy displays consistently.
+  nightlyRateCents  Int?
+  adults            Int?
+  children          Int?
   expectedCheckIn   DateTime?
   expectedCheckOut  DateTime?
   createdAt         DateTime    @default(now())
