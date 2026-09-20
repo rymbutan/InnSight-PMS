@@ -15,8 +15,6 @@ const STATUSES = ['CLEAN', 'CLEAN_INSPECTED', 'DIRTY', 'OCCUPIED', 'OUT_OF_ORDER
 export default function Rooms() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('ADMIN'); // property configuration is ADMIN-only
-  // Promotions are commercial, not configuration — see the panel below.
-  const canManagePromos = hasRole('ADMIN', 'MANAGER');
   const [rooms, setRooms] = useState([]);
   const [types, setTypes] = useState([]);
   const [newRoom, setNewRoom] = useState({ number: '', typeCode: '', floor: 1 });
@@ -49,55 +47,14 @@ export default function Rooms() {
   // The room type being fully edited, or null. One at a time — two open cards
   // in a 300px rail would leave neither readable.
   const [typeEdit, setTypeEdit] = useState(null);
-  const [promos, setPromos] = useState([]);
-  const [newPromo, setNewPromo] = useState({ code: '', percentOff: '', description: '' });
   const toast = useToast();
   const confirm = useConfirm();
 
   async function load() {
     try {
-      const [r, t, p] = await Promise.all([
-        api.get('/api/rooms'),
-        api.get('/api/room-types'),
-        api.get('/api/promo-codes').catch(() => ({ data: [] })),
-      ]);
+      const [r, t] = await Promise.all([api.get('/api/rooms'), api.get('/api/room-types')]);
       setRooms(r.data);
       setTypes(t.data);
-      setPromos(p.data);
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  }
-  async function createPromo(e) {
-    e.preventDefault();
-    try {
-      await api.post('/api/promo-codes', {
-        code: newPromo.code,
-        percentOff: Number(newPromo.percentOff),
-        description: newPromo.description || undefined,
-      });
-      toast.success(`Promo ${newPromo.code.toUpperCase()} created.`);
-      setNewPromo({ code: '', percentOff: '', description: '' });
-      load();
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  }
-  async function togglePromo(code, active) {
-    // Only deactivation asks. Turning a promo back on is harmless; turning it
-    // off stops it working for every guest mid-booking.
-    if (!active) {
-      const ok = await confirm({
-        title: 'Deactivate promo code',
-        message: `Are you sure you want to deactivate ${code}?`,
-        detail: 'Guests will no longer be able to apply this code. You can reactivate it later.',
-        confirmLabel: 'Deactivate',
-      });
-      if (!ok) return;
-    }
-    try {
-      await api.patch(`/api/promo-codes/${code}`, { active });
-      load();
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -216,8 +173,8 @@ export default function Rooms() {
           open the page. */}
       {!isAdmin && (
         <p className="muted rooms-note">
-          Room types &amp; pricing are managed by an administrator. You can create and manage promo codes
-          here.
+          Room types &amp; pricing are managed by an administrator. Promo codes are managed from Amenities
+          &amp; Facilities.
         </p>
       )}
 
@@ -330,81 +287,6 @@ export default function Rooms() {
         </div>
 
         <aside className="rooms-aside">
-          {/* Promo codes leads the aside. It is a short list of short values, so
-              it reads as cards rather than the five-column table it used to be —
-              that table needed the full page width, which is why it used to live
-              below the grid instead of here. */}
-          {/* Manager too, not Admin only. A promotion is a commercial decision
-              — the manager running the shoulder-season rate is the person who
-              should be able to open and close it — and it is the one thing in
-              this aside that is not property configuration. Mirrors the MGMT
-              guard on POST/PATCH /api/promo-codes; gating it any tighter here
-              would hide a form the API would have accepted. */}
-          {canManagePromos && (
-            <div className="panel">
-              <h3>Promo codes</h3>
-              <form onSubmit={createPromo}>
-                {/* Code and % off share a line: the aside stacks a `.row` one
-                    field per line, which is right for a full-width Description
-                    but wasteful for a short code beside a three-digit number. */}
-                <div className="row row-split">
-                  <div>
-                    <label>Code</label>
-                    <input
-                      required
-                      value={newPromo.code}
-                      onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value.toUpperCase() })}
-                    />
-                  </div>
-                  <div>
-                    <label>% off</label>
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      max="100"
-                      value={newPromo.percentOff}
-                      onChange={(e) => setNewPromo({ ...newPromo, percentOff: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="row">
-                  <div>
-                    <label>Description</label>
-                    <input
-                      value={newPromo.description}
-                      onChange={(e) => setNewPromo({ ...newPromo, description: e.target.value })}
-                    />
-                  </div>
-                  <div className="row-action">
-                    <button>Add promo</button>
-                  </div>
-                </div>
-              </form>
-              {promos.length > 0 && (
-                <div className="rt-list" style={{ marginTop: 12 }}>
-                  {promos.map((p) => (
-                    <div key={p.code} className="rt-item" style={{ opacity: p.active ? 1 : 0.55 }}>
-                      <div className="rt-head">
-                        <span className="rt-name">{p.code}</span>
-                        <span className="rt-rate">{p.percentOff}% off</span>
-                      </div>
-                      <div className="rt-meta">{p.description || 'No description'}</div>
-                      <div className="rt-edit">
-                        <button
-                          className={`small secondary${p.active ? '' : ' outline-success'}`}
-                          onClick={() => togglePromo(p.code, !p.active)}
-                        >
-                          {p.active ? 'Deactivate' : 'Activate'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Setup REPLACES the types list rather than appearing beside it. The
               aside is one column: adding a room and reading the rates are two
               different jobs, and showing both at once is what made this column a
