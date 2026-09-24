@@ -9000,6 +9000,51 @@ html[data-theme='dark'] .folio-audit-line.is-pending {
   opacity: 0.6;
   cursor: default;
 }
+/* Canned replies: a lighter-weight alternative to the two big Accept/Decline
+   buttons above, for when a one-tap answer plus a short line beats a bare
+   accept. Colour is a hint (which way each reply answers), not the point —
+   these read as text first, buttons second, so they sit visually below the
+   real Accept/Decline pair rather than competing with it. */
+.call-quick-replies {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.call-quick-replies-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.call-quick-replies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.call-quick-reply {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.call-quick-reply:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+.call-quick-reply.is-accept {
+  border-color: #86dba3;
+}
+.call-quick-reply.is-decline {
+  border-color: #f0a8a8;
+}
+.call-quick-reply:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 /* Motion-sensitive users get the call without the pulsing. */
 @media (prefers-reduced-motion: reduce) {
   .call-pulse,

@@ -1237,7 +1237,10 @@ router.post('/housekeeping-calls', requireRole(...CALLERS), async (req, res) => 
 // the answer carries everything the caller needs to hear.
 router.post('/housekeeping-calls/:callId/answer', requireRole(...ANSWERERS), async (req, res) => {
   try {
-    const { accepted = true, roomNumber = null, callerId = null } = req.body || {};
+    const { accepted = true, roomNumber = null, callerId = null, replyMessage = null } = req.body || {};
+    // Capped, never trusted at face value: this is free text from a role with
+    // no other route that echoes user input back to another user's screen.
+    const reply = replyMessage ? String(replyMessage).trim().slice(0, 200) || null : null;
     // updateMany, not update: a callId minted before this log existed — or one
     // from a message that outlived its row — has nothing to update, and an
     // answer must still reach the desk that is sitting there listening to it
@@ -1250,12 +1253,14 @@ router.post('/housekeeping-calls/:callId/answer', requireRole(...ANSWERERS), asy
         answeredById: req.user?.sub || null,
         answeredByName: req.user?.displayName || req.user?.username || 'Housekeeping',
         accepted: !!accepted,
+        replyMessage: reply,
       },
     });
     const answer = {
       event: 'housekeeping.call_answered',
       callId: String(req.params.callId),
       accepted: !!accepted,
+      replyMessage: reply,
       // Lets the dashboard tell "I just logged this" from "someone else got
       // there first" without a second request.
       recorded: recorded.count > 0,
