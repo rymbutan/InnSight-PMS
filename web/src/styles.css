@@ -396,13 +396,25 @@ button.danger {
 /* ==========================================================================
    App shell: persistent sidebar rail + content column
    ========================================================================== */
+/* Column, not row: the topbar is now the full-width top of the shell, with
+   the sidebar and the content column as a row underneath it — rather than
+   the topbar being scoped to the width of the content column alone. */
 .cb-app {
   display: flex;
+  flex-direction: column;
   min-height: var(--vh-full);
   /* The gutter that keeps the rail and the topbar from touching the
-     viewport edges — both float the same way the panels below them do. */
+     viewport edges — both float the same way the panels below them do.
+     In a column, this is the vertical gap between the topbar and the row
+     below it; .cb-body carries the matching horizontal gap for that row. */
   gap: 16px;
   padding: 16px;
+}
+.cb-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
 }
 
 /* The content column owns its own scroll context so the sidebar can stay put
@@ -421,12 +433,14 @@ button.danger {
   height: var(--topbar-h);
   /* Styled like .panel — rounded card, no hairline — but lighter: it sits
      above every page's content and a shadow as deep as the cards below it
-     reads as too heavy at the top of the screen. Inset from the viewport
-     on every side by .cb-app's gutter, so it floats the same way the
-     sidebar and the cards below it do rather than running flush
-     edge-to-edge. Sticky so search/notifications/account stay reachable
-     while a long page scrolls. Side padding matches .cb-main so the row
-     lines up with the cards underneath it. */
+     reads as too heavy at the top of the screen. A direct child of the
+     column-direction .cb-app now (not scoped to the content column), so
+     the default flex stretch already gives it the full width — inset
+     from the viewport on the left/right/top by .cb-app's own padding,
+     same as the sidebar and the cards below it. The vertical gap before
+     the sidebar/content row comes from .cb-app's own `gap`, not a margin
+     here. Sticky so search/notifications/account stay reachable while a
+     long page scrolls. */
   background: var(--surface);
   border: 1px solid transparent;
   border-radius: var(--card-radius);
@@ -435,7 +449,7 @@ button.danger {
   align-items: center;
   gap: 16px;
   padding: 0 32px;
-  margin-bottom: 16px;
+  flex-shrink: 0;
   position: sticky;
   top: 16px;
   z-index: 100;
@@ -1183,11 +1197,15 @@ html[data-theme='dark'] .login-eyebrow-mark {
   display: flex;
   flex-direction: column;
   position: sticky;
-  /* Matches .cb-app's gutter, so the rail keeps a 16px gap above and below
-     the viewport edge at every scroll position instead of the old flush
-     100vh block. */
-  top: 16px;
-  height: calc(var(--vh-full) - 32px);
+  /* The rail now sits in .cb-body, BELOW the full-width topbar, not
+     beside it from the very top of the viewport — so its stuck offset
+     and height both have to clear the topbar's own footprint first:
+     .cb-app's 16px top padding, the topbar itself, and the 16px gap
+     .cb-app puts between the topbar and this row. The 48px below is that
+     same 16+16 again plus .cb-app's 16px bottom padding, so the rail
+     keeps an even gap above and below at every scroll position. */
+  top: calc(var(--topbar-h) + 32px);
+  height: calc(var(--vh-full) - var(--topbar-h) - 48px);
   z-index: 110;
   transition: width 0.16s ease;
 }
