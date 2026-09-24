@@ -436,22 +436,26 @@ button.danger {
      reads as too heavy at the top of the screen. A direct child of the
      column-direction .cb-app now (not scoped to the content column), so
      the default flex stretch already gives it the full width — inset
-     from the viewport on the left/right/top by .cb-app's own padding,
-     same as the sidebar and the cards below it. The vertical gap before
-     the sidebar/content row comes from .cb-app's own `gap`, not a margin
-     here. Sticky so search/notifications/account stay reachable while a
-     long page scrolls. */
+     from the viewport on the left/right by .cb-app's own padding, same as
+     the sidebar and the cards below it. The TOP, though, is pulled flush
+     against the true viewport edge: negative margin cancels .cb-app's
+     16px padding-top just for this element, sticky offset moves from
+     16px to 0, and only the bottom corners stay rounded since the top
+     edge has nowhere left to curve away from. Sticky so
+     search/notifications/account stay reachable while a long page
+     scrolls. */
   background: var(--surface);
   border: 1px solid transparent;
-  border-radius: var(--card-radius);
+  border-radius: 0 0 var(--card-radius) var(--card-radius);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 16px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 32px;
   flex-shrink: 0;
+  margin-top: -16px;
   position: sticky;
-  top: 16px;
+  top: 0;
   z-index: 100;
 }
 
@@ -1197,15 +1201,15 @@ html[data-theme='dark'] .login-eyebrow-mark {
   display: flex;
   flex-direction: column;
   position: sticky;
-  /* The rail now sits in .cb-body, BELOW the full-width topbar, not
-     beside it from the very top of the viewport — so its stuck offset
-     and height both have to clear the topbar's own footprint first:
-     .cb-app's 16px top padding, the topbar itself, and the 16px gap
-     .cb-app puts between the topbar and this row. The 48px below is that
-     same 16+16 again plus .cb-app's 16px bottom padding, so the rail
+  /* The rail sits in .cb-body, BELOW the full-width topbar, not beside it
+     from the very top of the viewport — so its stuck offset and height
+     both have to clear the topbar's own footprint first: the topbar
+     itself (flush against the true top, no gap of its own) plus the 16px
+     gap .cb-app puts between the topbar and this row. The 32px below is
+     that same 16px again plus .cb-app's 16px bottom padding, so the rail
      keeps an even gap above and below at every scroll position. */
-  top: calc(var(--topbar-h) + 32px);
-  height: calc(var(--vh-full) - var(--topbar-h) - 48px);
+  top: calc(var(--topbar-h) + 16px);
+  height: calc(var(--vh-full) - var(--topbar-h) - 32px);
   z-index: 110;
   transition: width 0.16s ease;
 }
@@ -4955,13 +4959,13 @@ html[data-theme='dark'] .skel {
   .rooms-fixed {
     display: flex;
     flex-direction: column;
-    /* Viewport minus the sticky top bar, .cb-main's 24px top and bottom
-       padding, and — since the topbar floats as its own inset card rather
-       than sitting flush — .cb-app's 16px top+bottom gutter and the
-       topbar's own 16px margin-bottom (48px extra beyond the old flush
-       layout). Anything taller and the window itself starts scrolling
-       again, which is the behaviour being removed. */
-    height: calc(var(--vh-full) - var(--topbar-h) - 96px);
+    /* Viewport minus the sticky top bar (flush with the true top, so no
+       gutter of its own to add), the 16px gap .cb-app puts before the
+       sidebar/content row, and .cb-main's 24px top and bottom padding plus
+       .cb-app's 16px bottom padding. Anything taller and the window
+       itself starts scrolling again, which is the behaviour being
+       removed. */
+    height: calc(var(--vh-full) - var(--topbar-h) - 80px);
   }
   .rooms-fixed .rooms-grid {
     flex: 1;
@@ -5781,16 +5785,14 @@ html[data-theme='dark'] .skel {
   flex-direction: column;
   gap: 16px;
   position: sticky;
-  /* The topbar now floats: .cb-app's 16px top padding, then the topbar
-     itself, then its own 16px margin-bottom, before this column's normal
-     flow position even starts — so the stuck offset is that whole 32px,
-     not the old 16px gap against a flush topbar. */
-  top: calc(var(--topbar-h) + 32px);
-  /* Never taller than what is left of the screen — the 64px is that same
-     32px offset above plus 32px reserved below (the old 16px gap plus
-     .cb-app's 16px bottom padding), so it never sits flush against the
-     bottom edge. */
-  max-height: calc(var(--vh-full) - var(--topbar-h) - 64px);
+  /* The topbar's top is flush with the true viewport edge, so the stuck
+     offset is just the topbar itself plus the 16px gap .cb-app puts
+     before the sidebar/content row. */
+  top: calc(var(--topbar-h) + 16px);
+  /* Never taller than what is left of the screen — the 32px is that same
+     16px offset above plus 16px reserved below (.cb-app's bottom
+     padding), so it never sits flush against the bottom edge. */
+  max-height: calc(var(--vh-full) - var(--topbar-h) - 32px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -8671,12 +8673,12 @@ html[data-theme='dark'] .hk-tooltip {
   width: 320px;
   flex-shrink: 0;
   position: sticky;
-  /* Same reasoning as .hk-side, including its updated offset: the topbar
-     floats now, so the stuck top is .cb-app's 16px padding + the topbar +
-     its own 16px margin-bottom, and the max-height reserves that same
-     32px again at the bottom. */
-  top: calc(var(--topbar-h) + 32px);
-  max-height: calc(var(--vh-full) - var(--topbar-h) - 64px);
+  /* Same reasoning as .hk-side: the topbar's top is flush with the true
+     viewport edge, so the stuck offset is just the topbar plus the 16px
+     gap before the sidebar/content row, and the max-height reserves that
+     same 16px again at the bottom (.cb-app's bottom padding). */
+  top: calc(var(--topbar-h) + 16px);
+  max-height: calc(var(--vh-full) - var(--topbar-h) - 32px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -9343,10 +9345,11 @@ button.danger:disabled:hover {
   gap: 14px;
   /* Measured off the topbar rather than guessed at, so the panes reach the
      bottom of the viewport and the composer sits ON that edge instead of
-     floating short of it. 108px was right for the old flush topbar; the
-     floating topbar adds .cb-app's 16px top+bottom gutter plus its own
-     16px margin-bottom (48px), hence 156. */
-  height: calc(var(--vh-full) - var(--topbar-h) - 156px);
+     floating short of it. The topbar's top is flush with the true
+     viewport edge, so only the 16px gap before the sidebar/content row
+     and .cb-app's 16px bottom padding (32px) are owed on top of the old
+     108px, hence 140. */
+  height: calc(var(--vh-full) - var(--topbar-h) - 140px);
   min-height: 460px;
 }
 .msg-contacts,
