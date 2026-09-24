@@ -75,6 +75,14 @@ export default function Users() {
   const [resetPw, setResetPw] = useState('');
   const [resetErr, setResetErr] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
+  // Bulk approve: same roles for every pending request, username defaulted
+  // per person the same way the single-approve dialog defaults it. A clash
+  // (two requests defaulting to the same username) fails just that one
+  // request — see submitApproveAll — rather than the whole batch.
+  const [approveAllOpen, setApproveAllOpen] = useState(false);
+  const [approveAllRoles, setApproveAllRoles] = useState([]);
+  const [approveAllBusy, setApproveAllBusy] = useState(false);
+  const [approveAllProgress, setApproveAllProgress] = useState(null);
 
   async function load() {
     try {
@@ -250,6 +258,41 @@ export default function Users() {
     }
   }
 
+  function openApproveAll() {
+    setApproveAllRoles([]);
+    setApproveAllOpen(true);
+  }
+
+  async function submitApproveAll() {
+    const pending = requests;
+    if (pending.length === 0) return;
+    setApproveAllBusy(true);
+    setApproveAllProgress({ done: 0, total: pending.length });
+    let approved = 0;
+    const failures = [];
+    // Sequential, not Promise.all: these hit the same duplicate-username check
+    // and the same audit log, and a slow last request is a fine price for not
+    // hammering the auth service with the whole queue at once.
+    for (const r of pending) {
+      try {
+        await api.post(`/api/access-requests/${r.id}/approve`, { roles: approveAllRoles });
+        approved += 1;
+      } catch (e) {
+        failures.push(`${r.email} (${e.response?.data?.error || e.message})`);
+      }
+      setApproveAllProgress((p) => ({ done: (p?.done || 0) + 1, total: pending.length }));
+    }
+    setApproveAllBusy(false);
+    setApproveAllProgress(null);
+    setApproveAllOpen(false);
+    setMsg(
+      failures.length === 0
+        ? `Approved all ${approved} request${approved === 1 ? '' : 's'}.`
+        : `Approved ${approved} of ${pending.length}. Failed: ${failures.join('; ')}`
+    );
+    load();
+  }
+
   async function rejectRequest(r) {
     const ok = await confirm({
       title: 'Reject access request',
@@ -285,12 +328,19 @@ export default function Users() {
 
       {requests.length > 0 && (
         <div className="panel">
-          <h3>
-            Access requests{' '}
-            {/* `neutral`, not a bare `badge`: the base class sets shape and type
-                but no background, so this count rendered as plain text. */}
-            <span className="badge neutral">{requests.length}</span>
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h3>
+              Access requests{' '}
+              {/* `neutral`, not a bare `badge`: the base class sets shape and type
+                  but no background, so this count rendered as plain text. */}
+              <span className="badge neutral">{requests.length}</span>
+            </h3>
+            {canManage && (
+              <button className="small success" onClick={openApproveAll}>
+                Approve all
+              </button>
+            )}
+          </div>
           <table>
             <thead>
               <tr>
@@ -649,6 +699,63 @@ export default function Users() {
               </p>
             )}
           </>
+        )}
+      </Modal>
+
+      {/* Approve all — one role set applied to every pending request, username
+          defaulted per person exactly like the single-approve dialog does. */}
+      <Modal
+        open={approveAllOpen}
+        onClose={() => !approveAllBusy && setApproveAllOpen(false)}
+        title="Approve all access requests"
+        width={440}
+        footer={
+          <>
+            <button className="secondary" onClick={() => setApproveAllOpen(false)} disabled={approveAllBusy}>
+              Cancel
+            </button>
+            <button className="success" onClick={submitApproveAll} disabled={approveAllBusy}>
+              {approveAllBusy
+                ? `Approving ${approveAllProgress?.done ?? 0}/${approveAllProgress?.total ?? requests.length}…`
+                : `Approve ${requests.length} request${requests.length === 1 ? '' : 's'}`}
+            </button>
+          </>
+        }
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          Creates an account for every pending request below, username defaulted from each
+          person's email. Every one of them gets the same roles you tick here — for anyone who
+          needs something different, cancel this and approve them individually instead.
+        </p>
+        <label>Roles for all {requests.length} accounts</label>
+        <div className="role-picker">
+          {/* A MANAGER cannot grant ADMIN — not offered here either. */}
+          {roles
+            .filter((r) => isAdmin || r.code !== 'ADMIN')
+            .map((r) => {
+              const on = approveAllRoles.includes(r.code);
+              return (
+                <label key={r.code} className={`role-picker-row${on ? ' is-on' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() =>
+                      setApproveAllRoles((d) => (on ? d.filter((x) => x !== r.code) : [...d, r.code]))
+                    }
+                    style={{ width: 'auto' }}
+                  />
+                  <RoleBadge code={r.code} />
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {r.name || r.code}
+                  </span>
+                </label>
+              );
+            })}
+        </div>
+        {approveAllRoles.length === 0 && (
+          <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+            With no roles they can sign in but will see nothing. You can add roles later, per person.
+          </p>
         )}
       </Modal>
 
