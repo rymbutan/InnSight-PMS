@@ -1881,7 +1881,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
   padding: 20px;
@@ -2228,9 +2228,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .panel-tinted {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
   border-top: 3px solid var(--accent);
+  box-shadow: var(--card-shadow);
   padding: 18px;
   margin-bottom: 16px;
 }
@@ -2619,7 +2620,7 @@ tr.active td {
 }
 .kpi-tile {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
   padding: 16px 16px;
