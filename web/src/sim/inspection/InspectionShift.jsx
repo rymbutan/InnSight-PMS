@@ -409,7 +409,16 @@ export default function InspectionShift({
           <button className="secondary" onClick={onExit}>
             Leave
           </button>
-          <button onClick={() => setPhase('done')}>Finish inspection</button>
+          {/* Disabled rather than confirmed: passesInspection() requires EVERY
+              injected defect to be found (see inspectionScore.js — no partial
+              credit), so finishing with anchors still unreviewed was a
+              guaranteed fail on a real defect the student never even saw,
+              sending a genuinely well-worked room back to Vacant Dirty. */}
+          <button onClick={() => setPhase('done')} disabled={reviewed < anchors.length}>
+            {reviewed < anchors.length
+              ? `Finish inspection (${anchors.length - reviewed} left)`
+              : 'Finish inspection'}
+          </button>
         </div>
 
         <div className="fr-stage">
