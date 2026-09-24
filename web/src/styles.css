@@ -195,12 +195,41 @@ body,
   background: var(--bg);
   font-size: 14px;
 }
-/* Whole app rendered 10% smaller than the browser's own 100% — set on
-   `html` only. `zoom` is non-inherited in its effect on descendants'
-   layout, so putting this on html/body/#root together would compound
-   (0.9 × 0.9 × 0.9), not just apply once. */
-html {
-  zoom: 0.9;
+/* Whole app rendered 10% smaller than the browser's own 100% — via a
+   transform on #root, not `zoom`. `zoom` looked like the obvious tool for
+   this, but every `vh`-based height in the app (.cb-sidebar, .rooms-fixed,
+   .hk-side, .folio-side, .msg-wrap…) came up short by roughly the same
+   10%: Chromium resolves `vh` against the pre-zoom viewport and then
+   scales the already-computed layout down, so a box declared as `100vh`
+   only ever COVERS 90% of the real, visible viewport. The symptom was the
+   sidebar's rounded card ending well above the bottom of the screen with
+   bare page background under it.
+   `transform: scale()` doesn't have that problem — it's a paint-time
+   effect that never touches layout, so every `vh`/`vw` in the app still
+   resolves against the TRUE viewport. #root is set to 1/0.9 (111.111%) of
+   its own size and then scaled back down by 0.9 around its top-left
+   corner, landing on exactly 100% of the real viewport, the same way
+   `zoom` intended to but without corrupting anything measured in vh.
+   It has to leave normal flow to do that without side effects: a child
+   111.111% the size of its parent, left in normal flow, makes body/html
+   think there is that much real content and grow a document-level
+   scrollbar sized to the UNSCALED 111% box — a scrollbar for space that
+   the transform then visually erases. position:fixed here takes #root out
+   of that flow (body ends up with no normal-flow content, so no
+   scrollbar) and gives #root its OWN overflow:auto, which is what actually
+   scrolls a normal (non-viewport-pinned) page now instead of the
+   document. The one `window` scroll listener in the app (TutorialTour's
+   remeasure) is attached with `capture: true`, which still sees scroll
+   events dispatched on #root on their way down from `window`. */
+#root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 111.111%;
+  height: 111.111%;
+  overflow: auto;
+  transform: scale(0.9);
+  transform-origin: top left;
 }
 a {
   color: var(--accent);
