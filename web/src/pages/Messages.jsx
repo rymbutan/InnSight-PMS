@@ -11,7 +11,7 @@ import RecordChip from '../components/RecordChip';
 import RecordPicker from '../components/RecordPicker';
 import { primaryRole } from '../lib/roles';
 import { useMessageSound } from '../lib/sound';
-import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
+import { avatarColorOf, groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
 import { allowedRecordTypes } from '../lib/recordRefs';
 import { useContacts, useConversation, useRetentionPolicy } from '../lib/useMessaging';
 import { openChat } from '../components/ChatDock';
@@ -217,7 +217,11 @@ export default function Messages() {
                 onClick={() => openPeer(c.id)}
                 aria-current={c.id === peerId ? 'true' : undefined}
               >
-                <span className="msg-avatar" aria-hidden="true">
+                <span
+                  className="msg-avatar"
+                  aria-hidden="true"
+                  style={{ background: avatarColorOf(c.id), borderColor: 'transparent', color: '#fff' }}
+                >
                   {initialsOf(c.displayName)}
                   <span
                     className={`msg-dot${c.online ? ' is-online' : ''}`}
@@ -253,7 +257,11 @@ export default function Messages() {
           ) : (
             <>
               <header className="msg-thread-head">
-                <span className="msg-avatar" aria-hidden="true">
+                <span
+                  className="msg-avatar"
+                  aria-hidden="true"
+                  style={{ background: avatarColorOf(peer.id), borderColor: 'transparent', color: '#fff' }}
+                >
                   {initialsOf(peer.displayName)}
                   <span className={`msg-dot${peer.online ? ' is-online' : ''}`} />
                 </span>
