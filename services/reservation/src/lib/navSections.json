@@ -231,7 +231,7 @@
           "nonAdminLabel": "Hotel Rooms",
           "icon": "bed",
           "roles": ["ADMIN", "MANAGER"],
-          "api": ["/api/rooms", "/api/room-types", "/api/promo-codes"]
+          "api": ["/api/rooms", "/api/room-types"]
         },
         {
           "key": "amenities",
@@ -239,7 +239,15 @@
           "label": "Amenities & Facilities",
           "icon": "sparkles",
           "roles": ["ADMIN", "MANAGER", "FRONT_DESK"],
-          "api": ["/api/facilities", "/api/facility-bookings", "/api/folios"]
+          "_mergeComment": [
+            "/api/promo-codes lives here, not under 'rooms': the feature moved",
+            "to the Amenities page's Promo Codes tab (canManagePromos in",
+            "Amenities.jsx). Left in 'rooms' too, this prefix would silently",
+            "break for MANAGER the moment an admin hides Hotel Rooms — a real",
+            "page they no longer touch has nothing to do with a commercial",
+            "promo they still manage from Amenities."
+          ],
+          "api": ["/api/facilities", "/api/facility-bookings", "/api/folios", "/api/promo-codes"]
         }
       ]
     },
