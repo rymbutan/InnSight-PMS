@@ -544,7 +544,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
   border-radius: 18px;
   padding: 0 16px 0 36px;
   font-size: 13px;
-  background-color: var(--surface-2);
+  /* A hint of the brand accent instead of plain neutral grey — subtle
+     enough not to read as a filled/active state, just enough that the
+     search field doesn't look identical to every other muted surface. */
+  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface-2));
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
   background-repeat: no-repeat;
   background-position: 12px center;
@@ -1610,8 +1613,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   gap: 20px;
   flex-wrap: wrap;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 12px;
+  box-shadow: var(--card-shadow);
   padding: 16px 18px;
 }
 .set-profile-id {
@@ -1674,8 +1678,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   gap: 12px;
   width: 100%;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
+  border: 1px solid transparent;
   border-radius: 12px;
+  box-shadow: var(--card-shadow);
   padding: 14px 20px;
   font-size: 14px;
   font-weight: 600;
@@ -1687,11 +1692,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
 .set-accordion-header:hover {
   border-color: var(--accent);
 }
-/* Header and body read as one bordered shape while open — square the seam
-   between them instead of stacking two fully-rounded rectangles. */
+/* Header and body read as one shape while open — square the seam between
+   them instead of stacking two fully-rounded rectangles. */
 .set-accordion.is-open .set-accordion-header {
   border-radius: 12px 12px 0 0;
-  border-bottom-color: transparent;
 }
 .set-accordion-icon {
   display: inline-flex;
@@ -1717,9 +1721,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   transform: rotate(180deg);
 }
 .set-accordion-body {
-  border: 1px solid var(--border-strong);
-  border-top: none;
+  border: 1px solid transparent;
   border-radius: 0 0 12px 12px;
+  box-shadow: var(--card-shadow);
   padding: 18px;
   background: var(--surface-2);
 }
@@ -1753,8 +1757,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 12px;
+  box-shadow: var(--card-shadow);
   padding: 16px 18px;
 }
 .set-card.is-wide {
