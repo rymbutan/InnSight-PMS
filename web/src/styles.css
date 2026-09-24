@@ -368,6 +368,10 @@ button.danger {
 .cb-app {
   display: flex;
   min-height: 100vh;
+  /* The gutter that keeps the rail and the topbar from touching the
+     viewport edges — both float the same way the panels below them do. */
+  gap: 16px;
+  padding: 16px;
 }
 
 /* The content column owns its own scroll context so the sidebar can stay put
@@ -384,22 +388,25 @@ button.danger {
 
 .cb-topbar {
   height: var(--topbar-h);
-  /* Back as a real bar, but in the same borderless-plus-shadow language as
-     the sidebar and every card below it: a white surface floating on the
-     page, no hairline, a soft shadow standing in for the edge. Sticky so
+  /* Back as a real bar, styled exactly like .panel: rounded card, soft
+     shadow, no hairline. Inset from the viewport on every side by
+     .cb-app's gutter, so it floats the same way the sidebar and the cards
+     below it do rather than running flush edge-to-edge. Sticky so
      search/notifications/account stay reachable while a long page scrolls.
      Side padding matches .cb-main so the row lines up with the cards
      underneath it. */
   background: var(--surface);
-  border-bottom: 1px solid transparent;
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 32px;
+  margin-bottom: 16px;
   position: sticky;
-  top: 0;
+  top: 16px;
   z-index: 100;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 20px rgba(15, 23, 42, 0.05);
 }
 
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
@@ -1109,15 +1116,20 @@ html[data-theme='dark'] .login-eyebrow-mark {
   width: 264px;
   flex-shrink: 0;
   background: var(--surface);
-  border-right: 1px solid transparent;
-  /* A soft edge instead of a hairline — the rail reads as a floating panel
-     next to the content pane rather than a boxed-in column. */
-  box-shadow: 1px 0 0 rgba(15, 23, 42, 0.03), 8px 0 32px rgba(15, 23, 42, 0.08);
+  border: 1px solid transparent;
+  /* Same rounded-card-plus-shadow language as .panel, not a directional
+     edge shadow — the rail is inset from the viewport on every side now
+     (see .cb-app's gutter), so it reads as one more floating container. */
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  /* Matches .cb-app's gutter, so the rail keeps a 16px gap above and below
+     the viewport edge at every scroll position instead of the old flush
+     100vh block. */
+  top: 16px;
+  height: calc(100vh - 32px);
   z-index: 110;
   transition: width 0.16s ease;
 }
@@ -1507,6 +1519,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   width: 264px;
   height: 100vh;
   z-index: 401;
+  /* An overlay drawer stays flush with the screen edge — the floating,
+     rounded-card treatment above is for the permanent rail only. */
+  border-radius: 0;
   box-shadow: 4px 0 16px rgba(15, 23, 42, 0.1);
   animation: drawer-in 0.18s ease-out;
 }
