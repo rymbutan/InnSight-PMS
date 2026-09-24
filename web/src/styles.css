@@ -195,6 +195,13 @@ body,
   background: var(--bg);
   font-size: 14px;
 }
+/* Whole app rendered 10% smaller than the browser's own 100% — set on
+   `html` only. `zoom` is non-inherited in its effect on descendants'
+   layout, so putting this on html/body/#root together would compound
+   (0.9 × 0.9 × 0.9), not just apply once. */
+html {
+  zoom: 0.9;
+}
 a {
   color: var(--accent);
   text-decoration: none;
@@ -388,17 +395,18 @@ button.danger {
 
 .cb-topbar {
   height: var(--topbar-h);
-  /* Back as a real bar, styled exactly like .panel: rounded card, soft
-     shadow, no hairline. Inset from the viewport on every side by
-     .cb-app's gutter, so it floats the same way the sidebar and the cards
-     below it do rather than running flush edge-to-edge. Sticky so
-     search/notifications/account stay reachable while a long page scrolls.
-     Side padding matches .cb-main so the row lines up with the cards
-     underneath it. */
+  /* Styled like .panel — rounded card, no hairline — but lighter: it sits
+     above every page's content and a shadow as deep as the cards below it
+     reads as too heavy at the top of the screen. Inset from the viewport
+     on every side by .cb-app's gutter, so it floats the same way the
+     sidebar and the cards below it do rather than running flush
+     edge-to-edge. Sticky so search/notifications/account stay reachable
+     while a long page scrolls. Side padding matches .cb-main so the row
+     lines up with the cards underneath it. */
   background: var(--surface);
   border: 1px solid transparent;
   border-radius: var(--card-radius);
-  box-shadow: var(--card-shadow);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 16px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   gap: 16px;
