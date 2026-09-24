@@ -403,7 +403,15 @@ export default function HousekeepingDashboard() {
                       <td className="muted">{c.callerName || '—'}</td>
                       <td>
                         {c.answeredAt ? (
-                          <Pill bg="#dcfce7" fg="#16a34a" title={new Date(c.answeredAt).toLocaleString()}>
+                          <Pill
+                            bg="#dcfce7"
+                            fg="#16a34a"
+                            title={
+                              c.replyMessage
+                                ? `${new Date(c.answeredAt).toLocaleString()} — “${c.replyMessage}”`
+                                : new Date(c.answeredAt).toLocaleString()
+                            }
+                          >
                             {c.answeredByName || 'Answered'}
                           </Pill>
                         ) : (

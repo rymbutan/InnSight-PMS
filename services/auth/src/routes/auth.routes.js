@@ -232,9 +232,10 @@ router.post('/google', async (req, res) => {
 // POST /api/auth/access-request — the "Sign Up" link.
 //
 // This creates NO account and grants NOTHING. It records that someone wants
-// access, for an admin to approve in Users. Public by necessity (the asker has
-// no session yet), so it is rate-limited at the gateway and restricted to the
-// university domain.
+// access, for an admin to approve in Users — approving is what creates the
+// User, using the username and password captured here. Public by necessity
+// (the asker has no session yet), so it is rate-limited at the gateway and
+// restricted to the university domain.
 router.post('/access-request', async (req, res) => {
   try {
     const fullName = String(req.body?.fullName || '').trim();
@@ -242,9 +243,14 @@ router.post('/access-request', async (req, res) => {
       .trim()
       .toLowerCase();
     const note = String(req.body?.note || '').trim() || null;
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const confirmPassword = String(req.body?.confirmPassword || '');
 
-    if (!fullName || !email) {
-      return res.status(400).json({ error: 'Your name and university email are required.' });
+    if (!fullName || !email || !username || !password) {
+      return res
+        .status(400)
+        .json({ error: 'Your name, university email, username and password are required.' });
     }
     if (fullName.length > 120 || (note && note.length > 500)) {
       return res.status(400).json({ error: 'That is longer than this form accepts.' });
@@ -252,28 +258,85 @@ router.post('/access-request', async (req, res) => {
     if (!email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
       return res.status(400).json({ error: `Use your @${ALLOWED_EMAIL_DOMAIN} university email.` });
     }
+    if (!USERNAME_RE.test(username)) {
+      return res.status(400).json({
+        error: 'Username must be 3–32 characters, using letters, numbers, dot, underscore or hyphen only.',
+      });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match.' });
+    }
+
+    // Username clashes are told apart from an email that already has an
+    // account — unlike the email check below, there is nothing private about
+    // "that username is taken", so the requester gets a chance to pick another
+    // one instead of being handed a request an admin can never approve.
+    const usernameTaken = await prisma.user.findFirst({ where: { username } });
+    const usernamePending = await prisma.accessRequest.findFirst({
+      where: { username, email: { not: email }, status: 'PENDING' },
+    });
+    if (usernameTaken || usernamePending) {
+      return res.status(409).json({ error: 'That username is already taken.' });
+    }
 
     // Never confirm or deny that an account already exists — that would turn
     // this open form into an account-enumeration oracle. The response below is
-    // identical either way.
+    // identical either way, `id` included: a random one that matches nothing
+    // in the table reads through GET /access-request/:id/status exactly like a
+    // request stuck PENDING forever, which is the same non-committal answer
+    // this branch already gives everywhere else.
     const existing = await prisma.user.findFirst({
       where: { email: { equals: email, mode: 'insensitive' } },
     });
+    let id = crypto.randomUUID();
     if (!existing) {
-      await prisma.accessRequest.upsert({
+      const passwordHash = await bcrypt.hash(password, 10);
+      const row = await prisma.accessRequest.upsert({
         where: { email },
-        update: { fullName, note, status: 'PENDING', createdAt: new Date() },
-        create: { email, fullName, note },
+        update: { fullName, note, username, passwordHash, status: 'PENDING', createdAt: new Date() },
+        create: { email, fullName, note, username, passwordHash },
       });
+      id = row.id;
     }
 
     return res.status(202).json({
       ok: true,
+      id,
       message: 'Request received. An administrator will review it and set up your account.',
     });
   } catch (err) {
     console.error('[Auth] Access request error:', err.message);
     return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/auth/access-request/:id/status — lets the "Sign Up" page poll for
+// approval without a session (it has none yet) and without leaking anything
+// beyond that. Public, keyed by the request's own id rather than its email:
+// that id is as unguessable as a password-reset token, so knowing it already
+// means you were the one who submitted the request. An id this route has
+// never seen (the fake one handed back above, or a stale one from a request
+// that never got that far) reads exactly like a still-pending request rather
+// than a 404, for the same anti-enumeration reason.
+router.get('/access-request/:id/status', async (req, res) => {
+  try {
+    const row = await prisma.accessRequest.findUnique({ where: { id: req.params.id } });
+    if (!row || row.status === 'PENDING') return res.json({ status: 'PENDING' });
+    if (row.status === 'REJECTED') return res.json({ status: 'REJECTED' });
+
+    // APPROVED: the admin may have changed the username at approval time, so
+    // read it back off the account that was actually created rather than
+    // assuming the one submitted here is still the true one.
+    const user = row.createdUser
+      ? await prisma.user.findUnique({ where: { id: row.createdUser }, select: { username: true } })
+      : null;
+    return res.json({ status: 'APPROVED', username: user?.username || row.username || null });
+  } catch (err) {
+    console.error('[Auth] Access request status error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
   }
 });
 

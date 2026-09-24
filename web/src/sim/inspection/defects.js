@@ -66,16 +66,24 @@ export const DEFECTS = [
       if (i === -1) return next;
       const [x, z] = next.furniture[i].pos;
       const ry = next.furniture[i].ry;
+      // `type`, not `model`: 'twin' has no registered .glb (see MODEL_FILES in
+      // modelSizes.js) — FixtureBody only falls through to procedural geometry
+      // for a `type`-tagged item, so `model: 'twin'` rendered NEITHER a real
+      // asset NOR the procedural box bed already defined for it, just an empty
+      // gap where the beds should be. The student had nothing to inspect, so
+      // this defect could never be found — every pass on a two-adult booking
+      // failed and sent the room back to Vacant Dirty regardless of how the
+      // rest of the inspection went.
       next.furniture.splice(
         i,
         1,
-        { model: 'twin', pos: [x - 0.95, z], ry },
-        { model: 'twin', pos: [x + 0.95, z], ry }
+        { type: 'twin', pos: [x - 0.95, z], ry },
+        { type: 'twin', pos: [x + 0.95, z], ry }
       );
       return next;
     },
     anchorAt(layout) {
-      const t = layout.furniture.filter((f) => f.model === 'twin');
+      const t = layout.furniture.filter((f) => f.type === 'twin');
       if (!t.length) return null;
       const x = t.reduce((s, f) => s + f.pos[0], 0) / t.length;
       const z = t.reduce((s, f) => s + f.pos[1], 0) / t.length;

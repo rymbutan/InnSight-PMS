@@ -31,6 +31,17 @@ const REASON_LABEL = {
   OTHER: 'Housekeeping needed',
 };
 
+// Canned replies, each carrying the answer it implies. Tapping one both
+// answers the call AND tells the desk something more useful than a plain
+// "accepted" — the plain Accept/Decline buttons stay for a call that just
+// needs a fast tap with nothing more to say.
+const QUICK_REPLIES = [
+  { accepted: true, text: "Sure, I'll look into it." },
+  { accepted: true, text: 'On my way.' },
+  { accepted: false, text: "Sorry, I'm busy — can you assign it to someone else?" },
+  { accepted: false, text: 'Not available right now.' },
+];
+
 // A two-tone ring, synthesised rather than shipped as an audio file: a .mp3
 // would be another asset to load, and the CSP on this app blocks media from
 // anywhere but its own origin anyway. Built on demand and torn down on answer,
@@ -131,11 +142,14 @@ export default function IncomingCall() {
         clearTimeout(ringOuts.current.get(data.callId));
         ringOuts.current.delete(data.callId);
         const who = data.answeredByName || 'Housekeeping';
-        if (data.accepted) {
-          toast.success(`${who} accepted the call${data.roomNumber ? ` for room ${data.roomNumber}` : ''}.`);
-        } else {
-          toast.error(`${who} declined the call${data.roomNumber ? ` for room ${data.roomNumber}` : ''}.`);
-        }
+        // A quick-reply message says more than "accepted"/"declined" ever
+        // could, so it replaces the generic line rather than sitting next to it.
+        const generic = data.accepted
+          ? `${who} accepted the call${data.roomNumber ? ` for room ${data.roomNumber}` : ''}.`
+          : `${who} declined the call${data.roomNumber ? ` for room ${data.roomNumber}` : ''}.`;
+        const line = data.replyMessage ? `${who}: “${data.replyMessage}”` : generic;
+        if (data.accepted) toast.success(line);
+        else toast.error(line);
       }
     },
     [canAnswer, toast, user?.id]
@@ -150,7 +164,7 @@ export default function IncomingCall() {
     else ringer.stop();
   }, [call, ringer]);
 
-  async function answer(accepted) {
+  async function answer(accepted, replyMessage = null) {
     if (!call) return;
     setBusy(true);
     try {
@@ -158,6 +172,7 @@ export default function IncomingCall() {
         accepted,
         roomNumber: call.roomNumber,
         callerId: call.callerId,
+        replyMessage,
       });
       // Closed on the local decision, not on the round trip: the handset must
       // stop ringing when you press the button, even if the answer-back fails.
@@ -221,6 +236,22 @@ export default function IncomingCall() {
             <Icon name="phone" size={16} />
             Accept
           </button>
+        </div>
+        <div className="call-quick-replies">
+          <div className="call-quick-replies-label">Or send a reply</div>
+          <div className="call-quick-replies-list">
+            {QUICK_REPLIES.map((r) => (
+              <button
+                key={r.text}
+                type="button"
+                className={`call-quick-reply ${r.accepted ? 'is-accept' : 'is-decline'}`}
+                onClick={() => answer(r.accepted, r.text)}
+                disabled={busy}
+              >
+                {r.text}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
