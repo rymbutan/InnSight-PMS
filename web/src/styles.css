@@ -1633,7 +1633,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .cb-main {
   flex: 1;
-  padding: 24px 32px;
+  /* A bit more breathing room under the topbar specifically than on the
+     other three sides. */
+  padding: 32px 32px 24px;
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
@@ -4961,11 +4963,11 @@ html[data-theme='dark'] .skel {
     flex-direction: column;
     /* Viewport minus the sticky top bar (flush with the true top, so no
        gutter of its own to add), the 16px gap .cb-app puts before the
-       sidebar/content row, and .cb-main's 24px top and bottom padding plus
-       .cb-app's 16px bottom padding. Anything taller and the window
+       sidebar/content row, and .cb-main's 32px top / 24px bottom padding
+       plus .cb-app's 16px bottom padding. Anything taller and the window
        itself starts scrolling again, which is the behaviour being
        removed. */
-    height: calc(var(--vh-full) - var(--topbar-h) - 80px);
+    height: calc(var(--vh-full) - var(--topbar-h) - 88px);
   }
   .rooms-fixed .rooms-grid {
     flex: 1;
@@ -9345,11 +9347,10 @@ button.danger:disabled:hover {
   gap: 14px;
   /* Measured off the topbar rather than guessed at, so the panes reach the
      bottom of the viewport and the composer sits ON that edge instead of
-     floating short of it. The topbar's top is flush with the true
-     viewport edge, so only the 16px gap before the sidebar/content row
-     and .cb-app's 16px bottom padding (32px) are owed on top of the old
-     108px, hence 140. */
-  height: calc(var(--vh-full) - var(--topbar-h) - 140px);
+     floating short of it. 140 (the 16px gap before the sidebar/content
+     row and .cb-app's 16px bottom padding, on top of the old 108) plus
+     the extra 8px .cb-main now adds to its own top padding. */
+  height: calc(var(--vh-full) - var(--topbar-h) - 148px);
   min-height: 460px;
 }
 .msg-contacts,
