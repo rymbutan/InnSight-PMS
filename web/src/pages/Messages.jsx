@@ -79,6 +79,12 @@ export default function Messages() {
     );
   }, [contacts, filter]);
 
+  // Two sections rather than one flat list — who is reachable right now is
+  // worth seeing at a glance before you scroll past them looking for someone
+  // who is not.
+  const onlineContacts = useMemo(() => visibleContacts.filter((c) => c.online), [visibleContacts]);
+  const offlineContacts = useMemo(() => visibleContacts.filter((c) => !c.online), [visibleContacts]);
+
   // Staff are told how long what they type will last. A retention rule nobody
   // can see is one people only discover by losing something.
   const policyNote = useMemo(() => {
@@ -147,6 +153,38 @@ export default function Messages() {
     }
   }
 
+  // One row, shared by the online and offline sections, so the two cannot
+  // render a contact differently.
+  function renderContact(c) {
+    return (
+      <button
+        key={c.id}
+        type="button"
+        className={`msg-contact${c.id === peerId ? ' active' : ''}`}
+        onClick={() => openPeer(c.id)}
+        aria-current={c.id === peerId ? 'true' : undefined}
+      >
+        <span
+          className="msg-avatar"
+          aria-hidden="true"
+          style={{ background: avatarColorOf(c.id), borderColor: 'transparent', color: '#fff' }}
+        >
+          {initialsOf(c.displayName)}
+          <span className={`msg-dot${c.online ? ' is-online' : ''}`} title={c.online ? 'Online' : 'Offline'} />
+        </span>
+        <span className="msg-contact-text">
+          <span className="msg-contact-top">
+            <span className="msg-contact-name">{c.displayName}</span>
+            {c.unreadCount > 0 && <span className="msg-unread">{c.unreadCount}</span>}
+          </span>
+          <span className="msg-contact-sub">
+            {c.lastMessagePreview ? previewOf(c.lastMessagePreview, 46) : <RoleBadge code={primaryRole(c.roles)} />}
+          </span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <div className="msg-page">
       <div className="msg-head">
@@ -209,40 +247,23 @@ export default function Messages() {
               <p className="msg-note muted">No one matches “{filter}”.</p>
             )}
 
-            {visibleContacts.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={`msg-contact${c.id === peerId ? ' active' : ''}`}
-                onClick={() => openPeer(c.id)}
-                aria-current={c.id === peerId ? 'true' : undefined}
-              >
-                <span
-                  className="msg-avatar"
-                  aria-hidden="true"
-                  style={{ background: avatarColorOf(c.id), borderColor: 'transparent', color: '#fff' }}
-                >
-                  {initialsOf(c.displayName)}
-                  <span
-                    className={`msg-dot${c.online ? ' is-online' : ''}`}
-                    title={c.online ? 'Online' : 'Offline'}
-                  />
-                </span>
-                <span className="msg-contact-text">
-                  <span className="msg-contact-top">
-                    <span className="msg-contact-name">{c.displayName}</span>
-                    {c.unreadCount > 0 && <span className="msg-unread">{c.unreadCount}</span>}
-                  </span>
-                  <span className="msg-contact-sub">
-                    {c.lastMessagePreview ? (
-                      previewOf(c.lastMessagePreview, 46)
-                    ) : (
-                      <RoleBadge code={primaryRole(c.roles)} />
-                    )}
-                  </span>
-                </span>
-              </button>
-            ))}
+            {/* Online first, offline after — two labelled sections instead of
+                one flat list, so who is reachable right now doesn't get lost
+                among everyone who isn't. Only a section with someone in it
+                gets a label; a staff of six online and none offline should
+                not print an empty "Offline" heading. */}
+            {onlineContacts.length > 0 && (
+              <div className="msg-contact-section">
+                <span className="msg-contact-section-label">Online</span>
+                {onlineContacts.map((c) => renderContact(c))}
+              </div>
+            )}
+            {offlineContacts.length > 0 && (
+              <div className="msg-contact-section">
+                <span className="msg-contact-section-label">Offline</span>
+                {offlineContacts.map((c) => renderContact(c))}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -302,7 +323,7 @@ export default function Messages() {
                     No messages yet — say hello to {peer.displayName.split(' ')[0]}.
                   </p>
                 ) : (
-                  <Transcript rows={rows} onOpenRecord={openRecord} />
+                  <Transcript rows={rows} onOpenRecord={openRecord} peerName={peer.displayName} />
                 )}
                 {peerTyping && <TypingIndicator name={peer.displayName.split(' ')[0]} />}
               </div>
