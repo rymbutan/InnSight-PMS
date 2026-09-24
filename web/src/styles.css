@@ -5086,7 +5086,7 @@ html[data-theme='dark'] .skel {
     margin-bottom: 0;
   }
   .rooms-fixed .rooms-aside .rt-list {
-    gap: 6px;
+    gap: 12px;
   }
   .rooms-fixed .rooms-aside .rt-item {
     padding: 7px 9px;
@@ -5530,7 +5530,7 @@ html[data-theme='dark'] .skel {
 .rt-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
   /* Its own scroll, separate from the page's: a hotel adds room types far more
      often than it removes them, and without a cap this list pushed the panel
      — and everything below it in the sidebar — taller with every one added.
