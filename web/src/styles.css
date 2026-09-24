@@ -130,7 +130,12 @@
   --topbar-h: 60px;
   --control-pad-x: 16px;
   --control-pad-x-sm: 10px;
-  --control-radius: 8px;
+  --control-radius: 10px;
+  /* Card-level geometry — panels, KPI tiles and other elevated containers.
+     A wider radius plus a soft shadow instead of a hard border reads as a
+     lighter, "floating" surface rather than a boxed-in one. */
+  --card-radius: 18px;
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px rgba(15, 23, 42, 0.06);
   /* Icon ↔ label spacing inside a control. */
   --control-gap: 8px;
   /* Scrollbars. Named so the thickness and colours are tuned in one place
@@ -1877,8 +1882,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: 20px;
   margin-bottom: 16px;
 }
 .panel h3 {
@@ -2614,7 +2620,8 @@ tr.active td {
 .kpi-tile {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   padding: 16px 16px;
   display: flex;
   align-items: center;
