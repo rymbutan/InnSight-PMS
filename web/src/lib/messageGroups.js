@@ -159,3 +159,17 @@ export function initialsOf(name = '') {
   if (parts.length === 1) return parts[0][0].toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+// A fixed fill per person instead of one flat grey for every avatar — purely
+// decorative, so the palette is deliberately clear of the app's semantic
+// colours (the brand green, --danger, --info, --warn fills all mean
+// something elsewhere in the product; an avatar in one of those would read as
+// a status by accident). Hashed off the id rather than the name, so it can't
+// change with a display-name edit, and stable across the page and the dock
+// because both call this same function.
+const AVATAR_FILLS = ['#475569', '#6d28d9', '#0e7490', '#be185d', '#b45309', '#334155'];
+export function avatarColorOf(id = '') {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_FILLS[Math.abs(hash) % AVATAR_FILLS.length];
+}

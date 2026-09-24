@@ -1,4 +1,21 @@
 :root {
+  /* The app is rendered at zoom: 0.9 (see the note on `html` below) so it
+     looks 10% smaller everywhere. Zoom does NOT rescale what `vh` means —
+     Chromium resolves `100vh` against the real, already-zoomed-out
+     viewport and THEN shrinks that already-correct box by the same 0.9
+     again, so anything sized in plain `vh` ends up covering only ~90% of
+     the visible screen instead of 100%. That was the sidebar's rounded
+     card (and every other viewport-pinned container: .rooms-fixed,
+     .hk-side, .folio-side, .msg-wrap, the login/booking/pay full-page
+     screens…) ending with bare page background under it.
+     var(--vh-full) is 100vh pre-compensated for that (÷0.9 = ×1.11111), so
+     it lands on exactly the real viewport height after zoom shrinks it
+     back down. USE THIS, NOT a literal `100vh`, anywhere a size is meant
+     to reach the actual edge of the screen — a plain `100vh` will quietly
+     reintroduce the shortfall. A subtracted plain px amount alongside it
+     (padding, a fixed topbar height) needs no such adjustment — only the
+     "fill the viewport" part of the sum does. */
+  --vh-full: 111.111vh;
   --bg: #f0f3f7;
   --panel: #ffffff;
   --border: #c5ccd8; /* was #e2e6ec — 1.25:1 on white, edge barely visible */
@@ -130,7 +147,12 @@
   --topbar-h: 60px;
   --control-pad-x: 16px;
   --control-pad-x-sm: 10px;
-  --control-radius: 8px;
+  --control-radius: 10px;
+  /* Card-level geometry — panels, KPI tiles and other elevated containers.
+     A wider radius plus a soft shadow instead of a hard border reads as a
+     lighter, "floating" surface rather than a boxed-in one. */
+  --card-radius: 18px;
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 22px rgba(15, 23, 42, 0.07);
   /* Icon ↔ label spacing inside a control. */
   --control-gap: 8px;
   /* Scrollbars. Named so the thickness and colours are tuned in one place
@@ -189,6 +211,20 @@ body,
   color: var(--text);
   background: var(--bg);
   font-size: 14px;
+}
+/* Whole app rendered 10% smaller than the browser's own 100% — see
+   var(--vh-full) at the top of :root for the `vh` compensation this
+   requires everywhere a size means "the whole viewport". A `transform:
+   scale()` on #root was tried instead of `zoom` here first, on the theory
+   that zoom was the one corrupting `vh`; measuring both with a headless
+   browser showed the identical shortfall under either one (a transform
+   still shrinks a correctly-`100vh`-tall descendant by the same 0.9,
+   since it scales everything inside its subtree uniformly) — so zoom is
+   the simpler of two options that both need the same fix, and it doesn't
+   need transform's position:fixed/overflow:auto restructuring of #root to
+   avoid a phantom document scrollbar. */
+html {
+  zoom: 0.9;
 }
 a {
   color: var(--accent);
@@ -360,9 +396,25 @@ button.danger {
 /* ==========================================================================
    App shell: persistent sidebar rail + content column
    ========================================================================== */
+/* Column, not row: the topbar is now the full-width top of the shell, with
+   the sidebar and the content column as a row underneath it — rather than
+   the topbar being scoped to the width of the content column alone. */
 .cb-app {
   display: flex;
-  min-height: 100vh;
+  flex-direction: column;
+  min-height: var(--vh-full);
+  /* The gutter that keeps the rail and the topbar from touching the
+     viewport edges — both float the same way the panels below them do.
+     In a column, this is the vertical gap between the topbar and the row
+     below it; .cb-body carries the matching horizontal gap for that row. */
+  gap: 16px;
+  padding: 16px;
+}
+.cb-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
 }
 
 /* The content column owns its own scroll context so the sidebar can stay put
@@ -379,23 +431,39 @@ button.danger {
 
 .cb-topbar {
   height: var(--topbar-h);
+  /* Styled like .panel — rounded card, no hairline — but lighter: it sits
+     above every page's content and a shadow as deep as the cards below it
+     reads as too heavy at the top of the screen. A direct child of the
+     column-direction .cb-app now (not scoped to the content column), so
+     the default flex stretch already gives it the full width — inset
+     from the viewport on the left/right by .cb-app's own padding, same as
+     the sidebar and the cards below it. The TOP, though, is pulled flush
+     against the true viewport edge: negative margin cancels .cb-app's
+     16px padding-top just for this element, sticky offset moves from
+     16px to 0, and only the bottom corners stay rounded since the top
+     edge has nowhere left to curve away from. Sticky so
+     search/notifications/account stay reachable while a long page
+     scrolls. */
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid transparent;
+  border-radius: 0 0 var(--card-radius) var(--card-radius);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 16px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 0 20px;
+  padding: 0 32px;
+  flex-shrink: 0;
+  margin-top: -16px;
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
    so this is the small-screen affordance only. */
 .cb-hamburger {
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--control-radius);
   width: var(--control-h);
   height: var(--control-h);
@@ -490,11 +558,14 @@ html[data-theme='dark'] .login-eyebrow-mark {
 .cb-search {
   width: 100%;
   height: 36px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 18px;
   padding: 0 16px 0 36px;
   font-size: 13px;
-  background-color: var(--surface-2);
+  /* A hint of the brand accent instead of plain neutral grey — subtle
+     enough not to read as a filled/active state, just enough that the
+     search field doesn't look identical to every other muted surface. */
+  background-color: color-mix(in srgb, var(--accent) 6%, var(--surface-2));
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
   background-repeat: no-repeat;
   background-position: 12px center;
@@ -504,6 +575,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
 .cb-search:focus {
   background-color: var(--field);
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .cb-search-pop {
   position: absolute;
@@ -511,9 +583,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   left: 0;
   right: 0;
   background: var(--overlay);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   padding: 6px 0;
   max-height: 380px;
   overflow-y: auto;
@@ -727,12 +799,12 @@ html[data-theme='dark'] .login-eyebrow-mark {
   position: absolute;
   top: calc(var(--control-h) + 8px);
   right: 0;
-  width: 360px;
+  width: 400px;
   max-width: calc(100vw - 24px);
   background: var(--overlay);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   z-index: 320;
   overflow: hidden;
 }
@@ -741,47 +813,60 @@ html[data-theme='dark'] .login-eyebrow-mark {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 16px 18px 12px;
 }
 .notif-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 /* Active | History. A segmented pair rather than a dropdown: there are exactly
-   two lists and both should be one click away. */
+   two lists and both should be one click away. Underlined like a tab strip
+   rather than a filled pill, with the count as its own small badge next to
+   the label instead of parenthesised text. */
 .notif-tabs {
   display: flex;
   gap: 4px;
-  padding: 8px 10px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--border);
 }
 .notif-tab {
-  flex: 1;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: var(--control-h-sm);
-  padding: 0 8px;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 6px;
   border: 0;
-  border-radius: 7px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 .notif-tab:hover {
-  background: var(--row-hover);
   color: var(--text);
 }
 .notif-tab.is-on {
-  background: var(--accent-soft);
-  color: var(--on-accent-soft);
-}
-.notif-tab.is-on svg {
   color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.notif-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--pill-radius);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.notif-tab.is-on .notif-tab-count {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .notif-list {
@@ -791,9 +876,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
 .notif-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 18px;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -825,18 +910,17 @@ html[data-theme='dark'] .login-eyebrow-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
-  margin-top: 1px;
   border-radius: 50%;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--muted);
 }
 .notif-item.is-new .notif-item-icon {
-  background: var(--surface);
-  border-color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
   color: var(--accent);
 }
 .notif-item-body {
@@ -845,25 +929,37 @@ html[data-theme='dark'] .login-eyebrow-mark {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  padding-top: 2px;
 }
 .notif-item-text {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text);
   white-space: normal;
 }
+/* The subject/context label and the timestamp, stacked and right-aligned
+   in their own column — not squeezed onto the text's own lines. */
+.notif-item-meta {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  padding-top: 2px;
+  max-width: 40%;
+}
 .notif-item-sub {
-  font-size: 11.5px;
-  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
 }
 .notif-item-time {
   font-size: 10.5px;
   color: var(--muted-2);
-  flex-shrink: 0;
-  margin-top: 2px;
   white-space: nowrap;
 }
 
@@ -884,38 +980,37 @@ html[data-theme='dark'] .login-eyebrow-mark {
 }
 .notif-foot {
   border-top: 1px solid var(--border);
-  padding: 8px 10px;
+  padding: 10px 18px;
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: flex-start;
 }
+/* A plain text link, not a bordered button — this is the one quiet action
+   at the bottom of the panel, not a call to action competing with the
+   list above it. */
 .notif-action {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  min-height: var(--control-h-sm);
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 500;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 .notif-action:hover:not(:disabled) {
-  background: var(--row-hover);
-  border-color: var(--border-strong);
+  text-decoration: underline;
 }
 .notif-action:disabled {
-  background: var(--surface);
+  /* The global `button:disabled { background: var(--muted-2) }` rule
+     otherwise wins this property (this selector never contested it before),
+     painting a solid grey rectangle behind grey text — the "gray box". */
+  background: transparent;
   color: var(--muted-2);
-  border-color: var(--border);
   cursor: not-allowed;
 }
-.notif-action.is-danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-  border-color: var(--danger);
+.notif-action.is-danger {
   color: var(--danger);
 }
 
@@ -1097,12 +1192,24 @@ html[data-theme='dark'] .login-eyebrow-mark {
   width: 264px;
   flex-shrink: 0;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border: 1px solid transparent;
+  /* Same rounded-card-plus-shadow language as .panel, not a directional
+     edge shadow — the rail is inset from the viewport on every side now
+     (see .cb-app's gutter), so it reads as one more floating container. */
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  /* The rail sits in .cb-body, BELOW the full-width topbar, not beside it
+     from the very top of the viewport — so its stuck offset and height
+     both have to clear the topbar's own footprint first: the topbar
+     itself (flush against the true top, no gap of its own) plus the 16px
+     gap .cb-app puts between the topbar and this row. The 32px below is
+     that same 16px again plus .cb-app's 16px bottom padding, so the rail
+     keeps an even gap above and below at every scroll position. */
+  top: calc(var(--topbar-h) + 16px);
+  height: calc(var(--vh-full) - var(--topbar-h) - 32px);
   z-index: 110;
   transition: width 0.16s ease;
 }
@@ -1122,7 +1229,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
   align-items: center;
   gap: 8px;
   padding: 0 14px 0 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
 }
 
 /* A bare glyph, not a button-looking control: no ring, no fill. It is chrome on
@@ -1162,6 +1269,13 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .side-nav {
   flex: 1;
+  /* A flex item's default min-height is auto, i.e. "at least as tall as my
+     content" — which for a scrolling item means it never actually shrinks
+     below that content and overflow-y:auto never gets a reason to kick in.
+     With the rail's height now fixed (see .cb-sidebar) rather than free to
+     grow with 100vh, an admin's full section list did exactly that: pushed
+     the rail taller than its own card instead of scrolling inside it. */
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   /* Generous top padding so the first section label sits clear of the divider
@@ -1199,12 +1313,13 @@ html[data-theme='dark'] .login-eyebrow-mark {
   height: 40px;
   padding: 0 10px;
   margin-bottom: 2px;
-  border-radius: 9px;
+  border-radius: var(--control-radius);
   font-size: 13.5px;
   font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
+  transition: background-color 0.12s ease;
 }
 .side-link svg {
   color: var(--muted-2);
@@ -1402,7 +1517,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
 /* ── The account block, pinned to the bottom of the rail ───────────────── */
 .side-user {
   flex-shrink: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid transparent;
   padding: 10px;
   display: flex;
   align-items: center;
@@ -1416,7 +1531,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
   gap: 10px;
   padding: 6px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--control-radius);
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -1467,7 +1582,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -1489,8 +1604,11 @@ html[data-theme='dark'] .login-eyebrow-mark {
   top: 0;
   left: 0;
   width: 264px;
-  height: 100vh;
+  height: var(--vh-full);
   z-index: 401;
+  /* An overlay drawer stays flush with the screen edge — the floating,
+     rounded-card treatment above is for the permanent rail only. */
+  border-radius: 0;
   box-shadow: 4px 0 16px rgba(15, 23, 42, 0.1);
   animation: drawer-in 0.18s ease-out;
 }
@@ -1515,7 +1633,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .cb-main {
   flex: 1;
-  padding: 24px 32px;
+  /* A bit more breathing room under the topbar specifically than on the
+     other three sides. */
+  padding: 32px 32px 24px;
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
@@ -1540,8 +1660,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   gap: 20px;
   flex-wrap: wrap;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 12px;
+  box-shadow: var(--card-shadow);
   padding: 16px 18px;
 }
 .set-profile-id {
@@ -1604,10 +1725,13 @@ html[data-theme='dark'] .login-eyebrow-mark {
   gap: 12px;
   width: 100%;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
+  border: 1px solid transparent;
   border-radius: 12px;
+  box-shadow: var(--card-shadow);
   padding: 14px 20px;
-  font-size: 14px;
+  /* Matches .panel h3 and the other card-level section headers — was
+     14px, a size not used anywhere else for this role. */
+  font-size: 15px;
   font-weight: 600;
   color: var(--text);
   cursor: pointer;
@@ -1617,11 +1741,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
 .set-accordion-header:hover {
   border-color: var(--accent);
 }
-/* Header and body read as one bordered shape while open — square the seam
-   between them instead of stacking two fully-rounded rectangles. */
+/* Header and body read as one shape while open — square the seam between
+   them instead of stacking two fully-rounded rectangles. */
 .set-accordion.is-open .set-accordion-header {
   border-radius: 12px 12px 0 0;
-  border-bottom-color: transparent;
 }
 .set-accordion-icon {
   display: inline-flex;
@@ -1647,9 +1770,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   transform: rotate(180deg);
 }
 .set-accordion-body {
-  border: 1px solid var(--border-strong);
-  border-top: none;
+  border: 1px solid transparent;
   border-radius: 0 0 12px 12px;
+  box-shadow: var(--card-shadow);
   padding: 18px;
   background: var(--surface-2);
 }
@@ -1683,8 +1806,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 12px;
+  box-shadow: var(--card-shadow);
   padding: 16px 18px;
 }
 .set-card.is-wide {
@@ -1713,7 +1837,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   min-width: 0;
 }
 .set-card-title {
-  font-size: 13.5px;
+  /* Matches .panel h3 / .modal-header h3 / .bf-head h3 — one size for
+     every card-level section header in the app, not a Settings-only 13.5px. */
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -1876,9 +2002,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: 20px;
   margin-bottom: 16px;
 }
 .panel h3 {
@@ -2222,9 +2349,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .panel-tinted {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
   border-top: 3px solid var(--accent);
+  box-shadow: var(--card-shadow);
   padding: 18px;
   margin-bottom: 16px;
 }
@@ -2613,8 +2741,9 @@ tr.active td {
 }
 .kpi-tile {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   padding: 16px 16px;
   display: flex;
   align-items: center;
@@ -3142,7 +3271,7 @@ tr.active td {
 }
 .cal2-grid-wrap {
   overflow-x: auto;
-  max-height: calc(100vh - 220px);
+  max-height: calc(var(--vh-full) - 220px);
   position: relative;
 }
 .cal2-grid {
@@ -3733,7 +3862,7 @@ tr.active td {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  height: var(--vh-full);
 }
 /* ==========================================================================
    Sign-in screen
@@ -3742,7 +3871,7 @@ tr.active td {
    background so the browser can prioritise and size it like any other image.
    ========================================================================== */
 .login-shell {
-  min-height: 100vh;
+  min-height: var(--vh-full);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4363,7 +4492,7 @@ th.sortable.active .sort-arrow {
    Public booking engine + guest portal
    ========================================================================== */
 .public-booking {
-  min-height: 100vh;
+  min-height: var(--vh-full);
   background: linear-gradient(180deg, var(--surface-2) 0%, var(--bg) 240px);
 }
 .pb-header {
@@ -4832,10 +4961,13 @@ html[data-theme='dark'] .skel {
   .rooms-fixed {
     display: flex;
     flex-direction: column;
-    /* Viewport minus the sticky top bar and .cb-main's 24px top and bottom
-       padding. Anything taller and the window itself starts scrolling again,
-       which is the behaviour being removed. */
-    height: calc(100vh - var(--topbar-h) - 48px);
+    /* Viewport minus the sticky top bar (flush with the true top, so no
+       gutter of its own to add), the 16px gap .cb-app puts before the
+       sidebar/content row, and .cb-main's 32px top / 24px bottom padding
+       plus .cb-app's 16px bottom padding. Anything taller and the window
+       itself starts scrolling again, which is the behaviour being
+       removed. */
+    height: calc(var(--vh-full) - var(--topbar-h) - 88px);
   }
   .rooms-fixed .rooms-grid {
     flex: 1;
@@ -4882,6 +5014,33 @@ html[data-theme='dark'] .skel {
     position: static;
     max-height: 100%;
     overflow-y: auto;
+    /* .rooms-grid's align-items:start (needed so a short aside doesn't get
+       dragged down to the room list's height) also left a TALL aside's own
+       panel stopping at its content's height instead of matching
+       .rooms-main — the room-types card ended a third of the way down the
+       frame with nothing but bare page background under it. height:100%
+       plus the flex chain below hands that leftover space to the panel
+       itself, which is what the room list already gets. */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The one panel the aside holds (room types & rates, or the add/edit
+     form when setup is open) fills that height; its own list scrolls
+     inside it rather than the panel stopping short. */
+  .rooms-fixed .rooms-aside > .panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .rooms-fixed .rooms-aside .rt-list {
+    /* Overrides the flat 380px cap: on the desktop-pinned layout the list
+       gets whatever the panel actually has to give, which is real screen
+       height rather than a guess, and still scrolls internally past that. */
+    flex: 1;
+    min-height: 0;
+    max-height: none;
   }
 
   /* ── Compact rail ──────────────────────────────────────────────────────
@@ -4927,7 +5086,7 @@ html[data-theme='dark'] .skel {
     margin-bottom: 0;
   }
   .rooms-fixed .rooms-aside .rt-list {
-    gap: 6px;
+    gap: 12px;
   }
   .rooms-fixed .rooms-aside .rt-item {
     padding: 7px 9px;
@@ -5371,7 +5530,7 @@ html[data-theme='dark'] .skel {
 .rt-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
   /* Its own scroll, separate from the page's: a hotel adds room types far more
      often than it removes them, and without a cap this list pushed the panel
      — and everything below it in the sidebar — taller with every one added.
@@ -5628,11 +5787,14 @@ html[data-theme='dark'] .skel {
   flex-direction: column;
   gap: 16px;
   position: sticky;
+  /* The topbar's top is flush with the true viewport edge, so the stuck
+     offset is just the topbar itself plus the 16px gap .cb-app puts
+     before the sidebar/content row. */
   top: calc(var(--topbar-h) + 16px);
-  /* Never taller than what is left of the screen — see the note above this
-     rule used to carry alone; the 32px is the 16px offset above plus the same
-     again below, so it never sits flush against the bottom edge. */
-  max-height: calc(100vh - var(--topbar-h) - 32px);
+  /* Never taller than what is left of the screen — the 32px is that same
+     16px offset above plus 16px reserved below (.cb-app's bottom
+     padding), so it never sits flush against the bottom edge. */
+  max-height: calc(var(--vh-full) - var(--topbar-h) - 32px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -8251,7 +8413,7 @@ html[data-theme='dark'] .hk-tooltip {
    the app shell and is seen by people who are not logged in, so it defines its
    own ground rather than inheriting the dashboard's. */
 .pay-page {
-  min-height: 100vh;
+  min-height: var(--vh-full);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8513,11 +8675,12 @@ html[data-theme='dark'] .hk-tooltip {
   width: 320px;
   flex-shrink: 0;
   position: sticky;
-  /* Same reasoning as .hk-side: the page scrolls on the document, the
-     sidebar should not be stretched to the ledger's height (so it can
-     actually stick), and the top bar is sticky at z-index 100 above it. */
+  /* Same reasoning as .hk-side: the topbar's top is flush with the true
+     viewport edge, so the stuck offset is just the topbar plus the 16px
+     gap before the sidebar/content row, and the max-height reserves that
+     same 16px again at the bottom (.cb-app's bottom padding). */
   top: calc(var(--topbar-h) + 16px);
-  max-height: calc(100vh - var(--topbar-h) - 32px);
+  max-height: calc(var(--vh-full) - var(--topbar-h) - 32px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -9184,8 +9347,10 @@ button.danger:disabled:hover {
   gap: 14px;
   /* Measured off the topbar rather than guessed at, so the panes reach the
      bottom of the viewport and the composer sits ON that edge instead of
-     floating short of it. */
-  height: calc(100vh - var(--topbar-h) - 108px);
+     floating short of it. 140 (the 16px gap before the sidebar/content
+     row and .cb-app's 16px bottom padding, on top of the old 108) plus
+     the extra 8px .cb-main now adds to its own top padding. */
+  height: calc(var(--vh-full) - var(--topbar-h) - 148px);
   min-height: 460px;
 }
 .msg-contacts,
@@ -9194,8 +9359,9 @@ button.danger:disabled:hover {
   flex-direction: column;
   min-height: 0; /* or the inner scrollers inherit the content height and never scroll */
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 /* Every "nothing here" line in the two panes: loading, no staff, no search
@@ -9214,6 +9380,10 @@ button.danger:disabled:hover {
   align-items: center;
   gap: 9px;
   padding: 12px 14px;
+  /* Same tinted-section treatment as .msg-thread-head/.msg-composer, so the
+     search bar reads as its own block above the contact list rather than
+     just a hairline away from it. */
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   color: var(--muted-2);
 }
@@ -9256,20 +9426,37 @@ button.danger:disabled:hover {
   padding: 8px;
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+/* Online / Offline — same small-caps group-label convention as the sidebar's
+   .side-group-label, so "sections inside a list" reads the same way twice in
+   the app rather than inventing a second pattern for it. */
+.msg-contact-section {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
+}
+.msg-contact-section-label {
+  padding: 0 10px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .msg-contact {
   display: flex;
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s ease;
 }
 .msg-contact:hover {
   background: var(--row-hover);
@@ -9329,8 +9516,8 @@ button.danger:disabled:hover {
 .msg-avatar {
   position: relative;
   flex-shrink: 0;
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9338,7 +9525,7 @@ button.danger:disabled:hover {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 700;
 }
 /* Fixed hex rather than --accent: the accent is user-customisable through the
@@ -9366,7 +9553,11 @@ button.danger:disabled:hover {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 14px 18px;
+  /* A faint tint, not just a hairline, so the header reads as its own
+     section against the plain message scroll beneath it rather than only
+     being told apart by a 1px line. */
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 .msg-thread-id {
@@ -9446,6 +9637,9 @@ button.danger:disabled:hover {
   align-items: flex-end;
   gap: 10px;
   padding: 12px 14px;
+  /* Same reasoning as .msg-thread-head: a tint of its own, so the three
+     stacked sections (header / scroll / composer) read as distinct blocks. */
+  background: var(--surface-2);
   border-top: 1px solid var(--border);
 }
 .msg-composer-field {
@@ -9454,8 +9648,8 @@ button.danger:disabled:hover {
   display: flex;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 8px 14px;
+  border-radius: 22px;
+  padding: 10px 16px;
   transition: border-color 0.14s ease;
 }
 .msg-composer-field:focus-within {
@@ -9480,8 +9674,8 @@ button.danger:disabled:hover {
 }
 .msg-send {
   flex-shrink: 0;
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   min-height: 0;
   display: inline-flex;
   align-items: center;
@@ -9561,13 +9755,19 @@ button.danger:disabled:hover {
   max-width: 100%;
   align-items: flex-start;
 }
+.chat-group-name {
+  padding: 0 4px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
 .chat-group.mine .chat-group-bubbles {
   align-items: flex-end;
 }
 .chat-bubble {
   max-width: 100%;
-  padding: 8px 13px;
-  border-radius: 18px;
+  padding: 10px 16px;
+  border-radius: 20px;
   background: var(--surface-2);
   border: 1px solid var(--border);
 }

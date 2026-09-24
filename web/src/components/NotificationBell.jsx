@@ -73,7 +73,8 @@ export default function NotificationBell({ feed }) {
               className={`notif-tab${tab === 'unread' ? ' is-on' : ''}`}
               onClick={() => setTab('unread')}
             >
-              Unread{unreadItems.length ? ` (${unreadItems.length})` : ''}
+              Unread
+              {unreadItems.length > 0 && <span className="notif-tab-count">{unreadItems.length}</span>}
             </button>
             <button
               type="button"
@@ -82,7 +83,8 @@ export default function NotificationBell({ feed }) {
               className={`notif-tab${tab === 'read' ? ' is-on' : ''}`}
               onClick={() => setTab('read')}
             >
-              Read{readItems.length ? ` (${readItems.length})` : ''}
+              Read
+              {readItems.length > 0 && <span className="notif-tab-count">{readItems.length}</span>}
             </button>
           </div>
 
@@ -111,13 +113,15 @@ export default function NotificationBell({ feed }) {
                   disabled={!n.to}
                 >
                   <span className="notif-item-icon">
-                    <Icon name={n.icon} size={15} strokeWidth={1.9} />
+                    <Icon name={n.icon} size={16} strokeWidth={1.9} />
                   </span>
                   <span className="notif-item-body">
                     <span className="notif-item-text">{n.text}</span>
-                    {n.subject ? <span className="notif-item-sub">{n.subject}</span> : null}
                   </span>
-                  <span className="notif-item-time">{relativeTime(n.at)}</span>
+                  <span className="notif-item-meta">
+                    {n.subject ? <span className="notif-item-sub">{n.subject}</span> : null}
+                    <span className="notif-item-time">{relativeTime(n.at)}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -136,8 +140,7 @@ export default function NotificationBell({ feed }) {
                 disabled={unreadItems.length === 0}
                 title="Mark all as read"
               >
-                <Icon name="check" size={14} strokeWidth={2.2} />
-                Clear
+                Mark all as read
               </button>
             ) : (
               <button
@@ -147,8 +150,7 @@ export default function NotificationBell({ feed }) {
                 disabled={readItems.length === 0}
                 title="Delete read notifications"
               >
-                <Icon name="trash" size={14} strokeWidth={1.9} />
-                Clear
+                Delete read
               </button>
             )}
           </div>

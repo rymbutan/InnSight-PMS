@@ -26,7 +26,7 @@ import { refOf } from '../lib/recordRefs';
  * because leaving that page would otherwise close the conversation the reader
  * just clicked out of.
  */
-export default function Transcript({ rows, onOpenRecord }) {
+export default function Transcript({ rows, onOpenRecord, peerName }) {
   const navigate = useNavigate();
   // Re-derived each render rather than captured once, so a thread left open
   // across midnight relabels "Today" instead of insisting it still is.
@@ -45,6 +45,16 @@ export default function Transcript({ rows, onOpenRecord }) {
         ) : (
           <div className={`chat-group${row.mine ? ' mine' : ''}`} key={row.key}>
             <div className="chat-group-bubbles">
+              {/* Who this turn belongs to — the same fact the side a bubble
+                  sits on already carries, but named rather than implied, the
+                  way the reference design labels each cluster. Inside
+                  .chat-group-bubbles (not a sibling of it) so it inherits the
+                  same column stacking and left/right alignment as the
+                  bubbles beneath it. Only rendered when the caller hands over
+                  a name, so a surface with no peer to name (there is none
+                  right now) just keeps the old unlabelled look instead of
+                  printing "undefined". */}
+              {peerName && <span className="chat-group-name">{row.mine ? 'You' : peerName}</span>}
               {row.items.map((m) => {
                 const record = refOf(m);
                 return (
