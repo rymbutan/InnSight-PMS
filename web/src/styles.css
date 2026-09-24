@@ -985,6 +985,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
   text-decoration: underline;
 }
 .notif-action:disabled {
+  /* The global `button:disabled { background: var(--muted-2) }` rule
+     otherwise wins this property (this selector never contested it before),
+     painting a solid grey rectangle behind grey text — the "gray box". */
+  background: transparent;
   color: var(--muted-2);
   cursor: not-allowed;
 }
