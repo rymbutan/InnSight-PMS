@@ -1102,7 +1102,10 @@ html[data-theme='dark'] .login-eyebrow-mark {
   width: 264px;
   flex-shrink: 0;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid transparent;
+  /* A soft edge instead of a hairline — the rail reads as a floating panel
+     next to the content pane rather than a boxed-in column. */
+  box-shadow: 1px 0 0 rgba(15, 23, 42, 0.03), 6px 0 24px rgba(15, 23, 42, 0.04);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -1127,7 +1130,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
   align-items: center;
   gap: 8px;
   padding: 0 14px 0 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
 }
 
 /* A bare glyph, not a button-looking control: no ring, no fill. It is chrome on
@@ -1204,12 +1207,13 @@ html[data-theme='dark'] .login-eyebrow-mark {
   height: 40px;
   padding: 0 10px;
   margin-bottom: 2px;
-  border-radius: 9px;
+  border-radius: var(--control-radius);
   font-size: 13.5px;
   font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
+  transition: background-color 0.12s ease;
 }
 .side-link svg {
   color: var(--muted-2);
@@ -1407,7 +1411,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
 /* ── The account block, pinned to the bottom of the rail ───────────────── */
 .side-user {
   flex-shrink: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid transparent;
   padding: 10px;
   display: flex;
   align-items: center;
@@ -1421,7 +1425,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
   gap: 10px;
   padding: 6px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--control-radius);
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -1472,7 +1476,7 @@ html[data-theme='dark'] .login-eyebrow-mark {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
