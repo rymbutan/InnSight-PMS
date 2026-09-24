@@ -152,7 +152,7 @@
      A wider radius plus a soft shadow instead of a hard border reads as a
      lighter, "floating" surface rather than a boxed-in one. */
   --card-radius: 18px;
-  --card-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 18px 40px rgba(15, 23, 42, 0.12);
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 22px rgba(15, 23, 42, 0.07);
   /* Icon ↔ label spacing inside a control. */
   --control-gap: 8px;
   /* Scrollbars. Named so the thickness and colours are tuned in one place
@@ -1682,7 +1682,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   border-radius: 12px;
   box-shadow: var(--card-shadow);
   padding: 14px 20px;
-  font-size: 14px;
+  /* Matches .panel h3 and the other card-level section headers — was
+     14px, a size not used anywhere else for this role. */
+  font-size: 15px;
   font-weight: 600;
   color: var(--text);
   cursor: pointer;
@@ -1788,7 +1790,9 @@ html[data-theme='dark'] .login-eyebrow-mark {
   min-width: 0;
 }
 .set-card-title {
-  font-size: 13.5px;
+  /* Matches .panel h3 / .modal-header h3 / .bf-head h3 — one size for
+     every card-level section header in the app, not a Settings-only 13.5px. */
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.3;
 }
