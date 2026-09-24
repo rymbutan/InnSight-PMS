@@ -616,43 +616,11 @@ export default function Layout() {
 
   return (
     <div className="cb-app">
-      {/* `side-collapsed` lives on the rail, NOT on the shell, so the drawer
-          below — which renders the same markup — is never narrowed by it. The
-          drawer is always the full-width version even while the desktop rail is
-          collapsed. */}
-      {/* Clicking the rail's empty space toggles it, and the listener sits on
-          the RAIL rather than on .side-nav — which is what made the gesture
-          unreliable. .side-nav is `flex: 1`, so its empty space is whatever the
-          nav list does not fill: plenty for a housekeeper with six rows, and
-          NONE for an admin whose list overflows and scrolls. For those roles
-          every click in the rail landed on a link, and the gesture simply did
-          not exist. On the aside, the head's empty space beside the brand, the
-          strip beside the account block and the gap under the last row all
-          count, at every role and window height.
-
-          Keyboard users are unaffected: the labelled toggle in the head is
-          still the primary control and the aside is not focusable. */}
-      <aside className={`cb-sidebar${collapsed ? ' side-collapsed' : ''}`} {...railToggle}>
-        {sidebar}
-      </aside>
-
-      {drawerOpen && (
-        <>
-          <div className="side-backdrop" onClick={() => setDrawerOpen(false)} />
-          <aside className="cb-sidebar cb-sidebar-drawer">{sidebar}</aside>
-        </>
-      )}
-
-      {/* Clicking the page collapses an expanded rail, the same gesture as
-          clicking the rail's own whitespace — and now literally the same code
-          path, so the two cannot disagree about what "empty space" means. It
-          never fires on work: only while the rail is expanded (it never
-          re-expands from here — that stays a deliberate act on the rail or its
-          toggle), never while the mobile drawer is up (the backdrop owns that
-          dismissal), never on a drag, a text selection or a scrollbar, and
-          never when the click landed on something interactive. */}
-      <div className="cb-content" {...contentToggle}>
-        <header className="cb-topbar">
+      {/* The topbar now spans the FULL width of the shell — both sides, above
+          the rail as well as above the content — with the sidebar and the
+          content column as a row underneath it, rather than the topbar being
+          scoped to the content column alone. */}
+      <header className="cb-topbar">
           <button
             type="button"
             className="cb-hamburger"
@@ -999,14 +967,52 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="cb-main">
-          <Outlet />
-        </main>
+      <div className="cb-body">
+        {/* `side-collapsed` lives on the rail, NOT on the shell, so the drawer
+            below — which renders the same markup — is never narrowed by it. The
+            drawer is always the full-width version even while the desktop rail is
+            collapsed. */}
+        {/* Clicking the rail's empty space toggles it, and the listener sits on
+            the RAIL rather than on .side-nav — which is what made the gesture
+            unreliable. .side-nav is `flex: 1`, so its empty space is whatever the
+            nav list does not fill: plenty for a housekeeper with six rows, and
+            NONE for an admin whose list overflows and scrolls. For those roles
+            every click in the rail landed on a link, and the gesture simply did
+            not exist. On the aside, the head's empty space beside the brand, the
+            strip beside the account block and the gap under the last row all
+            count, at every role and window height.
 
-        {/* In the shell rather than on a page: an event that happened elsewhere
-            in the hotel has to reach whoever is on screen, whatever they have
-            open. */}
-        <NotificationPopups items={popups} onDismiss={dismissPopup} />
+            Keyboard users are unaffected: the labelled toggle in the head is
+            still the primary control and the aside is not focusable. */}
+        <aside className={`cb-sidebar${collapsed ? ' side-collapsed' : ''}`} {...railToggle}>
+          {sidebar}
+        </aside>
+
+        {drawerOpen && (
+          <>
+            <div className="side-backdrop" onClick={() => setDrawerOpen(false)} />
+            <aside className="cb-sidebar cb-sidebar-drawer">{sidebar}</aside>
+          </>
+        )}
+
+        {/* Clicking the page collapses an expanded rail, the same gesture as
+            clicking the rail's own whitespace — and now literally the same code
+            path, so the two cannot disagree about what "empty space" means. It
+            never fires on work: only while the rail is expanded (it never
+            re-expands from here — that stays a deliberate act on the rail or its
+            toggle), never while the mobile drawer is up (the backdrop owns that
+            dismissal), never on a drag, a text selection or a scrollbar, and
+            never when the click landed on something interactive. */}
+        <div className="cb-content" {...contentToggle}>
+          <main className="cb-main">
+            <Outlet />
+          </main>
+
+          {/* In the shell rather than on a page: an event that happened elsewhere
+              in the hotel has to reach whoever is on screen, whatever they have
+              open. */}
+          <NotificationPopups items={popups} onDismiss={dismissPopup} />
+        </div>
       </div>
       <KeyboardShortcuts />
       {/* In the SHELL, not on a page: a call has to interrupt wherever the
