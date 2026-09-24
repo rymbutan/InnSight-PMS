@@ -1197,6 +1197,13 @@ html[data-theme='dark'] .login-eyebrow-mark {
 
 .side-nav {
   flex: 1;
+  /* A flex item's default min-height is auto, i.e. "at least as tall as my
+     content" — which for a scrolling item means it never actually shrinks
+     below that content and overflow-y:auto never gets a reason to kick in.
+     With the rail's height now fixed (see .cb-sidebar) rather than free to
+     grow with 100vh, an admin's full section list did exactly that: pushed
+     the rail taller than its own card instead of scrolling inside it. */
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   /* Generous top padding so the first section label sits clear of the divider
@@ -4927,6 +4934,33 @@ html[data-theme='dark'] .skel {
     position: static;
     max-height: 100%;
     overflow-y: auto;
+    /* .rooms-grid's align-items:start (needed so a short aside doesn't get
+       dragged down to the room list's height) also left a TALL aside's own
+       panel stopping at its content's height instead of matching
+       .rooms-main — the room-types card ended a third of the way down the
+       frame with nothing but bare page background under it. height:100%
+       plus the flex chain below hands that leftover space to the panel
+       itself, which is what the room list already gets. */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The one panel the aside holds (room types & rates, or the add/edit
+     form when setup is open) fills that height; its own list scrolls
+     inside it rather than the panel stopping short. */
+  .rooms-fixed .rooms-aside > .panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .rooms-fixed .rooms-aside .rt-list {
+    /* Overrides the flat 380px cap: on the desktop-pinned layout the list
+       gets whatever the panel actually has to give, which is real screen
+       height rather than a guess, and still scrolls internally past that. */
+    flex: 1;
+    min-height: 0;
+    max-height: none;
   }
 
   /* ── Compact rail ──────────────────────────────────────────────────────
