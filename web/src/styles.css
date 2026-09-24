@@ -4874,10 +4874,13 @@ html[data-theme='dark'] .skel {
   .rooms-fixed {
     display: flex;
     flex-direction: column;
-    /* Viewport minus the sticky top bar and .cb-main's 24px top and bottom
-       padding. Anything taller and the window itself starts scrolling again,
-       which is the behaviour being removed. */
-    height: calc(100vh - var(--topbar-h) - 48px);
+    /* Viewport minus the sticky top bar, .cb-main's 24px top and bottom
+       padding, and — since the topbar floats as its own inset card rather
+       than sitting flush — .cb-app's 16px top+bottom gutter and the
+       topbar's own 16px margin-bottom (48px extra beyond the old flush
+       layout). Anything taller and the window itself starts scrolling
+       again, which is the behaviour being removed. */
+    height: calc(100vh - var(--topbar-h) - 96px);
   }
   .rooms-fixed .rooms-grid {
     flex: 1;
@@ -5670,11 +5673,16 @@ html[data-theme='dark'] .skel {
   flex-direction: column;
   gap: 16px;
   position: sticky;
-  top: calc(var(--topbar-h) + 16px);
-  /* Never taller than what is left of the screen — see the note above this
-     rule used to carry alone; the 32px is the 16px offset above plus the same
-     again below, so it never sits flush against the bottom edge. */
-  max-height: calc(100vh - var(--topbar-h) - 32px);
+  /* The topbar now floats: .cb-app's 16px top padding, then the topbar
+     itself, then its own 16px margin-bottom, before this column's normal
+     flow position even starts — so the stuck offset is that whole 32px,
+     not the old 16px gap against a flush topbar. */
+  top: calc(var(--topbar-h) + 32px);
+  /* Never taller than what is left of the screen — the 64px is that same
+     32px offset above plus 32px reserved below (the old 16px gap plus
+     .cb-app's 16px bottom padding), so it never sits flush against the
+     bottom edge. */
+  max-height: calc(100vh - var(--topbar-h) - 64px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -8555,11 +8563,12 @@ html[data-theme='dark'] .hk-tooltip {
   width: 320px;
   flex-shrink: 0;
   position: sticky;
-  /* Same reasoning as .hk-side: the page scrolls on the document, the
-     sidebar should not be stretched to the ledger's height (so it can
-     actually stick), and the top bar is sticky at z-index 100 above it. */
-  top: calc(var(--topbar-h) + 16px);
-  max-height: calc(100vh - var(--topbar-h) - 32px);
+  /* Same reasoning as .hk-side, including its updated offset: the topbar
+     floats now, so the stuck top is .cb-app's 16px padding + the topbar +
+     its own 16px margin-bottom, and the max-height reserves that same
+     32px again at the bottom. */
+  top: calc(var(--topbar-h) + 32px);
+  max-height: calc(100vh - var(--topbar-h) - 64px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -9226,8 +9235,10 @@ button.danger:disabled:hover {
   gap: 14px;
   /* Measured off the topbar rather than guessed at, so the panes reach the
      bottom of the viewport and the composer sits ON that edge instead of
-     floating short of it. */
-  height: calc(100vh - var(--topbar-h) - 108px);
+     floating short of it. 108px was right for the old flush topbar; the
+     floating topbar adds .cb-app's 16px top+bottom gutter plus its own
+     16px margin-bottom (48px), hence 156. */
+  height: calc(100vh - var(--topbar-h) - 156px);
   min-height: 460px;
 }
 .msg-contacts,
