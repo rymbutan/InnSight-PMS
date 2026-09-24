@@ -492,6 +492,19 @@ router.get('/access-requests', verifyToken, requireRole(...STAFF_ROLES), async (
       where,
       orderBy: { createdAt: 'desc' },
       take: 200,
+      // Never passwordHash — nobody past this point needs it, admin included.
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        note: true,
+        username: true,
+        status: true,
+        createdAt: true,
+        reviewedAt: true,
+        reviewedBy: true,
+        createdUser: true,
+      },
     });
     res.json(rows);
   } catch (err) {
@@ -502,10 +515,13 @@ router.get('/access-requests', verifyToken, requireRole(...STAFF_ROLES), async (
 
 // POST /api/access-requests/:id/approve — creates the User.
 //
-// The account is created WITHOUT a password: these people sign in with Google,
-// and a random unguessable hash is stored so the password path can never be used
-// against the account. Roles are whatever the admin ticks — the request itself
-// never implies any.
+// The account is created with the password the requester chose at sign-up
+// (routes/auth.routes.js, POST /api/auth/access-request) — approving does not
+// invent one, so there is nothing here for the admin to hand out or for the
+// new user to be told out of band. Google sign-in keeps working exactly as
+// before regardless: it matches by email alone (POST /api/auth/google) and
+// never looks at passwordHash. Roles are whatever the admin ticks — the
+// request itself never implies any.
 router.post('/access-requests/:id/approve', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
     const reqRow = await prisma.accessRequest.findUnique({ where: { id: req.params.id } });
@@ -516,7 +532,7 @@ router.post('/access-requests/:id/approve', verifyToken, requireRole(...STAFF_RO
 
     const roles = Array.isArray(req.body?.roles) ? req.body.roles : [];
     if (blockIfGrantingAdmin(req, res, roles)) return;
-    const username = String(req.body?.username || reqRow.email.split('@')[0])
+    const username = String(req.body?.username || reqRow.username || reqRow.email.split('@')[0])
       .trim()
       .toLowerCase();
 
@@ -525,15 +541,18 @@ router.post('/access-requests/:id/approve', verifyToken, requireRole(...STAFF_RO
     });
     if (clash) return res.status(409).json({ error: 'That username or email already exists.' });
 
-    // Not a placeholder anyone could guess: 64 random hex characters, hashed.
-    const unusable = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+    // Falls back to the old unusable-hash, Google-only behaviour only for a
+    // request that predates the password field (already PENDING when this
+    // shipped). Every request submitted from now on carries its own hash.
+    const passwordHash =
+      reqRow.passwordHash || (await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10));
 
     const user = await prisma.user.create({
       data: {
         username,
         email: reqRow.email,
         displayName: reqRow.fullName,
-        passwordHash: unusable,
+        passwordHash,
         status: 'ACTIVE',
         roles: { create: roles.map((roleCode) => ({ roleCode })) },
       },

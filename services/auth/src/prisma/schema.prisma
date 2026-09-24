@@ -114,15 +114,21 @@ model PasswordReset {
 }
 
 model AccessRequest {
-  id          String              @id @default(uuid())
-  email       String              @unique
-  fullName    String
-  note        String?
-  status      AccessRequestStatus @default(PENDING)
-  createdAt   DateTime            @default(now())
-  reviewedAt  DateTime?
-  reviewedBy  String?
-  createdUser String?             // User.id once approved
+  id           String              @id @default(uuid())
+  email        String              @unique
+  fullName     String
+  note         String?
+  // Chosen by the requester at sign-up time, not the admin, so approval no
+  // longer has to invent a password (a random unusable hash, Google-only) or
+  // guess a username from the email. Nullable because a request submitted
+  // before this field existed has neither — approve() falls back for those.
+  username     String?
+  passwordHash String?
+  status       AccessRequestStatus @default(PENDING)
+  createdAt    DateTime            @default(now())
+  reviewedAt   DateTime?
+  reviewedBy   String?
+  createdUser  String?             // User.id once approved
 
   @@index([status, createdAt])
 }

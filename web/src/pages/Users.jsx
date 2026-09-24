@@ -230,7 +230,9 @@ export default function Users() {
   function openApprove(r) {
     setApproveErr('');
     setApprove(r);
-    setApproveName(r.email.split('@')[0]);
+    // Their own choice from the signup form; the email-prefix guess is only
+    // for a request submitted before that field existed.
+    setApproveName(r.username || r.email.split('@')[0]);
     setApproveRoles([]);
   }
 
@@ -247,7 +249,7 @@ export default function Users() {
       });
       const email = approve.email;
       setApprove(null);
-      setMsg(`Approved ${email}. They can now sign in with Google.`);
+      setMsg(`Approved ${email}. They can now sign in with the password they chose (or Google).`);
       load();
     } catch (e) {
       // Shown inside the dialog: a duplicate username is the common failure and
@@ -346,6 +348,7 @@ export default function Users() {
               <tr>
                 <th>Name</th>
                 <th>University email</th>
+                <th>Username</th>
                 <th>Reason</th>
                 <th className="t-c">Requested</th>
                 <th className="t-c">Actions</th>
@@ -356,6 +359,7 @@ export default function Users() {
                 <tr key={r.id}>
                   <td>{r.fullName}</td>
                   <td>{r.email}</td>
+                  <td className="muted">{r.username || '—'}</td>
                   <td className="muted">{r.note || '—'}</td>
                   <td className="muted t-c">{new Date(r.createdAt).toLocaleDateString()}</td>
                   <td className="t-actions">
@@ -723,9 +727,10 @@ export default function Users() {
         }
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          Creates an account for every pending request below, username defaulted from each
-          person's email. Every one of them gets the same roles you tick here — for anyone who
-          needs something different, cancel this and approve them individually instead.
+          Creates an account for every pending request below, using the username and password
+          each person chose when they signed up. Every one of them gets the same roles you tick
+          here — for anyone who needs something different, cancel this and approve them
+          individually instead.
         </p>
         <label>Roles for all {requests.length} accounts</label>
         <div className="role-picker">
