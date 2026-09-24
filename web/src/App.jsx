@@ -175,7 +175,7 @@ export default function App() {
         <Route
           path="/revenue"
           element={
-            <ProtectedRoute section="reports" roles={['ADMIN', 'MANAGER']}>
+            <ProtectedRoute section="reports" roles={['ADMIN', 'MANAGER', 'AUDITOR']}>
               <Revenue />
             </ProtectedRoute>
           }
