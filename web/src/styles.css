@@ -384,18 +384,22 @@ button.danger {
 
 .cb-topbar {
   height: var(--topbar-h);
-  /* No bar any more: transparent onto the page background, no sticky pin,
-     no shadow — search/notifications/account read as the first row of the
-     page's own content instead of a fixed strip of chrome above it. Its
-     side padding matches .cb-main so the row lines up with the cards
+  /* Back as a real bar, but in the same borderless-plus-shadow language as
+     the sidebar and every card below it: a white surface floating on the
+     page, no hairline, a soft shadow standing in for the edge. Sticky so
+     search/notifications/account stay reachable while a long page scrolls.
+     Side padding matches .cb-main so the row lines up with the cards
      underneath it. */
-  background: transparent;
+  background: var(--surface);
   border-bottom: 1px solid transparent;
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 32px;
-  position: static;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 20px rgba(15, 23, 42, 0.05);
 }
 
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
