@@ -422,25 +422,22 @@ button.danger {
   /* Styled like .panel — rounded card, no hairline — but lighter: it sits
      above every page's content and a shadow as deep as the cards below it
      reads as too heavy at the top of the screen. Inset from the viewport
-     on the left/right/bottom by .cb-app's gutter, same as the sidebar and
-     the cards below it — EXCEPT the top, which is pulled flush against
-     the true viewport edge (negative margin canceling .cb-app's 16px
-     padding-top, sticky offset 0 to match) rather than floating with a
-     gap above it. Only the bottom corners stay rounded, since the top
-     edge no longer has anywhere to curve away from. Side padding matches
-     .cb-main so the row lines up with the cards underneath it. */
+     on every side by .cb-app's gutter, so it floats the same way the
+     sidebar and the cards below it do rather than running flush
+     edge-to-edge. Sticky so search/notifications/account stay reachable
+     while a long page scrolls. Side padding matches .cb-main so the row
+     lines up with the cards underneath it. */
   background: var(--surface);
   border: 1px solid transparent;
-  border-radius: 0 0 var(--card-radius) var(--card-radius);
+  border-radius: var(--card-radius);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 16px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 32px;
-  margin-top: -16px;
   margin-bottom: 16px;
   position: sticky;
-  top: 0;
+  top: 16px;
   z-index: 100;
 }
 
@@ -4941,13 +4938,12 @@ html[data-theme='dark'] .skel {
     display: flex;
     flex-direction: column;
     /* Viewport minus the sticky top bar, .cb-main's 24px top and bottom
-       padding, the topbar's own 16px margin-bottom, and .cb-app's 16px
-       BOTTOM padding — the topbar's top is flush with the true viewport
-       edge (see .cb-topbar), so unlike the other three there is no
-       matching top gutter to add here. Anything taller and the window
-       itself starts scrolling again, which is the behaviour being
-       removed. */
-    height: calc(var(--vh-full) - var(--topbar-h) - 80px);
+       padding, and — since the topbar floats as its own inset card rather
+       than sitting flush — .cb-app's 16px top+bottom gutter and the
+       topbar's own 16px margin-bottom (48px extra beyond the old flush
+       layout). Anything taller and the window itself starts scrolling
+       again, which is the behaviour being removed. */
+    height: calc(var(--vh-full) - var(--topbar-h) - 96px);
   }
   .rooms-fixed .rooms-grid {
     flex: 1;
@@ -5767,13 +5763,16 @@ html[data-theme='dark'] .skel {
   flex-direction: column;
   gap: 16px;
   position: sticky;
-  /* The topbar's top is flush with the true viewport edge, so the stuck
-     offset is just the topbar itself plus its own 16px margin-bottom. */
-  top: calc(var(--topbar-h) + 16px);
-  /* Never taller than what is left of the screen — the 32px is that same
-     16px offset above plus 16px reserved below (.cb-app's bottom
-     padding), so it never sits flush against the bottom edge. */
-  max-height: calc(var(--vh-full) - var(--topbar-h) - 32px);
+  /* The topbar now floats: .cb-app's 16px top padding, then the topbar
+     itself, then its own 16px margin-bottom, before this column's normal
+     flow position even starts — so the stuck offset is that whole 32px,
+     not the old 16px gap against a flush topbar. */
+  top: calc(var(--topbar-h) + 32px);
+  /* Never taller than what is left of the screen — the 64px is that same
+     32px offset above plus 32px reserved below (the old 16px gap plus
+     .cb-app's 16px bottom padding), so it never sits flush against the
+     bottom edge. */
+  max-height: calc(var(--vh-full) - var(--topbar-h) - 64px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -8654,12 +8653,12 @@ html[data-theme='dark'] .hk-tooltip {
   width: 320px;
   flex-shrink: 0;
   position: sticky;
-  /* Same reasoning as .hk-side: the topbar's top is flush with the true
-     viewport edge, so the stuck offset is just the topbar plus its own
-     16px margin-bottom, and the max-height reserves that same 16px again
-     at the bottom (.cb-app's bottom padding). */
-  top: calc(var(--topbar-h) + 16px);
-  max-height: calc(var(--vh-full) - var(--topbar-h) - 32px);
+  /* Same reasoning as .hk-side, including its updated offset: the topbar
+     floats now, so the stuck top is .cb-app's 16px padding + the topbar +
+     its own 16px margin-bottom, and the max-height reserves that same
+     32px again at the bottom. */
+  top: calc(var(--topbar-h) + 32px);
+  max-height: calc(var(--vh-full) - var(--topbar-h) - 64px);
   overflow-y: auto;
   z-index: 1;
 }
@@ -9327,10 +9326,9 @@ button.danger:disabled:hover {
   /* Measured off the topbar rather than guessed at, so the panes reach the
      bottom of the viewport and the composer sits ON that edge instead of
      floating short of it. 108px was right for the old flush topbar; the
-     topbar's own 16px margin-bottom plus .cb-app's 16px bottom padding
-     (32px) is still owed since only the topbar's TOP is flush now, hence
-     140. */
-  height: calc(var(--vh-full) - var(--topbar-h) - 140px);
+     floating topbar adds .cb-app's 16px top+bottom gutter plus its own
+     16px margin-bottom (48px), hence 156. */
+  height: calc(var(--vh-full) - var(--topbar-h) - 156px);
   min-height: 460px;
 }
 .msg-contacts,
