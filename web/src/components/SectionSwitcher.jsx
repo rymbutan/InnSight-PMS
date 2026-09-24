@@ -37,6 +37,6 @@ export default function SectionSwitcher({ options }) {
 // is a sibling view of the property's numbers, not a separate destination.
 export const REPORTS_SECTIONS = [
   { to: '/reports', label: 'Reports', icon: 'bar-chart', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
-  { to: '/revenue', label: 'Revenue', icon: 'coins', roles: ['ADMIN', 'MANAGER'] },
+  { to: '/revenue', label: 'Revenue', icon: 'coins', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
   { to: '/audit', label: 'Night Audit', icon: 'sunrise', roles: ['ADMIN', 'MANAGER', 'AUDITOR'] },
 ];

@@ -199,6 +199,11 @@ model HousekeepingCall {
   answeredById   String?
   answeredByName String?
   accepted       Boolean?
+  // A canned quick-reply picked at answer time (see IncomingCall.jsx), e.g.
+  // "Sure, I'll look into it." or "Sorry, I'm busy — can you assign it to
+  // someone else?" — null when the call was answered with the plain
+  // Accept/Decline buttons and no reply was sent.
+  replyMessage   String?
 
   @@index([placedAt])
   @@index([targetUserId, placedAt])
