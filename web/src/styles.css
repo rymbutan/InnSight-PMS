@@ -9380,6 +9380,10 @@ button.danger:disabled:hover {
   align-items: center;
   gap: 9px;
   padding: 12px 14px;
+  /* Same tinted-section treatment as .msg-thread-head/.msg-composer, so the
+     search bar reads as its own block above the contact list rather than
+     just a hairline away from it. */
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   color: var(--muted-2);
 }
@@ -9422,7 +9426,23 @@ button.danger:disabled:hover {
   padding: 8px;
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+/* Online / Offline — same small-caps group-label convention as the sidebar's
+   .side-group-label, so "sections inside a list" reads the same way twice in
+   the app rather than inventing a second pattern for it. */
+.msg-contact-section {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
+}
+.msg-contact-section-label {
+  padding: 0 10px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .msg-contact {
   display: flex;
@@ -9534,6 +9554,10 @@ button.danger:disabled:hover {
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
+  /* A faint tint, not just a hairline, so the header reads as its own
+     section against the plain message scroll beneath it rather than only
+     being told apart by a 1px line. */
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 .msg-thread-id {
@@ -9613,6 +9637,9 @@ button.danger:disabled:hover {
   align-items: flex-end;
   gap: 10px;
   padding: 12px 14px;
+  /* Same reasoning as .msg-thread-head: a tint of its own, so the three
+     stacked sections (header / scroll / composer) read as distinct blocks. */
+  background: var(--surface-2);
   border-top: 1px solid var(--border);
 }
 .msg-composer-field {
@@ -9727,6 +9754,12 @@ button.danger:disabled:hover {
   min-width: 0;
   max-width: 100%;
   align-items: flex-start;
+}
+.chat-group-name {
+  padding: 0 4px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
 }
 .chat-group.mine .chat-group-bubbles {
   align-items: flex-end;
