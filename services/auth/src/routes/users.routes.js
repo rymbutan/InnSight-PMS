@@ -539,6 +539,10 @@ router.post('/access-requests/:id/approve', verifyToken, requireRole(...STAFF_RO
       },
       include: { roles: true },
     });
+    // Messaging keeps its own UserCache mirror and only learns about new
+    // accounts from this event — without it, an approved user stays invisible
+    // in chat until the messaging service happens to restart.
+    redis.publish('auth:user_created', JSON.stringify({ userId: user.id, username }));
 
     await prisma.accessRequest.update({
       where: { id: reqRow.id },
