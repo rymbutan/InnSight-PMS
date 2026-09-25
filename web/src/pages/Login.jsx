@@ -3,6 +3,8 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { pingBackend } from '../api';
 import GoogleSignIn from '../components/GoogleSignIn';
+import AuthHero from '../components/AuthHero';
+import AuthBrandMark from '../components/AuthBrandMark';
 
 export default function Login() {
   const { user, login, loginWithGoogle, loading } = useAuth();
@@ -73,39 +75,14 @@ export default function Login() {
   return (
     <div className="login-shell">
       <div className="login-panel">
-        {/* ── Left: photograph, brand mark top-left, strapline bottom-left ── */}
-        <aside className="login-figure">
-          <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
-          <div className="login-figure-scrim" aria-hidden="true" />
-          <div className="login-figure-body">
-            <div className="login-eyebrow">
-              <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
-              <span className="login-eyebrow-rule" aria-hidden="true" />
-            </div>
-            <div className="login-figure-quote">
-              <h2>
-                Every Stay,
-                <br />
-                Perfectly Run
-              </h2>
-              <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
-            </div>
-          </div>
-        </aside>
-
-        {/* ── Right: the form ── */}
         <div className="login-form-side">
           <form className="login-card" onSubmit={onSubmit}>
-            <img
-              className="login-wordmark"
-              src="/brand/innsight-wordmark.png"
-              alt="InnSight"
-              width="640"
-              height="186"
-            />
+            <AuthBrandMark />
 
-            <h1>Welcome Back</h1>
-            <p className="login-lede">Enter your username and password to access your account</p>
+            <h1>Sign in</h1>
+            <p className="login-topline">
+              Don&rsquo;t have an account? <Link to="/request-access">Sign Up</Link>
+            </p>
 
             <label className="login-label" htmlFor="login-username">
               Username
@@ -145,15 +122,13 @@ export default function Login() {
               </button>
             </div>
 
+            <p className="login-forgot">
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
+
             <button className="login-submit" disabled={loading || !backend.ok}>
               {signInLabel}
             </button>
-
-            <GoogleSignIn
-              onCredential={onGoogleCredential}
-              onError={setError}
-              disabled={loading || !backend.ok}
-            />
 
             {error && (
               <div className="error" role="alert">
@@ -170,12 +145,17 @@ export default function Login() {
               </div>
             )}
 
-            <p className="login-alt">
-              <Link to="/forgot-password">Forgot password?</Link>
-            </p>
-            <p className="login-alt">
-              Don&rsquo;t have an account? <Link to="/request-access">Sign Up</Link>
-            </p>
+            <div className="login-divider">
+              <span className="login-divider-line" aria-hidden="true" />
+              <span>Or continue with username</span>
+              <span className="login-divider-line" aria-hidden="true" />
+            </div>
+
+            <GoogleSignIn
+              onCredential={onGoogleCredential}
+              onError={setError}
+              disabled={loading || !backend.ok}
+            />
 
             {import.meta.env.DEV && (
               <p className="login-devhint muted">
@@ -186,6 +166,8 @@ export default function Login() {
             )}
           </form>
         </div>
+
+        <AuthHero />
       </div>
     </div>
   );
