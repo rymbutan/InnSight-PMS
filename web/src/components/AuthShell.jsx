@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
+import AuthHero from './AuthHero';
+import AuthBrandMark from './AuthBrandMark';
 
-// The signed-out frame: photograph on the left, a card on the right.
+// The signed-out frame: a brand panel on the left, a card on the right.
 //
 // WHY THIS EXISTS
 // ---------------
@@ -29,35 +31,10 @@ export default function AuthShell({ title, lede, children, onSubmit }) {
   return (
     <div className="login-shell">
       <div className="login-panel">
-        <aside className="login-figure">
-          <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
-          <div className="login-figure-scrim" aria-hidden="true" />
-          <div className="login-figure-body">
-            <div className="login-eyebrow">
-              <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
-              <span className="login-eyebrow-rule" aria-hidden="true" />
-            </div>
-            <div className="login-figure-quote">
-              <h2>
-                Every Stay,
-                <br />
-                Perfectly Run
-              </h2>
-              <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
-            </div>
-          </div>
-        </aside>
-
         <div className="login-form-side">
           <Card className="login-card" {...cardProps}>
-            <Link to="/login" aria-label="InnSight — back to sign in">
-              <img
-                className="login-wordmark"
-                src="/brand/innsight-wordmark.png"
-                alt="InnSight"
-                width="640"
-                height="186"
-              />
+            <Link to="/login" aria-label="InnSight — back to sign in" className="login-brandmark-link">
+              <AuthBrandMark />
             </Link>
 
             <h1>{title}</h1>
@@ -66,6 +43,8 @@ export default function AuthShell({ title, lede, children, onSubmit }) {
             {children}
           </Card>
         </div>
+
+        <AuthHero />
       </div>
     </div>
   );

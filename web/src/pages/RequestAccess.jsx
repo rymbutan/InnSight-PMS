@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api';
+import AuthHero from '../components/AuthHero';
+import AuthBrandMark from '../components/AuthBrandMark';
 
 // Survives a refresh or a closed tab: approval can take anywhere from
 // minutes to days, and losing the waiting screen on reload would dump
@@ -165,34 +167,9 @@ export default function RequestAccess() {
   return (
     <div className="login-shell">
       <div className="login-panel">
-        <aside className="login-figure">
-          <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
-          <div className="login-figure-scrim" aria-hidden="true" />
-          <div className="login-figure-body">
-            <div className="login-eyebrow">
-              <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
-              <span className="login-eyebrow-rule" aria-hidden="true" />
-            </div>
-            <div className="login-figure-quote">
-              <h2>
-                Every Stay,
-                <br />
-                Perfectly Run
-              </h2>
-              <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
-            </div>
-          </div>
-        </aside>
-
         <div className="login-form-side">
           <form className="login-card" onSubmit={onSubmit}>
-            <img
-              className="login-wordmark"
-              src="/brand/innsight-wordmark.png"
-              alt="InnSight"
-              width="640"
-              height="186"
-            />
+            <AuthBrandMark />
 
             {waitId ? (
               <>
@@ -203,8 +180,8 @@ export default function RequestAccess() {
                       {state.message || 'An administrator will review it and set up your account.'}
                     </p>
                     <p className="login-lede">
-                      Leave this open or come back any time — it checks quietly and takes you to
-                      Sign In the moment it's approved.
+                      Leave this open or come back any time — it checks quietly and takes you to Sign In the
+                      moment it's approved.
                     </p>
                   </>
                 )}
@@ -226,8 +203,8 @@ export default function RequestAccess() {
                   <>
                     <h1>Request Declined</h1>
                     <p className="login-lede">
-                      An administrator declined this request. If you think that's a mistake, reach
-                      out to them directly — or submit a new request below.
+                      An administrator declined this request. If you think that's a mistake, reach out to them
+                      directly — or submit a new request below.
                     </p>
                     <button type="button" className="login-submit" onClick={startOver}>
                       Submit a new request
@@ -238,9 +215,12 @@ export default function RequestAccess() {
             ) : step === 1 ? (
               <>
                 <h1>Request Access</h1>
+                <p className="login-topline">
+                  Already have an account? <Link to="/login">Sign In</Link>
+                </p>
                 <p className="login-lede">
-                  Step 1 of 2 — tell us who you are. Next you'll choose the username and password
-                  you'll sign in with, once an administrator approves the request.
+                  Step 1 of 2 — tell us who you are. Next you'll choose the username and password you'll sign
+                  in with, once an administrator approves the request.
                 </p>
 
                 <label className="login-label" htmlFor="ra-name">
@@ -283,8 +263,8 @@ export default function RequestAccess() {
               <>
                 <h1>Choose Your Credentials</h1>
                 <p className="login-lede">
-                  Step 2 of 2 — this is what you'll sign in with. An administrator still has to
-                  approve the request before either one works.
+                  Step 2 of 2 — this is what you'll sign in with. An administrator still has to approve the
+                  request before either one works.
                 </p>
 
                 <label className="login-label" htmlFor="ra-username">
@@ -376,12 +356,10 @@ export default function RequestAccess() {
                 )}
               </>
             )}
-
-            <p className="login-alt">
-              Already have an account? <Link to="/login">Sign In</Link>
-            </p>
           </form>
         </div>
+
+        <AuthHero />
       </div>
     </div>
   );

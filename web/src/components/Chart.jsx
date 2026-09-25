@@ -158,46 +158,77 @@ export function BarChart({
   );
 }
 
-export function DonutChart({ segments, size = 120, thickness = 18 }) {
+export function DonutChart({
+  segments,
+  size = 120,
+  thickness = 18,
+  /** Optional node drawn centred inside the ring (a total, an average — the
+   *  one number the wedges themselves can't show). Absolutely positioned
+   *  over the svg rather than baked into it, so it can be plain HTML/CSS
+   *  (the "256" pattern hotel-map dashboards usually put inside the gauge). */
+  centerLabel,
+}) {
   // segments: [{ label, value, color }]
   const total = segments.reduce((s, x) => s + x.value, 0) || 1;
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
   let offset = 0;
   return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--neutral-soft)"
-          strokeWidth={thickness}
-        />
-        {segments.map((s, i) => {
-          const len = (s.value / total) * c;
-          const el = (
-            <circle
-              key={i}
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={thickness}
-              strokeDasharray={`${len} ${c - len}`}
-              strokeDashoffset={-offset}
-              transform={`rotate(-90 ${size / 2} ${size / 2})`}
-            >
-              <title>{`${s.label}: ${s.value}`}</title>
-            </circle>
-          );
-          offset += len;
-          return el;
-        })}
-      </svg>
-      <div style={{ fontSize: 12 }}>
+    // width: 100% — previously this row was only ever as wide as the svg
+    // plus the legend's own text, which in a panel sized for the row beside
+    // it (not for this content) left a dead gap on the trailing edge. The
+    // legend below gets `flex: 1` to actually use the space this opens up.
+    <div style={{ display: 'flex', gap: 16, alignItems: 'center', width: '100%' }}>
+      <div style={{ position: 'relative', width: size, height: size, flex: '0 0 auto' }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="var(--neutral-soft)"
+            strokeWidth={thickness}
+          />
+          {segments.map((s, i) => {
+            const len = (s.value / total) * c;
+            const el = (
+              <circle
+                key={i}
+                cx={size / 2}
+                cy={size / 2}
+                r={r}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={thickness}
+                strokeDasharray={`${len} ${c - len}`}
+                strokeDashoffset={-offset}
+                transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              >
+                <title>{`${s.label}: ${s.value}`}</title>
+              </circle>
+            );
+            offset += len;
+            return el;
+          })}
+        </svg>
+        {centerLabel && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            {centerLabel}
+          </div>
+        )}
+      </div>
+      <div style={{ fontSize: 12, flex: 1, minWidth: 0 }}>
         {segments.map((s) => (
           <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <span

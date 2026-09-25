@@ -41,6 +41,12 @@ function folioListRow(folio, codes, guestName, { isSplit = false } = {}) {
     // JSON cannot carry BigInt.
     balanceCents: summary.balanceCents.toString(),
     openedAt: folio.openedAt,
+    // Night-audit sign-off (see POST /folios/:id/audit-approve). The list
+    // previously left this out, so a screen showing many folios at once
+    // (the auditor's own dashboard) had no way to tell an already-approved
+    // folio from one still waiting, short of opening each one individually.
+    auditApprovedAt: folio.auditApprovedAt ?? null,
+    auditApprovedBy: folio.auditApprovedBy ?? null,
   };
 }
 

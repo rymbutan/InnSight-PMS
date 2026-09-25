@@ -141,3 +141,34 @@ test('chargeType is SPLIT when the route says another folio shares this stay', (
   );
   assert.equal(row.chargeType, 'SPLIT');
 });
+
+// ── auditApprovedAt / auditApprovedBy ───────────────────────────────────────
+
+test('an unapproved folio reports null sign-off fields, not undefined', () => {
+  const row = folioListRow(
+    { id: 'f1', folioNumber: 'F-1', status: 'OPEN', currency: 'PHP', transactions: [] },
+    CODES,
+    null
+  );
+  assert.equal(row.auditApprovedAt, null);
+  assert.equal(row.auditApprovedBy, null);
+});
+
+test('an approved folio carries its sign-off timestamp and approver into the row', () => {
+  const approvedAt = new Date('2026-09-20T22:00:00.000Z');
+  const row = folioListRow(
+    {
+      id: 'f1',
+      folioNumber: 'F-1',
+      status: 'OPEN',
+      currency: 'PHP',
+      transactions: [],
+      auditApprovedAt: approvedAt,
+      auditApprovedBy: 'user-42',
+    },
+    CODES,
+    null
+  );
+  assert.equal(row.auditApprovedAt, approvedAt);
+  assert.equal(row.auditApprovedBy, 'user-42');
+});
