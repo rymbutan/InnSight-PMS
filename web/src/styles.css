@@ -3717,17 +3717,19 @@ tr.active td {
 
 /* ==========================================================================
    Sign-in screen
-   A bold brand panel — a green gradient card, the brand mark large on the
-   left, and a translucent "glass" panel on the right holding the form —
-   contained on a neutral page ground rather than bled to the browser edges.
-   Modelled on a bold-color auth screen reference; green is InnSight's own
-   accent (var(--accent)), not a literal copy of the reference's palette.
+   A two-tone contained panel: a plain white form on the left, a green
+   marketing panel on the right (a feature-highlight card, a features blurb,
+   carousel dots) — modelled on a two-tone SaaS auth reference. Green is
+   InnSight's own accent (var(--accent)), not a literal copy of the
+   reference's palette, and the panel is contained on the app's own neutral
+   page background rather than bled to the browser edges.
 
-   The panel itself is intentionally fixed-dark regardless of the app's
+   Both halves are intentionally fixed-color regardless of the app's
    light/dark theme — like the reference, this is a deliberate brand splash,
-   not a themed page — so text inside it uses fixed white/translucent-white
-   rather than var(--text)/var(--muted), the same reasoning the old photo
-   treatment used for its scrim text.
+   not a themed page — so text on them uses fixed dark/white rather than
+   var(--text)/var(--muted), the same reasoning the old photo treatment used
+   for its scrim text. The one exception is small self-contained accents
+   inside the white highlight card, which use the theme's own accent token.
    ========================================================================== */
 .login-shell {
   min-height: 100vh;
@@ -3738,112 +3740,47 @@ tr.active td {
   background: var(--bg);
 }
 .login-panel {
-  position: relative;
-  width: min(1100px, 100%);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 40px;
-  padding: 56px;
-  overflow: hidden;
+  width: min(1080px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
   border-radius: 32px;
+  overflow: hidden;
   box-shadow: 0 30px 70px rgb(15 23 42 / 0.16);
-  background: linear-gradient(150deg, #052e1c 0%, #0a6b3d 55%, #12995e 100%);
-}
-/* Soft glow behind the hero graphic — decorative depth, echoing the
-   reference's own soft-lit abstract shape. */
-.login-panel::before {
-  content: '';
-  position: absolute;
-  top: -180px;
-  left: -160px;
-  width: 520px;
-  height: 520px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgb(255 255 255 / 0.16) 0%, rgb(255 255 255 / 0) 70%);
-  pointer-events: none;
 }
 
-/* ── Left: brand hero ───────────────────────────────────────────────────── */
-/* AuthShell wraps the hero in a Link back to sign-in; `display: contents`
-   keeps that anchor out of the flex layout so .login-hero is still the
-   direct flex item, exactly as when Login/RequestAccess render it bare. */
-.login-hero-link {
-  display: contents;
-  text-decoration: none;
-}
-.login-hero {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 40px;
-  width: min(460px, 100%);
-  min-height: min(70vh, 560px);
-  padding: 12px;
-}
-.login-hero-graphic {
+/* ── Left: the form, on a plain white card ──────────────────────────────── */
+.login-form-side {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 48px 40px;
+  background: #fff;
 }
-.login-hero-graphic-img {
-  width: min(280px, 70%);
-  height: auto;
-  transform: rotate(-4deg);
-  filter: drop-shadow(0 30px 50px rgb(0 0 0 / 0.35));
-}
-.login-hero-bottom {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.login-hero-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.login-hero-logo {
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
-}
-.login-hero-word {
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: #fff;
-}
-.login-hero-tag {
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: rgb(255 255 255 / 0.65);
-}
-.login-hero-copy {
-  max-width: 34ch;
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.6;
-  color: rgb(255 255 255 / 0.78);
-}
-
-/* ── Right: the glass card ──────────────────────────────────────────────── */
 .login-card {
-  position: relative;
-  z-index: 1;
   width: 100%;
   max-width: 380px;
-  padding: 34px 30px;
-  background: rgb(255 255 255 / 0.1);
-  border: 1px solid rgb(255 255 255 / 0.18);
-  border-radius: 24px;
-  box-shadow: 0 30px 60px rgb(0 0 0 / 0.28);
-  backdrop-filter: blur(20px);
+}
+/* AuthShell wraps the mark in a Link back to sign-in. */
+.login-brandmark-link {
+  display: block;
+  text-decoration: none;
+}
+.login-brandmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+.login-brandmark img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+.login-brandmark span {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #0a6b3d;
 }
 .login-card h1 {
   margin: 0 0 8px;
@@ -3851,27 +3788,40 @@ tr.active td {
   font-size: 26px;
   line-height: 1.2;
   letter-spacing: -0.01em;
-  color: #fff;
+  color: #0f172a;
+}
+/* "Don't have an account? Sign up" — directly under the heading. */
+.login-topline {
+  margin: 0 0 26px;
+  font-size: 13px;
+  color: #64748b;
+}
+.login-topline a {
+  font-weight: 700;
+  color: #0a6b3d;
+}
+.login-topline a:hover {
+  color: #063f26;
 }
 .login-lede {
   margin: 0 0 22px;
   font-size: 13px;
   line-height: 1.5;
-  color: rgb(255 255 255 / 0.7);
+  color: #64748b;
 }
-/* Text-and-rule divider between the social button(s) and the manual fields. */
+/* Text-and-rule divider between the manual fields and the social button(s). */
 .login-divider {
   display: flex;
   align-items: center;
   gap: 12px;
   margin: 20px 0;
   font-size: 12px;
-  color: rgb(255 255 255 / 0.6);
+  color: #94a3b8;
 }
 .login-divider-line {
   flex: 1;
   height: 1px;
-  background: rgb(255 255 255 / 0.22);
+  background: #e2e8f0;
 }
 .login-forgot {
   margin: -6px 0 18px;
@@ -3879,35 +3829,34 @@ tr.active td {
   font-size: 12.5px;
 }
 .login-forgot a {
-  color: rgb(255 255 255 / 0.7);
+  color: #64748b;
 }
 .login-forgot a:hover {
-  color: #fff;
+  color: #0a6b3d;
 }
 .login-label {
   display: block;
   margin: 0 0 6px;
   font-size: 13px;
   font-weight: 600;
-  color: rgb(255 255 255 / 0.85);
+  color: #334155;
 }
 .login-input {
   width: 100%;
   padding: 12px 14px;
   margin: 0 0 16px;
   font-size: 14px;
-  color: #fff;
-  background: rgb(255 255 255 / 0.12);
-  border: 1px solid rgb(255 255 255 / 0.25);
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
 }
 .login-input::placeholder {
-  color: rgb(255 255 255 / 0.5);
+  color: #94a3b8;
 }
 .login-input:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid #0a6b3d;
   outline-offset: 1px;
-  background: rgb(255 255 255 / 0.18);
 }
 /* The reveal toggle sits inside the field, so the input keeps room for it. */
 .login-input-wrap {
@@ -3931,7 +3880,7 @@ tr.active td {
   cursor: pointer;
 }
 .login-reveal:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid #0a6b3d;
 }
 .login-submit {
   width: 100%;
@@ -3939,14 +3888,15 @@ tr.active td {
   padding: 13px 16px;
   font-size: 14px;
   font-weight: 700;
-  color: #063f26;
-  background: #fff;
-  border: 1px solid #fff;
+  color: #fff;
+  background: #0a6b3d;
+  border: 1px solid #0a6b3d;
   border-radius: 10px;
   cursor: pointer;
 }
 .login-submit:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.88);
+  background: #075130;
+  border-color: #075130;
 }
 .login-submit:disabled {
   opacity: 0.55;
@@ -3975,49 +3925,28 @@ tr.active td {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.55;
-  color: rgb(255 255 255 / 0.7);
+  color: #64748b;
   text-align: left;
 }
-/* "Don't have an account?" line, sitting above the .login-secondary button
-   at the foot of the card — plain text, not a link, since the button below
-   it is the actual call to action. */
 .login-alt {
-  margin: 26px 0 10px;
+  margin: 26px 0 0;
   text-align: center;
   font-size: 13px;
-  color: rgb(255 255 255 / 0.7);
+  color: #64748b;
 }
 .login-alt a {
   font-weight: 700;
-  color: #fff;
+  color: #0a6b3d;
 }
-/* The bordered "glass" counterpart to .login-submit's solid fill — Sign Up
-   under Sign In, Sign In under Sign Up. */
-.login-secondary {
-  display: block;
-  width: 100%;
-  padding: 12px 16px;
-  font-size: 14px;
-  font-weight: 700;
-  text-align: center;
-  color: #fff;
-  background: transparent;
-  border: 1px solid rgb(255 255 255 / 0.4);
-  border-radius: 10px;
-  text-decoration: none;
-  cursor: pointer;
-}
-.login-secondary:hover {
-  background: rgb(255 255 255 / 0.1);
-  text-decoration: none;
-  color: #fff;
+.login-alt a:hover {
+  color: #063f26;
 }
 .login-backend-warning {
   margin-top: 14px;
   padding: 10px;
   font-size: 12px;
-  background: rgb(255 255 255 / 0.14);
-  color: #fff;
+  background: #fef2f2;
+  color: #991b1b;
   border-radius: 8px;
 }
 .login-backend-warning div {
@@ -4029,10 +3958,10 @@ tr.active td {
   margin-top: 16px;
 }
 .login-card .muted {
-  color: rgb(255 255 255 / 0.6);
+  color: #64748b;
 }
 .login-card .error {
-  color: #ffb4b4;
+  color: #dc2626;
 }
 
 /* University sign-in. The component renders nothing when Google is not
@@ -4052,17 +3981,17 @@ tr.active td {
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
-  background: rgb(255 255 255 / 0.1);
-  border: 1px solid rgb(255 255 255 / 0.3);
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   cursor: pointer;
 }
 .google-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.18);
+  background: #f8fafc;
 }
 .google-btn:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid #0a6b3d;
   outline-offset: 1px;
 }
 .google-btn:disabled {
@@ -4073,19 +4002,186 @@ tr.active td {
   margin: 12px 0 0;
   font-size: 11px;
   text-align: center;
-  color: rgb(255 255 255 / 0.6);
+  color: #64748b;
 }
 
-/* 1000px, not the usual 768px: the hero (460px) + card (380px) + gap (40px)
-   need ~880px of content room, so anything narrower would otherwise wrap the
-   hero above the card instead of hiding it — an awkward halfway state. */
+/* ── Right: the green marketing panel ───────────────────────────────────── */
+.login-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 36px;
+  overflow: hidden;
+  color: #fff;
+  background: linear-gradient(150deg, #052e1c 0%, #0a6b3d 55%, #12995e 100%);
+}
+/* Soft glow behind the panel content — decorative depth, echoing the
+   reference's own soft-lit abstract shape. */
+.login-hero::before {
+  content: '';
+  position: absolute;
+  top: -140px;
+  right: -120px;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.14) 0%, rgb(255 255 255 / 0) 70%);
+  pointer-events: none;
+}
+.login-hero-topbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+.login-hero-support {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: 999px;
+}
+/* The feature-highlight card: a white "product preview" floating on the
+   green panel, matching the reference's card + photo composition. */
+.login-hero-highlight {
+  position: relative;
+  z-index: 1;
+  margin-top: 36px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 22px;
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 24px 45px rgb(0 0 0 / 0.25);
+}
+.login-hero-highlight-text {
+  flex: 1;
+  min-width: 0;
+}
+.login-hero-highlight-text h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.login-hero-highlight-text p {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #64748b;
+}
+.login-hero-cta {
+  display: inline-block;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-radius: 999px;
+}
+.login-hero-highlight-art {
+  width: 96px;
+  height: 76px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 12px;
+}
+/* Small stat pill, overlapping the highlight card's bottom edge. */
+.login-hero-stat {
+  position: relative;
+  z-index: 2;
+  align-self: flex-start;
+  margin: -18px 0 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #fff;
+  color: var(--accent);
+  border-radius: 14px;
+  box-shadow: 0 14px 26px rgb(0 0 0 / 0.22);
+}
+.login-hero-stat div {
+  line-height: 1.2;
+}
+.login-hero-stat strong {
+  display: block;
+  font-size: 15px;
+  color: #0f172a;
+}
+.login-hero-stat span {
+  display: block;
+  font-size: 10.5px;
+  color: #64748b;
+}
+.login-hero-features {
+  position: relative;
+  z-index: 1;
+  margin-top: 48px;
+}
+.login-hero-features h3 {
+  margin: 0 0 10px;
+  font-size: 21px;
+  font-weight: 700;
+}
+.login-hero-features p {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgb(255 255 255 / 0.75);
+}
+.login-hero-dots {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  padding-top: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.login-hero-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+  border-radius: 50%;
+}
+.login-hero-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.35);
+}
+.login-hero-dot--active {
+  width: 18px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+/* 1000px: below this, the highlight card + stat pill no longer have room to
+   sit comfortably beside the form, so the marketing panel is hidden instead
+   of squeezing (an earlier version of this screen wrapped awkwardly here). */
 @media (max-width: 1000px) {
-  /* The brand hero is decoration; on a narrow screen the card gets the room. */
   .login-hero {
     display: none;
   }
   .login-panel {
-    padding: 28px;
+    display: block;
+  }
+  .login-form-side {
+    padding: 32px 24px;
   }
 }
 @media (max-width: 768px) {
