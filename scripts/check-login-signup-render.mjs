@@ -85,7 +85,7 @@ const PANEL = `
         <div class="google-signin" id="google"><button type="button" class="google-btn">Sign In with Google</button></div>
       </form>
     </div>
-    <div class="login-hero" id="hero">
+    <div class="login-hero" id="hero" style="background-image:url(${PIXEL})">
       <div class="login-hero-topbar"><div class="login-hero-support-wrap"><button type="button" class="login-hero-support" id="support">Support</button></div></div>
       <div class="login-hero-highlight" id="highlight">
         <div class="login-hero-highlight-text">
@@ -93,7 +93,6 @@ const PANEL = `
           <p>Check guests in, track housekeeping, and close the night audit.</p>
           <a href="/learn-more#front-desk" class="login-hero-cta" id="cta">Learn more</a>
         </div>
-        <img class="login-hero-highlight-art" src="${PIXEL}" alt="" />
       </div>
       <div class="login-hero-stat" id="stat">
         <div><strong>87%</strong><span>Occupancy today</span></div>
@@ -164,6 +163,14 @@ if (wide) {
   ok('hero is visible', box(hero).width > 0 && box(hero).height > 0);
   ok('hero sits right of the form', box(hero).left > box(card).left,
      'hero left ' + Math.round(box(hero).left) + ', card left ' + Math.round(box(card).left));
+
+  // ── Each slide's photo is the hero's actual background (not a flat
+  // color/gradient), with a scrim behind the text for legibility. ────────
+  ok('hero background is a photo, not a flat color', styleOf(hero).backgroundImage.includes('url('),
+     styleOf(hero).backgroundImage);
+  const heroScrim = getComputedStyle(hero, '::before');
+  ok('hero has a legibility scrim over the photo', heroScrim.backgroundImage.includes('gradient'),
+     heroScrim.backgroundImage);
 
   // ── Feature-highlight card + overlapping stat pill, matching the
   // reference's layered composition. ────────────────────────────────────
