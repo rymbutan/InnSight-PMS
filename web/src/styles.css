@@ -4006,6 +4006,9 @@ tr.active td {
 }
 
 /* ── Right: the green marketing panel ───────────────────────────────────── */
+/* The photo itself is set inline per slide (AuthHero.jsx sets
+   backgroundImage from slide.photo) — this just fixes how it's framed and
+   provides a solid fallback color for the instant before it loads. */
 .login-hero {
   position: relative;
   display: flex;
@@ -4013,19 +4016,26 @@ tr.active td {
   padding: 36px;
   overflow: hidden;
   color: #fff;
-  background: linear-gradient(150deg, #052e1c 0%, #0a6b3d 55%, #12995e 100%);
+  background-color: #0a6b3d;
+  background-size: cover;
+  background-position: center;
 }
-/* Soft glow behind the panel content — decorative depth, echoing the
-   reference's own soft-lit abstract shape. */
+/* Scrim over the slide's photo — darker at the top and bottom (where text
+   sits directly on the photo) and lighter through the middle (where the
+   opaque white highlight card already provides its own contrast), same
+   reasoning the very first version of this screen used for its own photo. */
 .login-hero::before {
   content: '';
   position: absolute;
-  top: -140px;
-  right: -120px;
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgb(255 255 255 / 0.14) 0%, rgb(255 255 255 / 0) 70%);
+  z-index: 0;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgb(5 26 16 / 0.65) 0%,
+    rgb(5 26 16 / 0.25) 30%,
+    rgb(5 26 16 / 0.3) 60%,
+    rgb(5 26 16 / 0.75) 100%
+  );
   pointer-events: none;
 }
 .login-hero-topbar {
@@ -4113,14 +4123,13 @@ tr.active td {
   background: #f1f5f9;
 }
 /* The feature-highlight card: a white "product preview" floating on the
-   green panel, matching the reference's card + photo composition. */
+   slide's photo. No thumbnail image inside it any more — the full-bleed
+   photo behind the whole panel already carries that job, so a second small
+   photo here was redundant clutter rather than added personality. */
 .login-hero-highlight {
   position: relative;
   z-index: 1;
   margin-top: 36px;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
   padding: 22px;
   background: #fff;
   border-radius: 20px;
@@ -4139,8 +4148,6 @@ tr.active td {
   }
 }
 .login-hero-highlight-text {
-  flex: 1;
-  min-width: 0;
   animation: login-hero-fade-in 0.4s ease;
 }
 .login-hero-highlight-text h2 {
@@ -4179,13 +4186,6 @@ tr.active td {
 .login-hero-cta:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-.login-hero-highlight-art {
-  width: 96px;
-  height: 76px;
-  flex-shrink: 0;
-  object-fit: cover;
-  border-radius: 12px;
 }
 /* Small stat pill, overlapping the highlight card's bottom edge. */
 .login-hero-stat {

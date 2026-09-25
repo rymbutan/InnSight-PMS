@@ -7,10 +7,10 @@ import { Link } from 'react-router-dom';
 // duplicating this markup means three chances for one of them to quietly go
 // stale.
 //
-// A real carousel, not decorative dots: each slide pairs the highlight
-// card's pitch with a stat AND its own "features" heading + sentence below
-// — both vary per slide, not just the paragraph, so the block doesn't read
-// as the same "Introducing new features" copy repeated three times.
+// A real carousel, not decorative dots: each slide pairs a full-bleed photo
+// with the highlight card's pitch and a stat AND its own "features" heading
+// + sentence below — all four vary per slide, not just the paragraph, so
+// the block doesn't read as the same copy/color repeated three times.
 // Auto-advances but is fully driven by the same index a click on an arrow
 // or a dot sets. Each slide's `id` matches a section id on the /learn-more
 // page (LearnMore.jsx), so "Learn more" jumps straight to that slide's
@@ -18,6 +18,7 @@ import { Link } from 'react-router-dom';
 const SLIDES = [
   {
     id: 'front-desk',
+    photo: '/brand/hero-front-desk.jpg',
     heading: 'Every Stay, Perfectly Run',
     body: 'Check guests in, track housekeeping, and close the night audit — all from one dashboard.',
     statValue: '87%',
@@ -27,6 +28,7 @@ const SLIDES = [
   },
   {
     id: 'housekeeping',
+    photo: '/brand/hero-housekeeping.jpg',
     heading: 'Housekeeping, in real time',
     body: "See every room's status the moment it changes, from dirty to inspected.",
     statValue: '42',
@@ -36,6 +38,7 @@ const SLIDES = [
   },
   {
     id: 'night-audit',
+    photo: '/brand/hotel.jpg',
     heading: 'Close the night audit in minutes',
     body: 'Automated reconciliation catches discrepancies before they become problems.',
     statValue: '3 min',
@@ -79,7 +82,7 @@ export default function AuthHero() {
   const goTo = (i) => setIndex((i + SLIDES.length) % SLIDES.length);
 
   return (
-    <div className="login-hero">
+    <div className="login-hero" style={{ backgroundImage: `url(${slide.photo})` }}>
       <div className="login-hero-topbar">
         <div className="login-hero-support-wrap" ref={supportRef}>
           <button
@@ -126,7 +129,6 @@ export default function AuthHero() {
             Learn more
           </Link>
         </div>
-        <img className="login-hero-highlight-art" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
       </div>
       <div className="login-hero-stat" key={`stat-${index}`}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
