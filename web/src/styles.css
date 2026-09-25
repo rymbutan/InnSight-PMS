@@ -4122,10 +4122,13 @@ tr.active td {
 .login-hero-support-close:hover {
   background: #f1f5f9;
 }
-/* The feature-highlight card: a white "product preview" floating on the
-   slide's photo. No thumbnail image inside it any more — the full-bleed
-   photo behind the whole panel already carries that job, so a second small
-   photo here was redundant clutter rather than added personality.
+/* The feature-highlight card: a frosted-glass "product preview" floating on
+   the slide's photo — translucent + blurred rather than solid white, which
+   blocked the photo out entirely in a big rectangle right where the photo
+   was supposed to show through. No thumbnail image inside it any more — the
+   full-bleed photo behind the whole panel already carries that job, so a
+   second small photo here was redundant clutter rather than added
+   personality.
 
    Capped to a max-width rather than stretching to fill the column: at full
    width, with no image to anchor the right side any more, the card read as
@@ -4140,9 +4143,11 @@ tr.active td {
   max-width: 300px;
   margin-top: 36px;
   padding: 20px 22px;
-  background: #fff;
+  background: rgb(255 255 255 / 0.82);
+  border: 1px solid rgb(255 255 255 / 0.5);
   border-radius: 20px;
-  box-shadow: 0 24px 45px rgb(0 0 0 / 0.25);
+  box-shadow: 0 24px 45px rgb(0 0 0 / 0.3);
+  backdrop-filter: blur(14px);
 }
 /* Re-keyed on every slide change, so this replays on each advance instead of
    only once on mount — the actual "slideshow" motion. */
@@ -4207,10 +4212,12 @@ tr.active td {
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  background: #fff;
+  background: rgb(255 255 255 / 0.82);
+  border: 1px solid rgb(255 255 255 / 0.5);
   color: var(--accent);
   border-radius: 14px;
-  box-shadow: 0 14px 26px rgb(0 0 0 / 0.22);
+  box-shadow: 0 14px 26px rgb(0 0 0 / 0.25);
+  backdrop-filter: blur(14px);
   animation: login-hero-fade-in 0.4s ease;
 }
 .login-hero-stat div {
