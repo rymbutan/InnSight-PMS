@@ -3801,24 +3801,29 @@ tr.active td {
 /* The reference's actual container shape, traced from the source image: a
    plain rounded rectangle, EXCEPT the two corners holding a button are
    notched out down to the card's own background — the button sits recessed
-   into that notch rather than floating on top of the photo. Sized to
-   comfortably clear the 36px button plus the figure-body's own padding. */
+   into that notch rather than floating on top of the photo.
+
+   The radius equals the box's own size, which turns the "rounded corner"
+   into a single clean quarter-circle arc (the far two corners of the box
+   collapse to tangent points) instead of a small-radius rounded square —
+   one smooth curve rather than a rectangle with a corner nipped off. Sized
+   generously so the 40px button sits well clear of that arc. */
 .login-figure-notch {
   position: absolute;
   z-index: 1;
-  width: 84px;
-  height: 76px;
+  width: 120px;
+  height: 120px;
   background: var(--panel);
 }
 .login-figure-notch--tl {
   top: 0;
   left: 0;
-  border-radius: 0 0 22px 0;
+  border-radius: 0 0 120px 0;
 }
 .login-figure-notch--br {
   bottom: 0;
   right: 0;
-  border-radius: 22px 0 0 0;
+  border-radius: 120px 0 0 0;
 }
 .login-figure-img {
   position: absolute;
@@ -3839,37 +3844,44 @@ tr.active td {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   padding: 0;
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 50%;
+  box-shadow: 0 4px 10px rgb(0 0 0 / 0.22);
   cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 .login-figure-back:hover {
   background: var(--panel);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgb(0 0 0 / 0.26);
 }
 /* Decorative forward affordance, recessed into .login-figure-notch--br at
    the opposite corner — same visual treatment as the back button, but not
    interactive (there's nothing for it to advance to on this screen). */
 .login-figure-forward {
   position: absolute;
-  right: 22px;
-  bottom: 20px;
+  right: 26px;
+  bottom: 24px;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  font-size: 15px;
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 50%;
+  box-shadow: 0 4px 10px rgb(0 0 0 / 0.22);
 }
 /* Darkened top and bottom only, so the middle of the photograph stays bright
    while the mark and the strapline keep their contrast. */
@@ -3934,15 +3946,17 @@ tr.active td {
 /* The testimonial itself: an inset, rounded card floating over the
    photograph — not full-width, with its own background so the quote stays
    legible over any part of the image. Right-margin keeps it clear of the
-   recessed forward button at the bottom-right corner. */
+   larger recessed notch at the bottom-right corner (120px, minus the
+   figure-body's own 34px padding, plus a small buffer). */
 .login-testimonial {
   margin-top: 22px;
-  margin-right: 56px;
+  margin-right: 92px;
   padding: 14px 16px;
-  background: rgb(2 6 23 / 0.55);
+  background: rgb(2 6 23 / 0.6);
   border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 14px;
-  backdrop-filter: blur(6px);
+  border-radius: 16px;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 0.25);
+  backdrop-filter: blur(8px);
 }
 .login-testimonial p {
   margin: 0 0 10px;
