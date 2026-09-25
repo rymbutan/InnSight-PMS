@@ -3793,7 +3793,11 @@ tr.active td {
   order: 2;
   position: relative;
   margin: 14px;
-  border-radius: 16px;
+  /* Asymmetric "swoop" corner — one exaggerated radius (bottom-right) against
+     three ordinary ones, the container shape from the reference image rather
+     than a plain uniform rounded rectangle. Order is top-left, top-right,
+     bottom-right, bottom-left. */
+  border-radius: 24px 24px 140px 24px;
   overflow: hidden;
   isolation: isolate;
 }

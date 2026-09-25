@@ -129,6 +129,20 @@ if (wide) {
   ok('photograph is visible', box(img).width > 0 && box(img).height > 0);
   ok('photograph has a grayscale filter applied', styleOf(img).filter.includes('grayscale'), styleOf(img).filter);
 
+  // ── Container shape: one exaggerated "swoop" corner (bottom-right),
+  // not a plain uniform rounded rectangle. ────────────────────────────────
+  // border-radius serializes as 1-4 values using the same collapsing rule as
+  // other 4-value shorthands (margin, etc.): missing trailing values mirror
+  // back through the list (2nd, then 1st).
+  const r = styleOf(figure).borderRadius.split(' ').map(parseFloat);
+  const tl = r[0];
+  const tr = r.length > 1 ? r[1] : r[0];
+  const br = r.length > 2 ? r[2] : r[0];
+  const bl = r.length > 3 ? r[3] : tr;
+  ok('figure has one exaggerated corner radius, not a uniform rounded rect',
+     br > tl * 2 && br > tr * 2 && br > bl * 2,
+     'tl ' + tl + ', tr ' + tr + ', br ' + br + ', bl ' + bl);
+
   // ── Back button sits top-LEFT of the figure, beside the brand mark (not
   // overlapping it) — matching the reference's back-arrow placement. ──────
   const backBtn = document.getElementById('backBtn');
