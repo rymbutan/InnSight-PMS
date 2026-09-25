@@ -464,17 +464,6 @@ html[data-theme='dark'] .side-brand-wordmark {
 html[data-theme='dark'] .side-brand-mark {
   filter: brightness(1.12);
 }
-/* Same two brand images, same deep-green-on-transparent problem, on the
-   login screen: .login-eyebrow-mark sits on the photo scrim and
-   .login-wordmark sits on .login-panel's background, both of which go dark
-   under this theme. */
-html[data-theme='dark'] .login-wordmark {
-  filter: brightness(1.85) saturate(0.9);
-}
-html[data-theme='dark'] .login-eyebrow-mark {
-  filter: brightness(1.12);
-}
-
 .cb-search-wrap {
   position: relative;
   flex: 1;
@@ -3727,19 +3716,11 @@ tr.active td {
 }
 
 /* ==========================================================================
-   Login (kept hero split from previous batch)
-   ========================================================================== */
-.login-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-}
-/* ==========================================================================
    Sign-in screen
-   A single rounded panel on a tinted ground: photograph and strapline on the
-   left, the form on the right. The photograph is a real <img> rather than a CSS
-   background so the browser can prioritise and size it like any other image.
+   A clean, light two-panel card: a brand/illustration panel on the left, the
+   form on the right — modelled on a minimal SaaS auth screen rather than the
+   earlier editorial photo treatment. Colors stay on the app's own theme
+   tokens throughout, not the reference's literal palette.
    ========================================================================== */
 .login-shell {
   min-height: 100vh;
@@ -3751,277 +3732,107 @@ tr.active td {
 }
 .login-panel {
   position: relative;
-  width: min(1180px, 100%);
-  height: min(84vh, 780px);
+  width: min(1080px, 100%);
+  min-height: min(84vh, 680px);
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1.15fr;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 22px;
-  box-shadow: 0 24px 60px rgb(15 23 42 / 0.14);
+  border-radius: 32px;
+  box-shadow: 0 30px 70px rgb(15 23 42 / 0.12);
   overflow: hidden;
 }
-/* Purely decorative "window chrome" dots that echo a desktop app frame,
-   sitting above both columns in the top-left corner of the panel. */
-.login-chrome {
-  position: absolute;
-  top: 16px;
-  left: 20px;
-  z-index: 2;
-  display: flex;
-  gap: 7px;
-}
-.login-chrome span {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: #ff5f57;
-}
-.login-chrome span:nth-child(2) {
-  background: #febc2e;
-}
-.login-chrome span:nth-child(3) {
-  background: #28c840;
-}
 
-/* ── Right: photograph ──────────────────────────────────────────────────── */
-.login-figure {
-  /* Visually on the right (matching the reference layout: form on the left,
-     photograph on the right) while staying first in the DOM/tab order —
-     `order` is purely presentational, so keyboard and screen-reader flow are
-     unaffected. */
-  order: 2;
-  position: relative;
+/* ── Left: brand panel ──────────────────────────────────────────────────── */
+.login-illustration {
   margin: 14px;
-  background: var(--panel);
-  border-radius: 24px;
-  overflow: hidden;
-  isolation: isolate;
-}
-/* The reference's actual container shape, traced from the source image: a
-   plain rounded rectangle, EXCEPT the two corners holding a button are
-   notched out down to the card's own background — the button sits recessed
-   into that notch rather than floating on top of the photo.
-
-   The radius equals the box's own size, which turns the "rounded corner"
-   into a single clean quarter-circle arc (the far two corners of the box
-   collapse to tangent points) instead of a small-radius rounded square —
-   one smooth curve rather than a rectangle with a corner nipped off. Sized
-   generously so the 40px button sits well clear of that arc. */
-.login-figure-notch {
-  position: absolute;
-  z-index: 1;
-  width: 120px;
-  height: 120px;
-  background: var(--panel);
-}
-.login-figure-notch--tl {
-  top: 0;
-  left: 0;
-  border-radius: 0 0 120px 0;
-}
-.login-figure-notch--br {
-  bottom: 0;
-  right: 0;
-  border-radius: 120px 0 0 0;
-}
-.login-figure-img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  /* Monochrome treatment matches the editorial, black-and-white portrait
-     style of the reference composition. */
-  filter: grayscale(1) contrast(1.06);
-}
-/* Round "back" affordance, top-left of the photograph, recessed into
-   .login-figure-notch--tl — in flow (not absolutely positioned) alongside
-   the brand mark so the two sit side by side on one row instead of
-   overlapping. */
-.login-figure-back {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  box-shadow: 0 4px 10px rgb(0 0 0 / 0.22);
-  cursor: pointer;
-  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-}
-.login-figure-back:hover {
-  background: var(--panel);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgb(0 0 0 / 0.26);
-}
-/* Decorative forward affordance, recessed into .login-figure-notch--br at
-   the opposite corner — same visual treatment as the back button, but not
-   interactive (there's nothing for it to advance to on this screen). */
-.login-figure-forward {
-  position: absolute;
-  right: 26px;
-  bottom: 24px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  box-shadow: 0 4px 10px rgb(0 0 0 / 0.22);
-}
-/* Darkened top and bottom only, so the middle of the photograph stays bright
-   while the mark and the strapline keep their contrast. */
-.login-figure-scrim {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(to bottom, rgb(2 6 23 / 0.62) 0%, rgb(2 6 23 / 0.05) 34%),
-    linear-gradient(to top, rgb(2 6 23 / 0.82) 0%, rgb(2 6 23 / 0) 46%);
-}
-.login-figure-body {
-  position: relative;
-  z-index: 2;
-  height: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: 30px 34px 34px;
-  /* Fixed white, NOT var(--on-accent) — this sits on the photo's own dark
-     scrim, which stays dark in both themes. --on-accent flips to near-black
-     under data-theme="dark" (see .role-badge above), which turned the
-     "Every Stay, Perfectly Run" heading invisible on this panel. */
-  color: #fff;
-}
-/* Top row of the photograph: back button, then the brand mark with the rule
-   that trails off it. */
-.login-figure-top {
-  display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 18px;
+  padding: 32px;
+  background: var(--bg);
+  border-radius: 24px;
 }
-.login-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 1;
-  min-width: 0;
+.login-illustration-logo {
+  width: min(220px, 60%);
+  height: auto;
 }
-.login-eyebrow-mark {
-  width: 42px;
-  height: 42px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 10px rgb(255 255 255 / 0.35));
-}
-.login-eyebrow-rule {
-  flex: 1;
-  max-width: 190px;
-  height: 1px;
-  background: rgb(255 255 255 / 0.65);
-}
-.login-figure-quote h2 {
-  margin: 0 0 14px;
-  /* The app has exactly one family — the stack set on <body>. Inheriting it
-     rather than naming a display serif keeps the sign-in screen in the same
-     voice as every page behind it. */
-  font-weight: 600;
-  font-size: clamp(28px, 3.2vw, 42px);
-  line-height: 1.12;
-  letter-spacing: -0.02em;
-  color: #fff;
-}
-/* The testimonial itself: an inset, rounded card floating over the
-   photograph — not full-width, with its own background so the quote stays
-   legible over any part of the image. Right-margin keeps it clear of the
-   larger recessed notch at the bottom-right corner (120px, minus the
-   figure-body's own 34px padding, plus a small buffer). */
-.login-testimonial {
-  margin-top: 22px;
-  margin-right: 92px;
-  padding: 14px 16px;
-  background: rgb(2 6 23 / 0.6);
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 16px;
-  box-shadow: 0 8px 20px rgb(0 0 0 / 0.25);
-  backdrop-filter: blur(8px);
-}
-.login-testimonial p {
-  margin: 0 0 10px;
+.login-illustration-caption {
+  max-width: 30ch;
+  margin: 0;
+  text-align: center;
   font-size: 13px;
-  line-height: 1.5;
-  color: rgb(255 255 255 / 0.92);
-}
-.login-testimonial-byline strong {
-  display: block;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: #fff;
-}
-.login-testimonial-byline span {
-  display: block;
-  margin-top: 2px;
-  font-size: 11.5px;
-  color: rgb(255 255 255 / 0.7);
+  line-height: 1.6;
+  color: var(--muted);
 }
 
-/* ── Left: the form ─────────────────────────────────────────────────────── */
+/* ── Right: the form ────────────────────────────────────────────────────── */
 .login-form-side {
-  order: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 24px 40px;
   overflow-y: auto;
 }
 .login-card {
   width: 100%;
   max-width: 380px;
 }
-/* Small gradient orb above the wordmark, echoing the brand mark that sits
-   above the heading in the reference composition. */
-.login-badge {
-  width: 34px;
-  height: 34px;
-  margin: 0 auto 20px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 32% 28%, var(--accent-hover), var(--accent) 70%);
-  box-shadow: 0 6px 16px rgb(15 23 42 / 0.25);
+/* "Don't have an account? Sign up" — right-aligned above the heading, rather
+   than a footer line under the button. */
+.login-topline {
+  margin: 0 0 28px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--muted);
 }
-.login-wordmark {
-  display: block;
-  width: 132px;
-  height: auto;
-  margin: 0 auto 34px;
+.login-topline a {
+  font-weight: 700;
+  color: var(--text);
+}
+.login-topline a:hover {
+  color: var(--accent);
 }
 .login-card h1 {
   margin: 0 0 8px;
-  /* Weight 600 is the heading weight used by .page-head h1 and .res-head-top h1;
-     only the size is larger, because this is the one full-screen heading. */
-  font-weight: 600;
-  font-size: 28px;
+  font-weight: 700;
+  font-size: 30px;
   line-height: 1.2;
   letter-spacing: -0.01em;
-  text-align: center;
   color: var(--text);
 }
 .login-lede {
-  margin: 0 0 26px;
-  text-align: center;
+  margin: 0 0 24px;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--muted);
+}
+/* Text-and-rule divider between the social button(s) and the manual fields. */
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.login-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.login-forgot {
+  margin: -6px 0 18px;
+  text-align: right;
+  font-size: 12.5px;
+}
+.login-forgot a {
+  color: var(--muted);
+}
+.login-forgot a:hover {
+  color: var(--accent);
 }
 .login-label {
   display: block;
@@ -4149,9 +3960,9 @@ tr.active td {
 
 /* University sign-in. The component renders nothing when Google is not
    configured, so none of this shows on a password-only install. It sits
-   directly under Sign In, matching the reference layout. */
+   above the divider, before the manual username/password fields. */
 .google-signin {
-  margin-top: 10px;
+  margin-top: 0;
 }
 /* Our own button, not Google's rendered one — the OAuth token flow lets us own
    the markup, so it matches the primary button's size and radius exactly. */
@@ -4190,11 +4001,9 @@ tr.active td {
 @media (max-width: 768px) {
   .login-panel {
     grid-template-columns: 1fr;
-    height: auto;
-    min-height: min(84vh, 780px);
   }
-  /* The photograph is decoration; on a narrow screen the form gets the room. */
-  .login-figure {
+  /* The brand panel is decoration; on a narrow screen the form gets the room. */
+  .login-illustration {
     display: none;
   }
   .cb-search-wrap {

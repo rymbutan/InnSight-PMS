@@ -1,9 +1,9 @@
-// Rendered checks for the restyled Sign In / Sign Up screens: the window-chrome
-// dots, the round "back" button and grayscale filter on the photograph, the
-// quote byline + decorative pagination row, and the gradient badge above the
-// wordmark.
+// Rendered checks for the light, minimal Sign In / Sign Up screens: the brand
+// panel with the InnSight logo, the top-right "sign up"/"sign in" link, the
+// divider between the Google button and the manual fields, and basic
+// responsive/overflow behavior.
 //
-// A green build says nothing about the CSS cascade these new pieces sit in —
+// A green build says nothing about the CSS cascade these pieces sit in —
 // this renders the real markup in headless Chrome and reads back computed
 // layout, same pattern as check-dashboard-revenue-row-render.mjs.
 //
@@ -45,49 +45,39 @@ if (!chrome) {
 
 const CSS_TEXT = fs.readFileSync(CSS_PATH, 'utf8');
 
-// Mirrors Login.jsx / RequestAccess.jsx's shared markup after the restyle —
-// a 1x1 transparent pixel stands in for /brand/hotel.jpg so the check has no
-// network/file dependency.
+// A tiny transparent pixel stands in for the real logo asset so the check has
+// no filesystem/network dependency.
 const PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7';
 
 const PANEL = `
 <div class="login-shell">
   <div class="login-panel" id="panel">
-    <div class="login-chrome" id="chrome" aria-hidden="true">
-      <span></span><span></span><span></span>
-    </div>
-    <aside class="login-figure" id="figure">
-      <img class="login-figure-img" id="figureImg" src="${PIXEL}" alt="" aria-hidden="true" />
-      <div class="login-figure-scrim" aria-hidden="true"></div>
-      <div class="login-figure-notch login-figure-notch--tl" id="notchTL" aria-hidden="true"></div>
-      <div class="login-figure-notch login-figure-notch--br" id="notchBR" aria-hidden="true"></div>
-      <div class="login-figure-body">
-        <div class="login-figure-top" id="figureTop">
-          <button type="button" class="login-figure-back" id="backBtn" aria-label="Go back">&larr;</button>
-          <div class="login-eyebrow">
-            <span class="login-eyebrow-rule" aria-hidden="true"></span>
-          </div>
-        </div>
-        <div class="login-figure-quote" id="quote">
-          <h2>Every Stay,<br />Perfectly Run</h2>
-          <div class="login-testimonial" id="testimonial">
-            <p>A modern PMS for front-desk, housekeeping, and night audit.</p>
-            <div class="login-testimonial-byline">
-              <strong>Front Desk, Simplified</strong>
-              <span>Built for hotel operations teams</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="login-figure-forward" id="forwardBtn" aria-hidden="true">&rarr;</div>
+    <aside class="login-illustration" id="illustration">
+      <img class="login-illustration-logo" id="logo" src="${PIXEL}" alt="InnSight" />
+      <p class="login-illustration-caption">A modern PMS for front-desk, housekeeping, and night audit.</p>
     </aside>
     <div class="login-form-side">
-      <form class="login-card">
-        <div class="login-badge" id="badge" aria-hidden="true"></div>
-        <h1>Welcome Back</h1>
+      <form class="login-card" id="card">
+        <p class="login-topline" id="topline">Don't have an account? <a href="#">Sign up</a></p>
+        <h1>Sign in</h1>
+        <p class="login-lede">Enter your username and password to access your account</p>
+        <div class="google-signin" id="google">
+          <button type="button" class="google-btn">Sign In with Google</button>
+        </div>
+        <div class="login-divider" id="divider">
+          <span class="login-divider-line" aria-hidden="true"></span>
+          <span>Or continue with username</span>
+          <span class="login-divider-line" aria-hidden="true"></span>
+        </div>
         <label class="login-label" for="u">Username</label>
         <input id="u" class="login-input" />
+        <label class="login-label" for="p">Password</label>
+        <div class="login-input-wrap">
+          <input id="p" class="login-input" type="password" />
+          <button type="button" class="login-reveal">o</button>
+        </div>
+        <p class="login-forgot" id="forgot"><a href="#">Forgot password?</a></p>
         <button class="login-submit" id="submit">Sign In</button>
       </form>
     </div>
@@ -108,79 +98,40 @@ const box = (el) => el.getBoundingClientRect();
 const styleOf = (el) => getComputedStyle(el);
 
 const panel = document.getElementById('panel');
-const chromeDots = document.getElementById('chrome');
-const figure = document.getElementById('figure');
-const badge = document.getElementById('badge');
+const illustration = document.getElementById('illustration');
+const logo = document.getElementById('logo');
+const card = document.getElementById('card');
+const topline = document.getElementById('topline');
+const google = document.getElementById('google');
+const divider = document.getElementById('divider');
+const forgot = document.getElementById('forgot');
+const submit = document.getElementById('submit');
 
-// ── Window-chrome dots ──────────────────────────────────────────────────
-const dots = [...chromeDots.querySelectorAll('span')];
-ok('three chrome dots render', dots.length === 3, dots.length + ' dots');
-const dotColors = dots.map((d) => styleOf(d).backgroundColor);
-ok('chrome dots use distinct colours', new Set(dotColors).size === 3, dotColors.join(', '));
-ok('chrome dots sit above the panel content (not clipped to 0 size)', box(chromeDots).width > 0 && box(chromeDots).height > 0);
-
-const wide = VW >= 769; // matches the 768px breakpoint that hides .login-figure
+const wide = VW >= 769; // matches the 768px breakpoint that hides .login-illustration
 
 if (wide) {
-  // ── Photograph: grayscale filter + back button ─────────────────────────
-  const img = document.getElementById('figureImg');
-  ok('photograph is visible', box(img).width > 0 && box(img).height > 0);
-  ok('photograph has a grayscale filter applied', styleOf(img).filter.includes('grayscale'), styleOf(img).filter);
-
-  // ── Container shape: a plain, modest rounded rectangle (traced from the
-  // reference — NOT an exaggerated swoop or organic blob). ────────────────
-  const r = styleOf(figure).borderRadius.split(' ').map(parseFloat);
-  const maxRadius = Math.max(...r);
-  const minRadius = Math.min(...r);
-  ok('figure has a uniform, modest corner radius (no exaggerated swoop)',
-     maxRadius <= 40 && maxRadius === minRadius, styleOf(figure).borderRadius);
-
-  // ── Back/forward buttons sit RECESSED into card-colored notches cut from
-  // the two opposite corners (top-left, bottom-right) — the actual shape
-  // traced from the reference, rather than floating on the bare photo. ────
-  const backBtn = document.getElementById('backBtn');
-  const forwardBtn = document.getElementById('forwardBtn');
-  const notchTL = document.getElementById('notchTL');
-  const notchBR = document.getElementById('notchBR');
-
-  ok('back button is visible over the photograph', box(backBtn).width > 0 && box(backBtn).height > 0);
-  ok('back button sits inside the figure bounds', box(backBtn).left >= box(figure).left - 1 && box(backBtn).top >= box(figure).top - 1);
-  ok('top-left notch is anchored flush to the figure top-left corner',
-     Math.abs(box(notchTL).left - box(figure).left) <= 1 && Math.abs(box(notchTL).top - box(figure).top) <= 1);
-  ok('back button is fully contained within the top-left notch',
-     box(backBtn).left >= box(notchTL).left && box(backBtn).right <= box(notchTL).right &&
-     box(backBtn).top >= box(notchTL).top && box(backBtn).bottom <= box(notchTL).bottom,
-     'btn ' + JSON.stringify({l:Math.round(box(backBtn).left),t:Math.round(box(backBtn).top),r:Math.round(box(backBtn).right),b:Math.round(box(backBtn).bottom)}) +
-     ' notch ' + JSON.stringify({l:Math.round(box(notchTL).left),t:Math.round(box(notchTL).top),r:Math.round(box(notchTL).right),b:Math.round(box(notchTL).bottom)}));
-
-  ok('forward affordance is visible over the photograph', box(forwardBtn).width > 0 && box(forwardBtn).height > 0);
-  ok('bottom-right notch is anchored flush to the figure bottom-right corner',
-     Math.abs(box(notchBR).right - box(figure).right) <= 1 && Math.abs(box(notchBR).bottom - box(figure).bottom) <= 1);
-  ok('forward affordance is fully contained within the bottom-right notch',
-     box(forwardBtn).left >= box(notchBR).left && box(forwardBtn).right <= box(notchBR).right &&
-     box(forwardBtn).top >= box(notchBR).top && box(forwardBtn).bottom <= box(notchBR).bottom,
-     'btn ' + JSON.stringify({l:Math.round(box(forwardBtn).left),t:Math.round(box(forwardBtn).top),r:Math.round(box(forwardBtn).right),b:Math.round(box(forwardBtn).bottom)}) +
-     ' notch ' + JSON.stringify({l:Math.round(box(notchBR).left),t:Math.round(box(notchBR).top),r:Math.round(box(notchBR).right),b:Math.round(box(notchBR).bottom)}));
-
-  // ── Testimonial: an inset rounded card, clear of the forward notch. ─────
-  const testimonial = document.getElementById('testimonial');
-  ok('testimonial card renders inside the figure', box(testimonial).bottom <= box(figure).bottom + 1);
-  ok('testimonial card is inset from the figure edges (not full-bleed)',
-     box(testimonial).left > box(figure).left + 4 && box(testimonial).right < box(figure).right - 4,
-     'card ' + Math.round(box(testimonial).left) + '-' + Math.round(box(testimonial).right) + ' vs figure ' + Math.round(box(figure).left) + '-' + Math.round(box(figure).right));
-  ok('testimonial card does not run under the forward notch',
-     box(testimonial).right <= box(notchBR).left + 1,
-     'card right ' + Math.round(box(testimonial).right) + ', notch left ' + Math.round(box(notchBR).left));
+  ok('illustration panel is visible', box(illustration).width > 0 && box(illustration).height > 0);
+  ok('logo renders inside the illustration panel', box(logo).width > 0 &&
+     box(logo).left >= box(illustration).left - 1 && box(logo).right <= box(illustration).right + 1);
+  ok('illustration sits left of the form (matches the reference layout)',
+     box(illustration).left < box(card).left, 'illustration left ' + Math.round(box(illustration).left) + ', card left ' + Math.round(box(card).left));
 } else {
-  ok('narrow: figure is hidden, form gets the room', styleOf(figure).display === 'none', styleOf(figure).display);
-  ok('narrow: chrome dots remain visible above the form', box(chromeDots).width > 0);
+  ok('narrow: illustration panel is hidden, form gets the room', styleOf(illustration).display === 'none', styleOf(illustration).display);
 }
 
-// ── Badge above the heading, always (both breakpoints) ──────────────────
-ok('brand badge renders as a visible circle', box(badge).width >= 20 && box(badge).height >= 20,
-   Math.round(box(badge).width) + 'x' + Math.round(box(badge).height));
-ok('badge is round', styleOf(badge).borderRadius.includes('50%') || parseFloat(styleOf(badge).borderRadius) >= box(badge).width / 2 - 1,
-   styleOf(badge).borderRadius);
+// ── Top-right "sign up" line sits above the heading ─────────────────────
+ok('topline renders above the card content', box(topline).top <= box(card).top + 4);
+ok('topline is right-aligned', styleOf(topline).textAlign === 'right', styleOf(topline).textAlign);
+
+// ── Google button, then the divider, then the manual fields ─────────────
+ok('Google sign-in sits above the divider', box(google).bottom <= box(divider).top + 1,
+   'google bottom ' + Math.round(box(google).bottom) + ', divider top ' + Math.round(box(divider).top));
+const lines = [...divider.querySelectorAll('.login-divider-line')];
+ok('divider has a rule on each side of its text', lines.length === 2 && lines.every((l) => box(l).width > 4));
+
+// ── Forgot-password link sits after the fields, before the submit button ─
+ok('forgot-password link sits above the submit button', box(forgot).bottom <= box(submit).top + 1);
+ok('forgot-password link is right-aligned', styleOf(forgot).textAlign === 'right', styleOf(forgot).textAlign);
 
 // ── No horizontal overflow anywhere in the panel ────────────────────────
 ok('panel does not overflow the viewport', box(panel).right <= VW + 1, Math.round(box(panel).right) + ' vs ' + VW);

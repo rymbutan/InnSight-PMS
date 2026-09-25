@@ -73,68 +73,33 @@ export default function Login() {
   return (
     <div className="login-shell">
       <div className="login-panel">
-        <div className="login-chrome" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-
-        {/* Photograph column — placed first in the DOM for tab order, shown on
-            the right via CSS `order` (see .login-figure/.login-form-side). */}
-        <aside className="login-figure">
-          <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
-          <div className="login-figure-scrim" aria-hidden="true" />
-          <div className="login-figure-notch login-figure-notch--tl" aria-hidden="true" />
-          <div className="login-figure-notch login-figure-notch--br" aria-hidden="true" />
-          <div className="login-figure-body">
-            <div className="login-figure-top">
-              <button
-                type="button"
-                className="login-figure-back"
-                aria-label="Go back"
-                onClick={() => navigate(-1)}
-              >
-                ←
-              </button>
-              <div className="login-eyebrow">
-                <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
-                <span className="login-eyebrow-rule" aria-hidden="true" />
-              </div>
-            </div>
-            <div className="login-figure-quote">
-              <h2>
-                Every Stay,
-                <br />
-                Perfectly Run
-              </h2>
-              <div className="login-testimonial">
-                <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
-                <div className="login-testimonial-byline">
-                  <strong>Front Desk, Simplified</strong>
-                  <span>Built for hotel operations teams</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="login-figure-forward" aria-hidden="true">
-            →
-          </div>
+        <aside className="login-illustration">
+          <img className="login-illustration-logo" src="/brand/innsight-logo-icon.png" alt="InnSight" />
+          <p className="login-illustration-caption">
+            A modern PMS for front-desk, housekeeping, and night audit.
+          </p>
         </aside>
 
-        {/* Form column — first visually (order: 1) and in the DOM. */}
         <div className="login-form-side">
           <form className="login-card" onSubmit={onSubmit}>
-            <div className="login-badge" aria-hidden="true" />
-            <img
-              className="login-wordmark"
-              src="/brand/innsight-wordmark.png"
-              alt="InnSight"
-              width="640"
-              height="186"
+            <p className="login-topline">
+              Don&rsquo;t have an account? <Link to="/request-access">Sign up</Link>
+            </p>
+
+            <h1>Sign in</h1>
+            <p className="login-lede">Enter your username and password to access your account</p>
+
+            <GoogleSignIn
+              onCredential={onGoogleCredential}
+              onError={setError}
+              disabled={loading || !backend.ok}
             />
 
-            <h1>Welcome Back</h1>
-            <p className="login-lede">Enter your username and password to access your account</p>
+            <div className="login-divider">
+              <span className="login-divider-line" aria-hidden="true" />
+              <span>Or continue with username</span>
+              <span className="login-divider-line" aria-hidden="true" />
+            </div>
 
             <label className="login-label" htmlFor="login-username">
               Username
@@ -174,15 +139,13 @@ export default function Login() {
               </button>
             </div>
 
+            <p className="login-forgot">
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
+
             <button className="login-submit" disabled={loading || !backend.ok}>
               {signInLabel}
             </button>
-
-            <GoogleSignIn
-              onCredential={onGoogleCredential}
-              onError={setError}
-              disabled={loading || !backend.ok}
-            />
 
             {error && (
               <div className="error" role="alert">
@@ -198,13 +161,6 @@ export default function Login() {
                 </div>
               </div>
             )}
-
-            <p className="login-alt">
-              <Link to="/forgot-password">Forgot password?</Link>
-            </p>
-            <p className="login-alt">
-              Don&rsquo;t have an account? <Link to="/request-access">Sign Up</Link>
-            </p>
 
             {import.meta.env.DEV && (
               <p className="login-devhint muted">
