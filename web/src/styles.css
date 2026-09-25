@@ -3717,21 +3717,29 @@ tr.active td {
 
 /* ==========================================================================
    Sign-in screen
-   A bold, full-bleed brand moment rather than a neutral card-on-page: a
-   green gradient background, the brand mark large on the left, and a
-   translucent "glass" card on the right holding the form. Modelled on a
-   bold-color auth screen reference; green is InnSight's own accent
-   (var(--accent)), not a literal copy of the reference's palette.
+   A bold brand panel — a green gradient card, the brand mark large on the
+   left, and a translucent "glass" panel on the right holding the form —
+   contained on a neutral page ground rather than bled to the browser edges.
+   Modelled on a bold-color auth screen reference; green is InnSight's own
+   accent (var(--accent)), not a literal copy of the reference's palette.
 
-   The whole screen is intentionally fixed-dark regardless of the app's
+   The panel itself is intentionally fixed-dark regardless of the app's
    light/dark theme — like the reference, this is a deliberate brand splash,
-   not a themed page — so text on it uses fixed white/translucent-white
+   not a themed page — so text inside it uses fixed white/translucent-white
    rather than var(--text)/var(--muted), the same reasoning the old photo
    treatment used for its scrim text.
    ========================================================================== */
 .login-shell {
-  position: relative;
   min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: var(--bg);
+}
+.login-panel {
+  position: relative;
+  width: min(1100px, 100%);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3739,11 +3747,13 @@ tr.active td {
   gap: 40px;
   padding: 56px;
   overflow: hidden;
+  border-radius: 32px;
+  box-shadow: 0 30px 70px rgb(15 23 42 / 0.16);
   background: linear-gradient(150deg, #052e1c 0%, #0a6b3d 55%, #12995e 100%);
 }
 /* Soft glow behind the hero graphic — decorative depth, echoing the
    reference's own soft-lit abstract shape. */
-.login-shell::before {
+.login-panel::before {
   content: '';
   position: absolute;
   top: -180px;
@@ -4074,8 +4084,8 @@ tr.active td {
   .login-hero {
     display: none;
   }
-  .login-shell {
-    padding: 24px;
+  .login-panel {
+    padding: 28px;
   }
 }
 @media (max-width: 768px) {

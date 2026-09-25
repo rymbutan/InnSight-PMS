@@ -29,16 +29,18 @@ export default function AuthShell({ title, lede, children, onSubmit }) {
 
   return (
     <div className="login-shell">
-      <Link to="/login" aria-label="InnSight — back to sign in" className="login-hero-link">
-        <AuthHero />
-      </Link>
+      <div className="login-panel">
+        <Link to="/login" aria-label="InnSight — back to sign in" className="login-hero-link">
+          <AuthHero />
+        </Link>
 
-      <Card className="login-card" {...cardProps}>
-        <h1>{title}</h1>
-        {lede && <p className="login-lede">{lede}</p>}
+        <Card className="login-card" {...cardProps}>
+          <h1>{title}</h1>
+          {lede && <p className="login-lede">{lede}</p>}
 
-        {children}
-      </Card>
+          {children}
+        </Card>
+      </div>
     </div>
   );
 }

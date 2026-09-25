@@ -51,39 +51,41 @@ const PIXEL =
 
 const PANEL = `
 <div class="login-shell" id="shell">
-  <div class="login-hero" id="hero">
-    <div class="login-hero-graphic"><img class="login-hero-graphic-img" src="${PIXEL}" alt="" /></div>
-    <div class="login-hero-bottom">
-      <div class="login-hero-brand">
-        <img class="login-hero-logo" src="${PIXEL}" alt="" />
-        <div>
-          <div class="login-hero-word">InnSight</div>
-          <div class="login-hero-tag">Hotel PMS</div>
+  <div class="login-panel" id="panel">
+    <div class="login-hero" id="hero">
+      <div class="login-hero-graphic"><img class="login-hero-graphic-img" src="${PIXEL}" alt="" /></div>
+      <div class="login-hero-bottom">
+        <div class="login-hero-brand">
+          <img class="login-hero-logo" src="${PIXEL}" alt="" />
+          <div>
+            <div class="login-hero-word">InnSight</div>
+            <div class="login-hero-tag">Hotel PMS</div>
+          </div>
         </div>
       </div>
     </div>
+    <form class="login-card" id="card">
+      <h1 id="heading">Sign in</h1>
+      <p class="login-lede">Enter your username and password to access your account</p>
+      <div class="google-signin" id="google"><button type="button" class="google-btn">Sign In with Google</button></div>
+      <div class="login-divider" id="divider">
+        <span class="login-divider-line" aria-hidden="true"></span>
+        <span>Or continue with username</span>
+        <span class="login-divider-line" aria-hidden="true"></span>
+      </div>
+      <label class="login-label" for="u">Username</label>
+      <input id="u" class="login-input" />
+      <label class="login-label" for="p">Password</label>
+      <div class="login-input-wrap">
+        <input id="p" class="login-input" type="password" />
+        <button type="button" class="login-reveal">o</button>
+      </div>
+      <p class="login-forgot" id="forgot"><a href="#">Forgot password?</a></p>
+      <button class="login-submit" id="submit">Sign In</button>
+      <p class="login-alt" id="alt">Don't have an account?</p>
+      <a href="#" class="login-secondary" id="secondary">Sign Up</a>
+    </form>
   </div>
-  <form class="login-card" id="card">
-    <h1 id="heading">Sign in</h1>
-    <p class="login-lede">Enter your username and password to access your account</p>
-    <div class="google-signin" id="google"><button type="button" class="google-btn">Sign In with Google</button></div>
-    <div class="login-divider" id="divider">
-      <span class="login-divider-line" aria-hidden="true"></span>
-      <span>Or continue with username</span>
-      <span class="login-divider-line" aria-hidden="true"></span>
-    </div>
-    <label class="login-label" for="u">Username</label>
-    <input id="u" class="login-input" />
-    <label class="login-label" for="p">Password</label>
-    <div class="login-input-wrap">
-      <input id="p" class="login-input" type="password" />
-      <button type="button" class="login-reveal">o</button>
-    </div>
-    <p class="login-forgot" id="forgot"><a href="#">Forgot password?</a></p>
-    <button class="login-submit" id="submit">Sign In</button>
-    <p class="login-alt" id="alt">Don't have an account?</p>
-    <a href="#" class="login-secondary" id="secondary">Sign Up</a>
-  </form>
 </div>`;
 
 const PAGE = `<!doctype html>
@@ -100,6 +102,7 @@ const box = (el) => el.getBoundingClientRect();
 const styleOf = (el) => getComputedStyle(el);
 
 const shell = document.getElementById('shell');
+const panel = document.getElementById('panel');
 const hero = document.getElementById('hero');
 const card = document.getElementById('card');
 const heading = document.getElementById('heading');
@@ -110,9 +113,17 @@ const submit = document.getElementById('submit');
 const alt = document.getElementById('alt');
 const secondary = document.getElementById('secondary');
 
-// ── Shell is a bold, fixed-color gradient, not a neutral page background ──
-const bg = styleOf(shell).backgroundImage;
-ok('shell has a gradient background', bg.includes('gradient'), bg);
+// ── The bold gradient is CONTAINED in a rounded panel, not bled to the
+// browser edges — the panel sits on the app's own neutral page background. ──
+const bg = styleOf(panel).backgroundImage;
+ok('panel (not the shell) carries the gradient', bg.includes('gradient'), bg);
+ok('shell behind the panel is a plain, non-gradient background', !styleOf(shell).backgroundImage.includes('gradient'),
+   styleOf(shell).backgroundImage);
+ok('panel is contained: rounded corners', parseFloat(styleOf(panel).borderRadius) > 0, styleOf(panel).borderRadius);
+ok('panel is inset from the shell edges (not full-bleed)',
+   box(panel).left > box(shell).left + 4 && box(panel).top > box(shell).top + 4 && box(panel).width < box(shell).width,
+   'panel left ' + Math.round(box(panel).left) + ' vs shell left ' + Math.round(box(shell).left) +
+   ', panel width ' + Math.round(box(panel).width) + ' vs shell width ' + Math.round(box(shell).width));
 
 // ── Card is a translucent "glass" panel, not an opaque page-colored one ──
 const cardBg = styleOf(card).backgroundColor;

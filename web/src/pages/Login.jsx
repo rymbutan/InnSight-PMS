@@ -73,97 +73,100 @@ export default function Login() {
 
   return (
     <div className="login-shell">
-      <AuthHero />
+      <div className="login-panel">
+        <AuthHero />
 
-      <form className="login-card" onSubmit={onSubmit}>
-        <h1>Sign in</h1>
-        <p className="login-lede">Enter your username and password to access your account</p>
+        <form className="login-card" onSubmit={onSubmit}>
+          <h1>Sign in</h1>
+          <p className="login-lede">Enter your username and password to access your account</p>
 
-        <GoogleSignIn
-          onCredential={onGoogleCredential}
-          onError={setError}
-          disabled={loading || !backend.ok}
-        />
-
-        <div className="login-divider">
-          <span className="login-divider-line" aria-hidden="true" />
-          <span>Or continue with username</span>
-          <span className="login-divider-line" aria-hidden="true" />
-        </div>
-
-        <label className="login-label" htmlFor="login-username">
-          Username
-        </label>
-        <input
-          id="login-username"
-          className="login-input"
-          placeholder="Enter your username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          autoFocus
-        />
-
-        <label className="login-label" htmlFor="login-password">
-          Password
-        </label>
-        <div className="login-input-wrap">
-          <input
-            id="login-password"
-            className="login-input"
-            type={showPassword ? 'text' : 'password'}
-            placeholder="Enter your password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
+          <GoogleSignIn
+            onCredential={onGoogleCredential}
+            onError={setError}
+            disabled={loading || !backend.ok}
           />
-          <button
-            type="button"
-            className="login-reveal"
-            onClick={() => setShowPassword((v) => !v)}
-            aria-label={showPassword ? 'Hide password' : 'Show password'}
-            aria-pressed={showPassword}
-            title={showPassword ? 'Hide password' : 'Show password'}
-          >
-            {showPassword ? '🙈' : '👁'}
-          </button>
-        </div>
 
-        <p className="login-forgot">
-          <Link to="/forgot-password">Forgot password?</Link>
-        </p>
-
-        <button className="login-submit" disabled={loading || !backend.ok}>
-          {signInLabel}
-        </button>
-
-        {error && (
-          <div className="error" role="alert">
-            {error}
+          <div className="login-divider">
+            <span className="login-divider-line" aria-hidden="true" />
+            <span>Or continue with username</span>
+            <span className="login-divider-line" aria-hidden="true" />
           </div>
-        )}
 
-        {!backend.checking && !backend.ok && (
-          <div className="login-backend-warning" role="alert">
-            <strong>{backend.msg}</strong>
-            <div>
-              In a terminal: <code>cd "InnSight PMS" && docker compose up -d</code>
-            </div>
+          <label className="login-label" htmlFor="login-username">
+            Username
+          </label>
+          <input
+            id="login-username"
+            className="login-input"
+            placeholder="Enter your username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            autoFocus
+          />
+
+          <label className="login-label" htmlFor="login-password">
+            Password
+          </label>
+          <div className="login-input-wrap">
+            <input
+              id="login-password"
+              className="login-input"
+              type={showPassword ? 'text' : 'password'}
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              className="login-reveal"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showPassword}
+              title={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? '🙈' : '👁'}
+            </button>
           </div>
-        )}
 
-        <p className="login-alt">Don&rsquo;t have an account?</p>
-        <Link to="/request-access" className="login-secondary">
-          Sign Up
-        </Link>
-
-        {import.meta.env.DEV && (
-          <p className="login-devhint muted">
-            Sign in as <code>admin</code> with the <code>ADMIN_INITIAL_PASSWORD</code> from your{' '}
-            <code>.env</code> (generated by <code>scripts/gen-env.sh</code>). You will be asked to change it.
+          <p className="login-forgot">
+            <Link to="/forgot-password">Forgot password?</Link>
           </p>
-        )}
-      </form>
+
+          <button className="login-submit" disabled={loading || !backend.ok}>
+            {signInLabel}
+          </button>
+
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
+
+          {!backend.checking && !backend.ok && (
+            <div className="login-backend-warning" role="alert">
+              <strong>{backend.msg}</strong>
+              <div>
+                In a terminal: <code>cd "InnSight PMS" && docker compose up -d</code>
+              </div>
+            </div>
+          )}
+
+          <p className="login-alt">Don&rsquo;t have an account?</p>
+          <Link to="/request-access" className="login-secondary">
+            Sign Up
+          </Link>
+
+          {import.meta.env.DEV && (
+            <p className="login-devhint muted">
+              Sign in as <code>admin</code> with the <code>ADMIN_INITIAL_PASSWORD</code> from your{' '}
+              <code>.env</code> (generated by <code>scripts/gen-env.sh</code>). You will be asked to change
+              it.
+            </p>
+          )}
+        </form>
+      </div>
     </div>
   );
 }
