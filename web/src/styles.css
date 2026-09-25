@@ -4125,12 +4125,21 @@ tr.active td {
 /* The feature-highlight card: a white "product preview" floating on the
    slide's photo. No thumbnail image inside it any more — the full-bleed
    photo behind the whole panel already carries that job, so a second small
-   photo here was redundant clutter rather than added personality. */
+   photo here was redundant clutter rather than added personality.
+
+   Capped to a max-width rather than stretching to fill the column: at full
+   width, with no image to anchor the right side any more, the card read as
+   a big mostly-empty box with a couple of overlong, thin lines of text in
+   the corner — and it hid more of the photo than a compact callout needs
+   to. Shrinking it to fit its own text lets the photo show around it and
+   gives the paragraph natural, book-width line lengths instead of ~70-
+   character lines at 12.5px. */
 .login-hero-highlight {
   position: relative;
   z-index: 1;
+  max-width: 300px;
   margin-top: 36px;
-  padding: 22px;
+  padding: 20px 22px;
   background: #fff;
   border-radius: 20px;
   box-shadow: 0 24px 45px rgb(0 0 0 / 0.25);
@@ -4152,14 +4161,15 @@ tr.active td {
 }
 .login-hero-highlight-text h2 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 19px;
+  line-height: 1.25;
   font-weight: 700;
   color: #0f172a;
 }
 .login-hero-highlight-text p {
   margin: 0 0 14px;
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.55;
   color: #64748b;
 }
 /* Links to the matching section of /learn-more (a real <a>, via react-router
