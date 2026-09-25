@@ -79,7 +79,8 @@ export default function Login() {
           <span />
         </div>
 
-        {/* ── Left: photograph, brand mark top-left, strapline bottom-left ── */}
+        {/* Photograph column — placed first in the DOM for tab order, shown on
+            the right via CSS `order` (see .login-figure/.login-form-side). */}
         <aside className="login-figure">
           <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
           <div className="login-figure-scrim" aria-hidden="true" />
@@ -117,7 +118,7 @@ export default function Login() {
           </div>
         </aside>
 
-        {/* ── Right: the form ── */}
+        {/* Form column — first visually (order: 1) and in the DOM. */}
         <div className="login-form-side">
           <form className="login-card" onSubmit={onSubmit}>
             <div className="login-badge" aria-hidden="true" />
