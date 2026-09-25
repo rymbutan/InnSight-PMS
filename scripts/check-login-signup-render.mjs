@@ -86,12 +86,12 @@ const PANEL = `
       </form>
     </div>
     <div class="login-hero" id="hero">
-      <div class="login-hero-topbar"><span class="login-hero-support">Support</span></div>
+      <div class="login-hero-topbar"><div class="login-hero-support-wrap"><button type="button" class="login-hero-support" id="support">Support</button></div></div>
       <div class="login-hero-highlight" id="highlight">
         <div class="login-hero-highlight-text">
-          <h2>Run your front desk faster</h2>
+          <h2>Every Stay, Perfectly Run</h2>
           <p>Check guests in, track housekeeping, and close the night audit.</p>
-          <span class="login-hero-cta">Learn more</span>
+          <button type="button" class="login-hero-cta" id="cta">Learn more</button>
         </div>
         <img class="login-hero-highlight-art" src="${PIXEL}" alt="" />
       </div>
@@ -141,6 +141,8 @@ const highlight = document.getElementById('highlight');
 const stat = document.getElementById('stat');
 const features = document.getElementById('features');
 const dots = document.getElementById('dots');
+const support = document.getElementById('support');
+const cta = document.getElementById('cta');
 
 // ── The panel is CONTAINED on the app's own page background, not bled to
 // the browser edges. ─────────────────────────────────────────────────────
@@ -181,6 +183,21 @@ if (wide) {
   ok('dot and arrow buttons show a pointer cursor',
      [...dotButtons, ...arrowButtons].every((b) => styleOf(b).cursor === 'pointer'));
 
+  // ── "Support" and "Learn more" are real, clickable buttons too — not
+  // decorative chrome. ────────────────────────────────────────────────────
+  ok('support badge is a real <button>, not a decorative span', support.tagName === 'BUTTON', support.tagName);
+  ok('support badge shows a pointer cursor', styleOf(support).cursor === 'pointer', styleOf(support).cursor);
+  ok('"Learn more" is a real <button>, not a decorative span', cta.tagName === 'BUTTON', cta.tagName);
+  ok('"Learn more" shows a pointer cursor', styleOf(cta).cursor === 'pointer', styleOf(cta).cursor);
+
+  // ── The support popover's stacking context (.login-hero-topbar) must
+  // out-rank the highlight card's, or the card (later in the DOM, same
+  // z-index) paints over the popover nested in the topbar regardless of the
+  // popover's own z-index — a real regression this project shipped once. ──
+  const topbarZ = parseInt(styleOf(document.querySelector('.login-hero-topbar')).zIndex, 10) || 0;
+  const highlightZ = parseInt(styleOf(highlight).zIndex, 10) || 0;
+  ok('support topbar stacking context outranks the highlight card',
+     topbarZ > highlightZ, 'topbar z-index ' + topbarZ + ' vs highlight z-index ' + highlightZ);
 } else {
   ok('narrow: hero is hidden, form gets the room', styleOf(hero).display === 'none', styleOf(hero).display);
 }
