@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 // The right-hand marketing panel shared by every signed-out screen (Sign In,
 // Sign Up, Forgot/Reset password via AuthShell). Pulled into its own
@@ -10,10 +11,13 @@ import { useEffect, useRef, useState } from 'react';
 // card's pitch with a stat AND its own "features" heading + sentence below
 // — both vary per slide, not just the paragraph, so the block doesn't read
 // as the same "Introducing new features" copy repeated three times.
-// Auto-advances but is fully driven by the same index a click on an arrow,
-// a dot, or "Learn more" sets.
+// Auto-advances but is fully driven by the same index a click on an arrow
+// or a dot sets. Each slide's `id` matches a section id on the /learn-more
+// page (LearnMore.jsx), so "Learn more" jumps straight to that slide's
+// fuller writeup instead of just cycling the carousel.
 const SLIDES = [
   {
+    id: 'front-desk',
     heading: 'Every Stay, Perfectly Run',
     body: 'Check guests in, track housekeeping, and close the night audit — all from one dashboard.',
     statValue: '87%',
@@ -22,6 +26,7 @@ const SLIDES = [
     feature: 'Real-time room status, automated night audits, and instant guest messaging — all in one place.',
   },
   {
+    id: 'housekeeping',
     heading: 'Housekeeping, in real time',
     body: "See every room's status the moment it changes, from dirty to inspected.",
     statValue: '42',
@@ -30,6 +35,7 @@ const SLIDES = [
     feature: 'Housekeepers update room status from any device — the front desk sees it instantly.',
   },
   {
+    id: 'night-audit',
     heading: 'Close the night audit in minutes',
     body: 'Automated reconciliation catches discrepancies before they become problems.',
     statValue: '3 min',
@@ -116,9 +122,9 @@ export default function AuthHero() {
         <div className="login-hero-highlight-text" key={`text-${index}`}>
           <h2>{slide.heading}</h2>
           <p>{slide.body}</p>
-          <button type="button" className="login-hero-cta" onClick={() => goTo(index + 1)}>
+          <Link to={`/learn-more#${slide.id}`} className="login-hero-cta">
             Learn more
-          </button>
+          </Link>
         </div>
         <img className="login-hero-highlight-art" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
       </div>

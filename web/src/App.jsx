@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import RequestAccess from './pages/RequestAccess';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import LearnMore from './pages/LearnMore';
 import Dashboard from './pages/Dashboard';
 import Reservations from './pages/Reservations';
 import Arrivals from './pages/Arrivals';
@@ -39,6 +40,8 @@ export default function App() {
           bookmarks and HOW-TO-OPEN-EDITOR.md keep working. */}
       <Route path="/sim-demo" element={<Navigate to="/room-layouts" replace />} />
       <Route path="/login" element={<Login />} />
+      {/* Public: the "Learn more" destination from the sign-in carousel. */}
+      <Route path="/learn-more" element={<LearnMore />} />
       {/* Public: asks for an account, never creates one. */}
       <Route path="/request-access" element={<RequestAccess />} />
       {/* Public by necessity — somebody locked out cannot authenticate to ask for
