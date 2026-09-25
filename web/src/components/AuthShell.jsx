@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import AuthHero from './AuthHero';
 
 // The signed-out frame: a brand panel on the left, a card on the right.
 //
@@ -28,22 +29,16 @@ export default function AuthShell({ title, lede, children, onSubmit }) {
 
   return (
     <div className="login-shell">
-      <div className="login-panel">
-        <aside className="login-illustration">
-          <Link to="/login" aria-label="InnSight — back to sign in">
-            <img className="login-illustration-logo" src="/brand/innsight-logo-icon.png" alt="InnSight" />
-          </Link>
-        </aside>
+      <Link to="/login" aria-label="InnSight — back to sign in" className="login-hero-link">
+        <AuthHero />
+      </Link>
 
-        <div className="login-form-side">
-          <Card className="login-card" {...cardProps}>
-            <h1>{title}</h1>
-            {lede && <p className="login-lede">{lede}</p>}
+      <Card className="login-card" {...cardProps}>
+        <h1>{title}</h1>
+        {lede && <p className="login-lede">{lede}</p>}
 
-            {children}
-          </Card>
-        </div>
-      </div>
+        {children}
+      </Card>
     </div>
   );
 }

@@ -3717,89 +3717,137 @@ tr.active td {
 
 /* ==========================================================================
    Sign-in screen
-   A clean, light two-panel card: a brand/illustration panel on the left, the
-   form on the right — modelled on a minimal SaaS auth screen rather than the
-   earlier editorial photo treatment. Colors stay on the app's own theme
-   tokens throughout, not the reference's literal palette.
+   A bold, full-bleed brand moment rather than a neutral card-on-page: a
+   green gradient background, the brand mark large on the left, and a
+   translucent "glass" card on the right holding the form. Modelled on a
+   bold-color auth screen reference; green is InnSight's own accent
+   (var(--accent)), not a literal copy of the reference's palette.
+
+   The whole screen is intentionally fixed-dark regardless of the app's
+   light/dark theme — like the reference, this is a deliberate brand splash,
+   not a themed page — so text on it uses fixed white/translucent-white
+   rather than var(--text)/var(--muted), the same reasoning the old photo
+   treatment used for its scrim text.
    ========================================================================== */
 .login-shell {
+  position: relative;
   min-height: 100vh;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  padding: 28px;
-  background: var(--bg);
-}
-.login-panel {
-  position: relative;
-  width: min(1080px, 100%);
-  min-height: min(84vh, 680px);
-  display: grid;
-  grid-template-columns: 1fr 1.15fr;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 32px;
-  box-shadow: 0 30px 70px rgb(15 23 42 / 0.12);
+  gap: 40px;
+  padding: 56px;
   overflow: hidden;
+  background: linear-gradient(150deg, #052e1c 0%, #0a6b3d 55%, #12995e 100%);
+}
+/* Soft glow behind the hero graphic — decorative depth, echoing the
+   reference's own soft-lit abstract shape. */
+.login-shell::before {
+  content: '';
+  position: absolute;
+  top: -180px;
+  left: -160px;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.16) 0%, rgb(255 255 255 / 0) 70%);
+  pointer-events: none;
 }
 
-/* ── Left: brand panel ──────────────────────────────────────────────────── */
-.login-illustration {
-  margin: 14px;
+/* ── Left: brand hero ───────────────────────────────────────────────────── */
+/* AuthShell wraps the hero in a Link back to sign-in; `display: contents`
+   keeps that anchor out of the flex layout so .login-hero is still the
+   direct flex item, exactly as when Login/RequestAccess render it bare. */
+.login-hero-link {
+  display: contents;
+  text-decoration: none;
+}
+.login-hero {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  padding: 32px;
-  background: var(--bg);
-  border-radius: 24px;
+  justify-content: space-between;
+  gap: 40px;
+  width: min(460px, 100%);
+  min-height: min(70vh, 560px);
+  padding: 12px;
 }
-.login-illustration-logo {
-  width: min(420px, 85%);
-  height: auto;
-}
-
-/* ── Right: the form ────────────────────────────────────────────────────── */
-.login-form-side {
+.login-hero-graphic {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 40px;
-  overflow-y: auto;
 }
+.login-hero-graphic-img {
+  width: min(280px, 70%);
+  height: auto;
+  transform: rotate(-4deg);
+  filter: drop-shadow(0 30px 50px rgb(0 0 0 / 0.35));
+}
+.login-hero-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login-hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.login-hero-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+.login-hero-word {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #fff;
+}
+.login-hero-tag {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.65);
+}
+.login-hero-copy {
+  max-width: 34ch;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgb(255 255 255 / 0.78);
+}
+
+/* ── Right: the glass card ──────────────────────────────────────────────── */
 .login-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 380px;
-}
-/* "Don't have an account? Sign up" — right-aligned above the heading, rather
-   than a footer line under the button. */
-.login-topline {
-  margin: 0 0 28px;
-  text-align: right;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.login-topline a {
-  font-weight: 700;
-  color: var(--text);
-}
-.login-topline a:hover {
-  color: var(--accent);
+  padding: 34px 30px;
+  background: rgb(255 255 255 / 0.1);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 24px;
+  box-shadow: 0 30px 60px rgb(0 0 0 / 0.28);
+  backdrop-filter: blur(20px);
 }
 .login-card h1 {
   margin: 0 0 8px;
   font-weight: 700;
-  font-size: 30px;
+  font-size: 26px;
   line-height: 1.2;
   letter-spacing: -0.01em;
-  color: var(--text);
+  color: #fff;
 }
 .login-lede {
-  margin: 0 0 24px;
+  margin: 0 0 22px;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--muted);
+  color: rgb(255 255 255 / 0.7);
 }
 /* Text-and-rule divider between the social button(s) and the manual fields. */
 .login-divider {
@@ -3808,12 +3856,12 @@ tr.active td {
   gap: 12px;
   margin: 20px 0;
   font-size: 12px;
-  color: var(--muted);
+  color: rgb(255 255 255 / 0.6);
 }
 .login-divider-line {
   flex: 1;
   height: 1px;
-  background: var(--border);
+  background: rgb(255 255 255 / 0.22);
 }
 .login-forgot {
   margin: -6px 0 18px;
@@ -3821,32 +3869,35 @@ tr.active td {
   font-size: 12.5px;
 }
 .login-forgot a {
-  color: var(--muted);
+  color: rgb(255 255 255 / 0.7);
 }
 .login-forgot a:hover {
-  color: var(--accent);
+  color: #fff;
 }
 .login-label {
   display: block;
   margin: 0 0 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: rgb(255 255 255 / 0.85);
 }
 .login-input {
   width: 100%;
   padding: 12px 14px;
   margin: 0 0 16px;
   font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.25);
   border-radius: 10px;
 }
+.login-input::placeholder {
+  color: rgb(255 255 255 / 0.5);
+}
 .login-input:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid #fff;
   outline-offset: 1px;
-  background: var(--panel);
+  background: rgb(255 255 255 / 0.18);
 }
 /* The reveal toggle sits inside the field, so the input keeps room for it. */
 .login-input-wrap {
@@ -3870,7 +3921,7 @@ tr.active td {
   cursor: pointer;
 }
 .login-reveal:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid #fff;
 }
 .login-submit {
   width: 100%;
@@ -3878,15 +3929,14 @@ tr.active td {
   padding: 13px 16px;
   font-size: 14px;
   font-weight: 700;
-  color: var(--on-accent);
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  color: #063f26;
+  background: #fff;
+  border: 1px solid #fff;
   border-radius: 10px;
   cursor: pointer;
 }
 .login-submit:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: rgb(255 255 255 / 0.88);
 }
 .login-submit:disabled {
   opacity: 0.55;
@@ -3900,7 +3950,6 @@ tr.active td {
 }
 .login-submit-link:hover {
   text-decoration: none;
-  color: var(--on-accent);
 }
 .login-textarea {
   resize: vertical;
@@ -3908,7 +3957,6 @@ tr.active td {
   font-family: inherit;
   line-height: 1.5;
 }
-/* "Don't have an account? Sign Up" — the foot of the card. */
 /* Secondary guidance inside an auth card — the "nothing arrived?" paragraph on
    Forgot password. Smaller and left-aligned against .login-alt's centred link
    line, because it is a few sentences to READ rather than one thing to click,
@@ -3917,28 +3965,49 @@ tr.active td {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.55;
-  color: var(--muted);
+  color: rgb(255 255 255 / 0.7);
   text-align: left;
 }
+/* "Don't have an account?" line, sitting above the .login-secondary button
+   at the foot of the card — plain text, not a link, since the button below
+   it is the actual call to action. */
 .login-alt {
-  margin: 26px 0 0;
+  margin: 26px 0 10px;
   text-align: center;
   font-size: 13px;
-  color: var(--muted);
+  color: rgb(255 255 255 / 0.7);
 }
 .login-alt a {
   font-weight: 700;
-  color: var(--text);
+  color: #fff;
 }
-.login-alt a:hover {
-  color: var(--accent);
+/* The bordered "glass" counterpart to .login-submit's solid fill — Sign Up
+   under Sign In, Sign In under Sign Up. */
+.login-secondary {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  color: #fff;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 0.4);
+  border-radius: 10px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.login-secondary:hover {
+  background: rgb(255 255 255 / 0.1);
+  text-decoration: none;
+  color: #fff;
 }
 .login-backend-warning {
   margin-top: 14px;
   padding: 10px;
   font-size: 12px;
-  background: var(--danger-soft);
-  color: var(--on-danger-soft);
+  background: rgb(255 255 255 / 0.14);
+  color: #fff;
   border-radius: 8px;
 }
 .login-backend-warning div {
@@ -3948,6 +4017,12 @@ tr.active td {
 .login-devhint {
   font-size: 11px;
   margin-top: 16px;
+}
+.login-card .muted {
+  color: rgb(255 255 255 / 0.6);
+}
+.login-card .error {
+  color: #ffb4b4;
 }
 
 /* University sign-in. The component renders nothing when Google is not
@@ -3967,17 +4042,17 @@ tr.active td {
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
+  color: #fff;
+  background: rgb(255 255 255 / 0.1);
+  border: 1px solid rgb(255 255 255 / 0.3);
   border-radius: 10px;
   cursor: pointer;
 }
 .google-btn:hover:not(:disabled) {
-  background: var(--bg);
+  background: rgb(255 255 255 / 0.18);
 }
 .google-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid #fff;
   outline-offset: 1px;
 }
 .google-btn:disabled {
@@ -3988,16 +4063,22 @@ tr.active td {
   margin: 12px 0 0;
   font-size: 11px;
   text-align: center;
+  color: rgb(255 255 255 / 0.6);
 }
 
-@media (max-width: 768px) {
-  .login-panel {
-    grid-template-columns: 1fr;
-  }
-  /* The brand panel is decoration; on a narrow screen the form gets the room. */
-  .login-illustration {
+/* 1000px, not the usual 768px: the hero (460px) + card (380px) + gap (40px)
+   need ~880px of content room, so anything narrower would otherwise wrap the
+   hero above the card instead of hiding it — an awkward halfway state. */
+@media (max-width: 1000px) {
+  /* The brand hero is decoration; on a narrow screen the card gets the room. */
+  .login-hero {
     display: none;
   }
+  .login-shell {
+    padding: 24px;
+  }
+}
+@media (max-width: 768px) {
   .cb-search-wrap {
     max-width: none;
   }

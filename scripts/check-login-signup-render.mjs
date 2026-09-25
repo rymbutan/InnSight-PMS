@@ -1,7 +1,6 @@
-// Rendered checks for the light, minimal Sign In / Sign Up screens: the brand
-// panel with the InnSight logo, the top-right "sign up"/"sign in" link, the
-// divider between the Google button and the manual fields, and basic
-// responsive/overflow behavior.
+// Rendered checks for the bold, full-bleed Sign In / Sign Up screens: the
+// green gradient shell, the brand hero on the left, the translucent "glass"
+// card on the right, and basic responsive/overflow behavior.
 //
 // A green build says nothing about the CSS cascade these pieces sit in —
 // this renders the real markup in headless Chrome and reads back computed
@@ -51,37 +50,40 @@ const PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7';
 
 const PANEL = `
-<div class="login-shell">
-  <div class="login-panel" id="panel">
-    <aside class="login-illustration" id="illustration">
-      <img class="login-illustration-logo" id="logo" src="${PIXEL}" alt="InnSight" />
-      <p class="login-illustration-caption">A modern PMS for front-desk, housekeeping, and night audit.</p>
-    </aside>
-    <div class="login-form-side">
-      <form class="login-card" id="card">
-        <p class="login-topline" id="topline">Don't have an account? <a href="#">Sign up</a></p>
-        <h1>Sign in</h1>
-        <p class="login-lede">Enter your username and password to access your account</p>
-        <div class="google-signin" id="google">
-          <button type="button" class="google-btn">Sign In with Google</button>
+<div class="login-shell" id="shell">
+  <div class="login-hero" id="hero">
+    <div class="login-hero-graphic"><img class="login-hero-graphic-img" src="${PIXEL}" alt="" /></div>
+    <div class="login-hero-bottom">
+      <div class="login-hero-brand">
+        <img class="login-hero-logo" src="${PIXEL}" alt="" />
+        <div>
+          <div class="login-hero-word">InnSight</div>
+          <div class="login-hero-tag">Hotel PMS</div>
         </div>
-        <div class="login-divider" id="divider">
-          <span class="login-divider-line" aria-hidden="true"></span>
-          <span>Or continue with username</span>
-          <span class="login-divider-line" aria-hidden="true"></span>
-        </div>
-        <label class="login-label" for="u">Username</label>
-        <input id="u" class="login-input" />
-        <label class="login-label" for="p">Password</label>
-        <div class="login-input-wrap">
-          <input id="p" class="login-input" type="password" />
-          <button type="button" class="login-reveal">o</button>
-        </div>
-        <p class="login-forgot" id="forgot"><a href="#">Forgot password?</a></p>
-        <button class="login-submit" id="submit">Sign In</button>
-      </form>
+      </div>
     </div>
   </div>
+  <form class="login-card" id="card">
+    <h1 id="heading">Sign in</h1>
+    <p class="login-lede">Enter your username and password to access your account</p>
+    <div class="google-signin" id="google"><button type="button" class="google-btn">Sign In with Google</button></div>
+    <div class="login-divider" id="divider">
+      <span class="login-divider-line" aria-hidden="true"></span>
+      <span>Or continue with username</span>
+      <span class="login-divider-line" aria-hidden="true"></span>
+    </div>
+    <label class="login-label" for="u">Username</label>
+    <input id="u" class="login-input" />
+    <label class="login-label" for="p">Password</label>
+    <div class="login-input-wrap">
+      <input id="p" class="login-input" type="password" />
+      <button type="button" class="login-reveal">o</button>
+    </div>
+    <p class="login-forgot" id="forgot"><a href="#">Forgot password?</a></p>
+    <button class="login-submit" id="submit">Sign In</button>
+    <p class="login-alt" id="alt">Don't have an account?</p>
+    <a href="#" class="login-secondary" id="secondary">Sign Up</a>
+  </form>
 </div>`;
 
 const PAGE = `<!doctype html>
@@ -97,44 +99,54 @@ const ok = (n, c, d) => out.push((c ? 'PASS' : 'FAIL') + ' :: [' + VW + 'px] ' +
 const box = (el) => el.getBoundingClientRect();
 const styleOf = (el) => getComputedStyle(el);
 
-const panel = document.getElementById('panel');
-const illustration = document.getElementById('illustration');
-const logo = document.getElementById('logo');
+const shell = document.getElementById('shell');
+const hero = document.getElementById('hero');
 const card = document.getElementById('card');
-const topline = document.getElementById('topline');
+const heading = document.getElementById('heading');
 const google = document.getElementById('google');
 const divider = document.getElementById('divider');
 const forgot = document.getElementById('forgot');
 const submit = document.getElementById('submit');
+const alt = document.getElementById('alt');
+const secondary = document.getElementById('secondary');
 
-const wide = VW >= 769; // matches the 768px breakpoint that hides .login-illustration
+// ── Shell is a bold, fixed-color gradient, not a neutral page background ──
+const bg = styleOf(shell).backgroundImage;
+ok('shell has a gradient background', bg.includes('gradient'), bg);
+
+// ── Card is a translucent "glass" panel, not an opaque page-colored one ──
+const cardBg = styleOf(card).backgroundColor;
+const alphaMatch = cardBg.match(/rgba?\\([^)]+,\\s*([0-9.]+)\\)/);
+const alpha = alphaMatch ? parseFloat(alphaMatch[1]) : 1;
+ok('card background is translucent (glass effect)', alpha < 1, cardBg);
+ok('card has a backdrop blur', styleOf(card).backdropFilter.includes('blur') || styleOf(card).webkitBackdropFilter?.includes('blur'),
+   styleOf(card).backdropFilter);
+
+// ── Primary CTA is a solid high-contrast fill, not another glass button ──
+ok('submit button has a solid, non-transparent fill', styleOf(submit).backgroundColor.startsWith('rgb(') && !styleOf(submit).backgroundColor.startsWith('rgba('),
+   styleOf(submit).backgroundColor);
+
+const wide = VW >= 1001; // matches the 1000px breakpoint that hides .login-hero
 
 if (wide) {
-  ok('illustration panel is visible', box(illustration).width > 0 && box(illustration).height > 0);
-  ok('logo renders inside the illustration panel', box(logo).width > 0 &&
-     box(logo).left >= box(illustration).left - 1 && box(logo).right <= box(illustration).right + 1);
-  ok('illustration sits left of the form (matches the reference layout)',
-     box(illustration).left < box(card).left, 'illustration left ' + Math.round(box(illustration).left) + ', card left ' + Math.round(box(card).left));
+  ok('hero is visible', box(hero).width > 0 && box(hero).height > 0);
+  ok('hero sits left of the card', box(hero).left < box(card).left,
+     'hero left ' + Math.round(box(hero).left) + ', card left ' + Math.round(box(card).left));
 } else {
-  ok('narrow: illustration panel is hidden, form gets the room', styleOf(illustration).display === 'none', styleOf(illustration).display);
+  ok('narrow: hero is hidden, card gets the room', styleOf(hero).display === 'none', styleOf(hero).display);
 }
 
-// ── Top-right "sign up" line sits above the heading ─────────────────────
-ok('topline renders above the card content', box(topline).top <= box(card).top + 4);
-ok('topline is right-aligned', styleOf(topline).textAlign === 'right', styleOf(topline).textAlign);
+// ── Card content order: heading -> google -> divider -> fields -> forgot -> submit -> alt/secondary ──
+ok('google sign-in sits above the divider', box(google).bottom <= box(divider).top + 1);
+ok('divider sits below the heading', box(divider).top >= box(heading).bottom);
+ok('forgot-password sits above the submit button', box(forgot).bottom <= box(submit).top + 1);
+ok('secondary sign-up affordance sits below the submit button', box(secondary).top >= box(submit).bottom,
+   'secondary top ' + Math.round(box(secondary).top) + ', submit bottom ' + Math.round(box(submit).bottom));
+ok('alt line sits directly above the secondary button', box(alt).bottom <= box(secondary).top + 4);
 
-// ── Google button, then the divider, then the manual fields ─────────────
-ok('Google sign-in sits above the divider', box(google).bottom <= box(divider).top + 1,
-   'google bottom ' + Math.round(box(google).bottom) + ', divider top ' + Math.round(box(divider).top));
-const lines = [...divider.querySelectorAll('.login-divider-line')];
-ok('divider has a rule on each side of its text', lines.length === 2 && lines.every((l) => box(l).width > 4));
-
-// ── Forgot-password link sits after the fields, before the submit button ─
-ok('forgot-password link sits above the submit button', box(forgot).bottom <= box(submit).top + 1);
-ok('forgot-password link is right-aligned', styleOf(forgot).textAlign === 'right', styleOf(forgot).textAlign);
-
-// ── No horizontal overflow anywhere in the panel ────────────────────────
-ok('panel does not overflow the viewport', box(panel).right <= VW + 1, Math.round(box(panel).right) + ' vs ' + VW);
+// ── No horizontal overflow anywhere in the shell ─────────────────────────
+ok('shell does not overflow the viewport horizontally', document.documentElement.scrollWidth <= VW + 1,
+   document.documentElement.scrollWidth + ' vs ' + VW);
 
 document.title = out.some((l) => l.startsWith('FAIL')) ? 'RESULT-FAIL' : 'RESULT-PASS';
 const pre = document.createElement('pre');
