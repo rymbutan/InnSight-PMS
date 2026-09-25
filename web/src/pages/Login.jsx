@@ -75,9 +75,6 @@ export default function Login() {
       <div className="login-panel">
         <aside className="login-illustration">
           <img className="login-illustration-logo" src="/brand/innsight-logo-icon.png" alt="InnSight" />
-          <p className="login-illustration-caption">
-            A modern PMS for front-desk, housekeeping, and night audit.
-          </p>
         </aside>
 
         <div className="login-form-side">
