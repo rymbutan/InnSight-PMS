@@ -3750,6 +3750,7 @@ tr.active td {
   background: var(--bg);
 }
 .login-panel {
+  position: relative;
   width: min(1180px, 100%);
   height: min(84vh, 780px);
   display: grid;
@@ -3759,6 +3760,28 @@ tr.active td {
   border-radius: 22px;
   box-shadow: 0 24px 60px rgb(15 23 42 / 0.14);
   overflow: hidden;
+}
+/* Purely decorative "window chrome" dots that echo a desktop app frame,
+   sitting above both columns in the top-left corner of the panel. */
+.login-chrome {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  z-index: 2;
+  display: flex;
+  gap: 7px;
+}
+.login-chrome span {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+.login-chrome span:nth-child(2) {
+  background: #febc2e;
+}
+.login-chrome span:nth-child(3) {
+  background: #28c840;
 }
 
 /* ── Left: photograph ───────────────────────────────────────────────────── */
@@ -3775,6 +3798,35 @@ tr.active td {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Monochrome treatment matches the editorial, black-and-white portrait
+     style of the reference composition. */
+  filter: grayscale(1) contrast(1.06);
+}
+/* Round "back" affordance floating over the top of the photograph. */
+.login-figure-back {
+  position: absolute;
+  top: 20px;
+  /* Top-right, not top-left — the brand mark (.login-eyebrow) already owns
+     the top-left corner of the photograph and the two would otherwise
+     overlap. */
+  right: 20px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 15px;
+  color: #fff;
+  background: rgb(255 255 255 / 0.16);
+  border: 1px solid rgb(255 255 255 / 0.4);
+  border-radius: 50%;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.login-figure-back:hover {
+  background: rgb(255 255 255 / 0.28);
 }
 /* Darkened top and bottom only, so the middle of the photograph stays bright
    while the mark and the strapline keep their contrast. */
@@ -3834,6 +3886,44 @@ tr.active td {
   line-height: 1.6;
   color: rgb(255 255 255 / 0.88);
 }
+/* Byline + decorative pagination dots beneath the strapline, mirroring the
+   testimonial-card footer in the reference layout. */
+.login-quote-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 22px;
+}
+.login-quote-byline strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+.login-quote-byline span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.72);
+}
+.login-quote-nav {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.login-quote-nav span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.85);
+  background: rgb(255 255 255 / 0.14);
+  border: 1px solid rgb(255 255 255 / 0.3);
+  border-radius: 50%;
+}
 
 /* ── Right: the form ────────────────────────────────────────────────────── */
 .login-form-side {
@@ -3846,6 +3936,16 @@ tr.active td {
 .login-card {
   width: 100%;
   max-width: 380px;
+}
+/* Small gradient orb above the wordmark, echoing the brand mark that sits
+   above the heading in the reference composition. */
+.login-badge {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, var(--accent-hover), var(--accent) 70%);
+  box-shadow: 0 6px 16px rgb(15 23 42 / 0.25);
 }
 .login-wordmark {
   display: block;

@@ -165,9 +165,23 @@ export default function RequestAccess() {
   return (
     <div className="login-shell">
       <div className="login-panel">
+        <div className="login-chrome" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+
         <aside className="login-figure">
           <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
           <div className="login-figure-scrim" aria-hidden="true" />
+          <button
+            type="button"
+            className="login-figure-back"
+            aria-label="Back to sign in"
+            onClick={() => navigate('/login')}
+          >
+            ←
+          </button>
           <div className="login-figure-body">
             <div className="login-eyebrow">
               <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
@@ -180,12 +194,23 @@ export default function RequestAccess() {
                 Perfectly Run
               </h2>
               <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
+              <div className="login-quote-foot">
+                <div className="login-quote-byline">
+                  <strong>Front Desk, Simplified</strong>
+                  <span>Built for hotel operations teams</span>
+                </div>
+                <div className="login-quote-nav" aria-hidden="true">
+                  <span>‹</span>
+                  <span>›</span>
+                </div>
+              </div>
             </div>
           </div>
         </aside>
 
         <div className="login-form-side">
           <form className="login-card" onSubmit={onSubmit}>
+            <div className="login-badge" aria-hidden="true" />
             <img
               className="login-wordmark"
               src="/brand/innsight-wordmark.png"
