@@ -3807,15 +3807,11 @@ tr.active td {
      style of the reference composition. */
   filter: grayscale(1) contrast(1.06);
 }
-/* Round "back" affordance floating over the top of the photograph. */
+/* Round "back" affordance, top-left of the photograph — in flow (not
+   absolutely positioned) alongside the brand mark so the two sit side by
+   side on one row instead of overlapping. */
 .login-figure-back {
-  position: absolute;
-  top: 20px;
-  /* Top-right, not top-left — the brand mark (.login-eyebrow) already owns
-     the top-left corner of the photograph and the two would otherwise
-     overlap. */
-  right: 20px;
-  z-index: 2;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3855,11 +3851,19 @@ tr.active td {
      "Every Stay, Perfectly Run" heading invisible on this panel. */
   color: #fff;
 }
-/* Brand mark in the upper-left corner, with the rule that trails off it. */
+/* Top row of the photograph: back button, then the brand mark with the rule
+   that trails off it. */
+.login-figure-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
 .login-eyebrow {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex: 1;
+  min-width: 0;
 }
 .login-eyebrow-mark {
   width: 42px;
@@ -3884,46 +3888,60 @@ tr.active td {
   letter-spacing: -0.02em;
   color: #fff;
 }
-.login-figure-quote p {
-  margin: 0;
-  max-width: 40ch;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: rgb(255 255 255 / 0.88);
-}
-/* Byline + decorative pagination dots beneath the strapline, mirroring the
-   testimonial-card footer in the reference layout. */
-.login-quote-foot {
+/* Row pairing the testimonial card with its pagination controls, sitting at
+   the very bottom of the photograph. */
+.login-testimonial-row {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   margin-top: 22px;
 }
-.login-quote-byline strong {
-  display: block;
+/* The testimonial itself: an inset, rounded card floating over the
+   photograph — not full-width, with its own background so the quote stays
+   legible over any part of the image. */
+.login-testimonial {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+  background: rgb(2 6 23 / 0.55);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+}
+.login-testimonial p {
+  margin: 0 0 10px;
   font-size: 13px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.92);
+}
+.login-testimonial-byline strong {
+  display: block;
+  font-size: 12.5px;
   font-weight: 700;
   color: #fff;
 }
-.login-quote-byline span {
+.login-testimonial-byline span {
   display: block;
   margin-top: 2px;
-  font-size: 12px;
-  color: rgb(255 255 255 / 0.72);
+  font-size: 11.5px;
+  color: rgb(255 255 255 / 0.7);
 }
-.login-quote-nav {
+/* Decorative pagination — stacked vertically beside the card, matching the
+   reference's up/down carousel controls (not the horizontal ‹ › pair a
+   left-to-right prev/next control would suggest). */
+.login-testimonial-nav {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
 }
-.login-quote-nav span {
+.login-testimonial-nav span {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  font-size: 13px;
+  font-size: 12px;
   color: rgb(255 255 255 / 0.85);
   background: rgb(255 255 255 / 0.14);
   border: 1px solid rgb(255 255 255 / 0.3);

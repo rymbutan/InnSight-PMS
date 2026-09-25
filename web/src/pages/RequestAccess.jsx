@@ -174,18 +174,20 @@ export default function RequestAccess() {
         <aside className="login-figure">
           <img className="login-figure-img" src="/brand/hotel.jpg" alt="" aria-hidden="true" />
           <div className="login-figure-scrim" aria-hidden="true" />
-          <button
-            type="button"
-            className="login-figure-back"
-            aria-label="Back to sign in"
-            onClick={() => navigate('/login')}
-          >
-            ←
-          </button>
           <div className="login-figure-body">
-            <div className="login-eyebrow">
-              <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
-              <span className="login-eyebrow-rule" aria-hidden="true" />
+            <div className="login-figure-top">
+              <button
+                type="button"
+                className="login-figure-back"
+                aria-label="Back to sign in"
+                onClick={() => navigate('/login')}
+              >
+                ←
+              </button>
+              <div className="login-eyebrow">
+                <img src="/brand/innsight-mark.png" alt="InnSight" className="login-eyebrow-mark" />
+                <span className="login-eyebrow-rule" aria-hidden="true" />
+              </div>
             </div>
             <div className="login-figure-quote">
               <h2>
@@ -193,15 +195,17 @@ export default function RequestAccess() {
                 <br />
                 Perfectly Run
               </h2>
-              <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
-              <div className="login-quote-foot">
-                <div className="login-quote-byline">
-                  <strong>Front Desk, Simplified</strong>
-                  <span>Built for hotel operations teams</span>
+              <div className="login-testimonial-row">
+                <div className="login-testimonial">
+                  <p>A modern PMS for front-desk, housekeeping, and night audit — built as an SLSU capstone.</p>
+                  <div className="login-testimonial-byline">
+                    <strong>Front Desk, Simplified</strong>
+                    <span>Built for hotel operations teams</span>
+                  </div>
                 </div>
-                <div className="login-quote-nav" aria-hidden="true">
-                  <span>‹</span>
-                  <span>›</span>
+                <div className="login-testimonial-nav" aria-hidden="true">
+                  <span>↑</span>
+                  <span>↓</span>
                 </div>
               </div>
             </div>

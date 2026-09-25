@@ -60,21 +60,25 @@ const PANEL = `
     <aside class="login-figure" id="figure">
       <img class="login-figure-img" id="figureImg" src="${PIXEL}" alt="" aria-hidden="true" />
       <div class="login-figure-scrim" aria-hidden="true"></div>
-      <button type="button" class="login-figure-back" id="backBtn" aria-label="Go back">&larr;</button>
       <div class="login-figure-body">
-        <div class="login-eyebrow">
-          <span class="login-eyebrow-rule" aria-hidden="true"></span>
+        <div class="login-figure-top" id="figureTop">
+          <button type="button" class="login-figure-back" id="backBtn" aria-label="Go back">&larr;</button>
+          <div class="login-eyebrow">
+            <span class="login-eyebrow-rule" aria-hidden="true"></span>
+          </div>
         </div>
         <div class="login-figure-quote" id="quote">
           <h2>Every Stay,<br />Perfectly Run</h2>
-          <p>A modern PMS for front-desk, housekeeping, and night audit.</p>
-          <div class="login-quote-foot" id="quoteFoot">
-            <div class="login-quote-byline">
-              <strong>Front Desk, Simplified</strong>
-              <span>Built for hotel operations teams</span>
+          <div class="login-testimonial-row" id="testimonialRow">
+            <div class="login-testimonial" id="testimonial">
+              <p>A modern PMS for front-desk, housekeeping, and night audit.</p>
+              <div class="login-testimonial-byline">
+                <strong>Front Desk, Simplified</strong>
+                <span>Built for hotel operations teams</span>
+              </div>
             </div>
-            <div class="login-quote-nav" id="quoteNav" aria-hidden="true">
-              <span>&lsaquo;</span><span>&rsaquo;</span>
+            <div class="login-testimonial-nav" id="testimonialNav" aria-hidden="true">
+              <span>&uarr;</span><span>&darr;</span>
             </div>
           </div>
         </div>
@@ -125,18 +129,30 @@ if (wide) {
   ok('photograph is visible', box(img).width > 0 && box(img).height > 0);
   ok('photograph has a grayscale filter applied', styleOf(img).filter.includes('grayscale'), styleOf(img).filter);
 
+  // ── Back button sits top-LEFT of the figure, beside the brand mark (not
+  // overlapping it) — matching the reference's back-arrow placement. ──────
   const backBtn = document.getElementById('backBtn');
+  const figureTop = document.getElementById('figureTop');
   ok('back button is visible over the photograph', box(backBtn).width > 0 && box(backBtn).height > 0);
   ok('back button sits inside the figure bounds', box(backBtn).left >= box(figure).left - 1 && box(backBtn).top >= box(figure).top - 1);
+  ok('back button is the leftmost element in the top row (top-left placement)',
+     box(backBtn).left <= box(figureTop).left + 1, 'back left ' + Math.round(box(backBtn).left) + ', row left ' + Math.round(box(figureTop).left));
 
-  // ── Quote footer: byline + decorative pagination stay on one row, inside the figure ──
-  const quoteFoot = document.getElementById('quoteFoot');
-  const quoteNav = document.getElementById('quoteNav');
-  ok('quote footer renders inside the figure', box(quoteFoot).bottom <= box(figure).bottom + 1,
-     Math.round(box(quoteFoot).bottom) + ' vs figure bottom ' + Math.round(box(figure).bottom));
-  ok('pagination nav sits to the right of the byline, not wrapped below it',
-     box(quoteNav).top < box(quoteFoot).bottom - 4 && box(quoteNav).left > box(quoteFoot).left,
-     'nav top ' + Math.round(box(quoteNav).top) + ', foot bottom ' + Math.round(box(quoteFoot).bottom));
+  // ── Testimonial: an inset rounded card, with pagination stacked
+  // VERTICALLY beside it (not a horizontal ‹ › pair) — matching the
+  // reference's up/down carousel controls. ───────────────────────────────
+  const testimonial = document.getElementById('testimonial');
+  const nav = document.getElementById('testimonialNav');
+  const navSpans = [...nav.querySelectorAll('span')];
+  ok('testimonial row renders inside the figure', box(document.getElementById('testimonialRow')).bottom <= box(figure).bottom + 1);
+  ok('testimonial card is inset from the figure edges (not full-bleed)',
+     box(testimonial).left > box(figure).left + 4 && box(testimonial).right < box(figure).right - 4,
+     'card ' + Math.round(box(testimonial).left) + '-' + Math.round(box(testimonial).right) + ' vs figure ' + Math.round(box(figure).left) + '-' + Math.round(box(figure).right));
+  ok('pagination sits beside the testimonial card, not below it',
+     box(nav).left > box(testimonial).left, 'nav left ' + Math.round(box(nav).left) + ', card left ' + Math.round(box(testimonial).left));
+  ok('pagination controls stack vertically (up above down)',
+     navSpans.length === 2 && box(navSpans[0]).bottom <= box(navSpans[1]).top + 1,
+     navSpans.map((s) => Math.round(box(s).top)).join(', '));
 } else {
   ok('narrow: figure is hidden, form gets the room', styleOf(figure).display === 'none', styleOf(figure).display);
   ok('narrow: chrome dots remain visible above the form', box(chromeDots).width > 0);
