@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api';
 import AuthHero from '../components/AuthHero';
+import AuthBrandMark from '../components/AuthBrandMark';
 
 // Survives a refresh or a closed tab: approval can take anywhere from
 // minutes to days, and losing the waiting screen on reload would dump
@@ -166,197 +167,199 @@ export default function RequestAccess() {
   return (
     <div className="login-shell">
       <div className="login-panel">
-        <AuthHero />
+        <div className="login-form-side">
+          <form className="login-card" onSubmit={onSubmit}>
+            <AuthBrandMark />
 
-        <form className="login-card" onSubmit={onSubmit}>
-          {waitId ? (
-            <>
-              {waitStatus === 'PENDING' && (
-                <>
-                  <h1>Waiting for Approval</h1>
-                  <p className="login-lede">
-                    {state.message || 'An administrator will review it and set up your account.'}
-                  </p>
-                  <p className="login-lede">
-                    Leave this open or come back any time — it checks quietly and takes you to Sign In the
-                    moment it's approved.
-                  </p>
-                </>
-              )}
-              {waitStatus === 'APPROVED' && (
-                <>
-                  <h1>Request Approved</h1>
-                  <p className="login-lede">
-                    {waitUsername
-                      ? `You're all set — sign in as ${waitUsername}.`
-                      : "You're all set — you can sign in now."}
-                  </p>
-                  <p className="login-lede">Taking you to Sign In…</p>
-                  <Link className="login-submit login-submit-link" to="/login">
-                    Go to Sign In now
-                  </Link>
-                </>
-              )}
-              {waitStatus === 'REJECTED' && (
-                <>
-                  <h1>Request Declined</h1>
-                  <p className="login-lede">
-                    An administrator declined this request. If you think that's a mistake, reach out to them
-                    directly — or submit a new request below.
-                  </p>
-                  <button type="button" className="login-submit" onClick={startOver}>
-                    Submit a new request
-                  </button>
-                </>
-              )}
-            </>
-          ) : step === 1 ? (
-            <>
-              <h1>Request Access</h1>
-              <p className="login-lede">
-                Step 1 of 2 — tell us who you are. Next you'll choose the username and password you'll sign in
-                with, once an administrator approves the request.
-              </p>
+            {waitId ? (
+              <>
+                {waitStatus === 'PENDING' && (
+                  <>
+                    <h1>Waiting for Approval</h1>
+                    <p className="login-lede">
+                      {state.message || 'An administrator will review it and set up your account.'}
+                    </p>
+                    <p className="login-lede">
+                      Leave this open or come back any time — it checks quietly and takes you to Sign In the
+                      moment it's approved.
+                    </p>
+                  </>
+                )}
+                {waitStatus === 'APPROVED' && (
+                  <>
+                    <h1>Request Approved</h1>
+                    <p className="login-lede">
+                      {waitUsername
+                        ? `You're all set — sign in as ${waitUsername}.`
+                        : "You're all set — you can sign in now."}
+                    </p>
+                    <p className="login-lede">Taking you to Sign In…</p>
+                    <Link className="login-submit login-submit-link" to="/login">
+                      Go to Sign In now
+                    </Link>
+                  </>
+                )}
+                {waitStatus === 'REJECTED' && (
+                  <>
+                    <h1>Request Declined</h1>
+                    <p className="login-lede">
+                      An administrator declined this request. If you think that's a mistake, reach out to them
+                      directly — or submit a new request below.
+                    </p>
+                    <button type="button" className="login-submit" onClick={startOver}>
+                      Submit a new request
+                    </button>
+                  </>
+                )}
+              </>
+            ) : step === 1 ? (
+              <>
+                <h1>Request Access</h1>
+                <p className="login-topline">
+                  Already have an account? <Link to="/login">Sign In</Link>
+                </p>
+                <p className="login-lede">
+                  Step 1 of 2 — tell us who you are. Next you'll choose the username and password you'll sign
+                  in with, once an administrator approves the request.
+                </p>
 
-              <label className="login-label" htmlFor="ra-name">
-                Full name
-              </label>
-              <input
-                id="ra-name"
-                className="login-input"
-                placeholder="Enter your full name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                autoComplete="name"
-                required
-                autoFocus
-              />
-
-              <label className="login-label" htmlFor="ra-email">
-                University email
-              </label>
-              <input
-                id="ra-email"
-                className="login-input"
-                type="email"
-                placeholder={`you@${domain}`}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                required
-              />
-
-              <button className="login-submit">Next</button>
-
-              {state.error && (
-                <div className="error" role="alert">
-                  {state.error}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <h1>Choose Your Credentials</h1>
-              <p className="login-lede">
-                Step 2 of 2 — this is what you'll sign in with. An administrator still has to approve the
-                request before either one works.
-              </p>
-
-              <label className="login-label" htmlFor="ra-username">
-                Username
-              </label>
-              <input
-                id="ra-username"
-                className="login-input"
-                placeholder="Pick a username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                minLength={3}
-                maxLength={32}
-                pattern="[a-zA-Z0-9._-]{3,32}"
-                title="3–32 characters: letters, numbers, dot, underscore or hyphen only."
-                required
-                autoFocus
-              />
-
-              <label className="login-label" htmlFor="ra-password">
-                Password
-              </label>
-              <div className="login-input-wrap">
+                <label className="login-label" htmlFor="ra-name">
+                  Full name
+                </label>
                 <input
-                  id="ra-password"
+                  id="ra-name"
+                  className="login-input"
+                  placeholder="Enter your full name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  autoComplete="name"
+                  required
+                  autoFocus
+                />
+
+                <label className="login-label" htmlFor="ra-email">
+                  University email
+                </label>
+                <input
+                  id="ra-email"
+                  className="login-input"
+                  type="email"
+                  placeholder={`you@${domain}`}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+
+                <button className="login-submit">Next</button>
+
+                {state.error && (
+                  <div className="error" role="alert">
+                    {state.error}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <h1>Choose Your Credentials</h1>
+                <p className="login-lede">
+                  Step 2 of 2 — this is what you'll sign in with. An administrator still has to approve the
+                  request before either one works.
+                </p>
+
+                <label className="login-label" htmlFor="ra-username">
+                  Username
+                </label>
+                <input
+                  id="ra-username"
+                  className="login-input"
+                  placeholder="Pick a username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  minLength={3}
+                  maxLength={32}
+                  pattern="[a-zA-Z0-9._-]{3,32}"
+                  title="3–32 characters: letters, numbers, dot, underscore or hyphen only."
+                  required
+                  autoFocus
+                />
+
+                <label className="login-label" htmlFor="ra-password">
+                  Password
+                </label>
+                <div className="login-input-wrap">
+                  <input
+                    id="ra-password"
+                    className="login-input"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="At least 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="login-reveal"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? '🙈' : '👁'}
+                  </button>
+                </div>
+
+                <label className="login-label" htmlFor="ra-confirm-password">
+                  Confirm password
+                </label>
+                <input
+                  id="ra-confirm-password"
                   className="login-input"
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="At least 8 characters"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Type it again"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
                   autoComplete="new-password"
                   minLength={8}
                   required
                 />
-                <button
-                  type="button"
-                  className="login-reveal"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  aria-pressed={showPassword}
-                  title={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? '🙈' : '👁'}
-                </button>
-              </div>
 
-              <label className="login-label" htmlFor="ra-confirm-password">
-                Confirm password
-              </label>
-              <input
-                id="ra-confirm-password"
-                className="login-input"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Type it again"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-                required
-              />
+                <label className="login-label" htmlFor="ra-note">
+                  Why do you need access? <span className="muted">(optional)</span>
+                </label>
+                <textarea
+                  id="ra-note"
+                  className="login-input login-textarea"
+                  placeholder="e.g. BSHM 4-A, enrolled in the front-office practicum"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                />
 
-              <label className="login-label" htmlFor="ra-note">
-                Why do you need access? <span className="muted">(optional)</span>
-              </label>
-              <textarea
-                id="ra-note"
-                className="login-input login-textarea"
-                placeholder="e.g. BSHM 4-A, enrolled in the front-office practicum"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={3}
-                maxLength={500}
-              />
-
-              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-                <button type="button" className="secondary" onClick={goBack} disabled={state.sending}>
-                  Back
-                </button>
-                <button className="login-submit" style={{ flex: 1, marginTop: 0 }} disabled={state.sending}>
-                  {state.sending ? 'Sending…' : 'Send Request'}
-                </button>
-              </div>
-
-              {state.error && (
-                <div className="error" role="alert">
-                  {state.error}
+                <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                  <button type="button" className="secondary" onClick={goBack} disabled={state.sending}>
+                    Back
+                  </button>
+                  <button className="login-submit" style={{ flex: 1, marginTop: 0 }} disabled={state.sending}>
+                    {state.sending ? 'Sending…' : 'Send Request'}
+                  </button>
                 </div>
-              )}
-            </>
-          )}
 
-          <p className="login-alt">Already have an account?</p>
-          <Link to="/login" className="login-secondary">
-            Sign In
-          </Link>
-        </form>
+                {state.error && (
+                  <div className="error" role="alert">
+                    {state.error}
+                  </div>
+                )}
+              </>
+            )}
+          </form>
+        </div>
+
+        <AuthHero />
       </div>
     </div>
   );
