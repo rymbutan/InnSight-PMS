@@ -1,7 +1,7 @@
 // Rendered checks for the two-tone Sign In / Sign Up screens: a plain white
-// form on the left, a green marketing panel (feature-highlight card, stat
-// pill, carousel dots) on the right, contained in a rounded panel on the
-// app's own page background.
+// form on the left, a green marketing panel (photo background, a translucent
+// feature-highlight card, carousel dots) on the right, contained in a
+// rounded panel on the app's own page background.
 //
 // A green build says nothing about the CSS cascade these pieces sit in —
 // this renders the real markup in headless Chrome and reads back computed
@@ -94,9 +94,6 @@ const PANEL = `
           <a href="/learn-more#front-desk" class="login-hero-cta" id="cta">Learn more</a>
         </div>
       </div>
-      <div class="login-hero-stat" id="stat">
-        <div><strong>87%</strong><span>Occupancy today</span></div>
-      </div>
       <div class="login-hero-features" id="features">
         <h3>Introducing new features</h3>
         <p>Real-time room status, automated night audits, and instant guest messaging.</p>
@@ -137,7 +134,6 @@ const divider = document.getElementById('divider');
 const google = document.getElementById('google');
 const hero = document.getElementById('hero');
 const highlight = document.getElementById('highlight');
-const stat = document.getElementById('stat');
 const features = document.getElementById('features');
 const dots = document.getElementById('dots');
 const support = document.getElementById('support');
@@ -172,11 +168,12 @@ if (wide) {
   ok('hero has a legibility scrim over the photo', heroScrim.backgroundImage.includes('gradient'),
      heroScrim.backgroundImage);
 
-  // ── Feature-highlight card + overlapping stat pill, matching the
-  // reference's layered composition. ────────────────────────────────────
-  ok('stat pill overlaps the bottom of the highlight card',
-     box(stat).top < box(highlight).bottom && box(stat).bottom > box(highlight).bottom,
-     'stat ' + Math.round(box(stat).top) + '-' + Math.round(box(stat).bottom) + ', highlight bottom ' + Math.round(box(highlight).bottom));
+  // ── Highlight card is translucent (frosted glass over the photo, not a
+  // solid fill that blocks it), and sits above the features block. ────────
+  const highlightBg = styleOf(highlight).backgroundColor;
+  const highlightAlphaMatch = highlightBg.match(/rgba?\\([^)]+,\\s*([0-9.]+)\\)/);
+  const highlightAlpha = highlightAlphaMatch ? parseFloat(highlightAlphaMatch[1]) : 1;
+  ok('highlight card is translucent, not solid', highlightAlpha < 1, highlightBg);
   ok('features block sits below the highlight card', box(features).top >= box(highlight).bottom);
   ok('carousel dots sit below the features text', box(dots).top >= box(features).bottom);
 
