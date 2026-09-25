@@ -12,6 +12,8 @@ import { SparkLine, BarChart } from '../components/Chart';
 import { HEAT_LEGEND, heatFill, heatInk, heatTitle, occupancyOf, outlookOccupancy } from '../lib/outlookHeat';
 import Icon from '../components/Icon';
 import HousekeepingDashboard from './HousekeepingDashboard';
+import AuditorDashboard from './AuditorDashboard';
+import ManagerDashboard from './ManagerDashboard';
 
 const RES_TABS = ['Arrivals', 'Departures', 'Stayovers', 'In-House Guests', 'Pending Payment'];
 // "Overbookings" used to sit here and could only ever have been empty: the
@@ -45,6 +47,23 @@ export default function Dashboard() {
   // the one they came for. The housekeeping view stays one click away on the map.
   if (hasRole('HOUSEKEEPING_MAINTENANCE') && !hasRole('ADMIN', 'MANAGER', 'FRONT_DESK', 'AUDITOR')) {
     return <HousekeepingDashboard />;
+  }
+  // Same carve-out, for the same reason: a pure auditor account cannot act on
+  // arrivals/departures/booking (nothing on that view is theirs to work), so
+  // it gets a dashboard built around what they DO do — certifying the day's
+  // figures and clearing folios for check-out — instead of a desk screen with
+  // every action greyed out. ADMIN/MANAGER/FRONT_DESK keep the full
+  // front-office view even when also AUDITOR, same as housekeeping above.
+  if (hasRole('AUDITOR') && !hasRole('ADMIN', 'MANAGER', 'FRONT_DESK')) {
+    return <AuditorDashboard />;
+  }
+  // ADMIN always gets this plain, unmodified front-office view — regardless of
+  // what else the account holds — so an admin's dashboard never depends on
+  // which other role happens to be on the same account. A MANAGER account
+  // that is NOT also ADMIN gets ManagerDashboard.jsx instead, the
+  // trend-charts/channel-mix build built specifically for a manager's day.
+  if (hasRole('MANAGER') && !hasRole('ADMIN')) {
+    return <ManagerDashboard />;
   }
   return <FrontOfficeDashboard />;
 }

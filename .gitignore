@@ -5,6 +5,10 @@ dist/
 *.local
 .DS_Store
 
+# Local Postgres dumps (scripts/db-*.sh) - contain guest PII and password
+# hashes, must never reach the repo.
+backups/
+
 # Quarantined build output pending deletion — see .attic/README.md.
 .attic/
 
