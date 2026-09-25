@@ -91,7 +91,7 @@ const PANEL = `
         <div class="login-hero-highlight-text">
           <h2>Every Stay, Perfectly Run</h2>
           <p>Check guests in, track housekeeping, and close the night audit.</p>
-          <button type="button" class="login-hero-cta" id="cta">Learn more</button>
+          <a href="/learn-more#front-desk" class="login-hero-cta" id="cta">Learn more</a>
         </div>
         <img class="login-hero-highlight-art" src="${PIXEL}" alt="" />
       </div>
@@ -183,12 +183,12 @@ if (wide) {
   ok('dot and arrow buttons show a pointer cursor',
      [...dotButtons, ...arrowButtons].every((b) => styleOf(b).cursor === 'pointer'));
 
-  // ── "Support" and "Learn more" are real, clickable buttons too — not
+  // ── "Support" and "Learn more" are real, clickable controls too — not
   // decorative chrome. ────────────────────────────────────────────────────
   ok('support badge is a real <button>, not a decorative span', support.tagName === 'BUTTON', support.tagName);
   ok('support badge shows a pointer cursor', styleOf(support).cursor === 'pointer', styleOf(support).cursor);
-  ok('"Learn more" is a real <button>, not a decorative span', cta.tagName === 'BUTTON', cta.tagName);
-  ok('"Learn more" shows a pointer cursor', styleOf(cta).cursor === 'pointer', styleOf(cta).cursor);
+  ok('"Learn more" is a real link to /learn-more, not a decorative span',
+     cta.tagName === 'A' && cta.getAttribute('href')?.startsWith('/learn-more'), cta.tagName + ' href=' + cta.getAttribute('href'));
 
   // ── The support popover's stacking context (.login-hero-topbar) must
   // out-rank the highlight card's, or the card (later in the DOM, same
