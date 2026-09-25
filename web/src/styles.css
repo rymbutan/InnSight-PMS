@@ -4060,9 +4060,22 @@ tr.active td {
   border-radius: 20px;
   box-shadow: 0 24px 45px rgb(0 0 0 / 0.25);
 }
+/* Re-keyed on every slide change, so this replays on each advance instead of
+   only once on mount — the actual "slideshow" motion. */
+@keyframes login-hero-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 .login-hero-highlight-text {
   flex: 1;
   min-width: 0;
+  animation: login-hero-fade-in 0.4s ease;
 }
 .login-hero-highlight-text h2 {
   margin: 0 0 8px;
@@ -4106,6 +4119,7 @@ tr.active td {
   color: var(--accent);
   border-radius: 14px;
   box-shadow: 0 14px 26px rgb(0 0 0 / 0.22);
+  animation: login-hero-fade-in 0.4s ease;
 }
 .login-hero-stat div {
   line-height: 1.2;
@@ -4131,6 +4145,7 @@ tr.active td {
   font-weight: 700;
 }
 .login-hero-features p {
+  animation: login-hero-fade-in 0.4s ease;
   margin: 0;
   max-width: 42ch;
   font-size: 13px;
@@ -4147,26 +4162,56 @@ tr.active td {
   justify-content: center;
   gap: 8px;
 }
+/* Real controls now (a functioning carousel, not decorative dots) — reset
+   the button chrome browsers would otherwise add. */
 .login-hero-arrow {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
+  padding: 0;
   font-size: 12px;
   color: #fff;
   background: rgb(255 255 255 / 0.12);
+  border: 0;
   border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.login-hero-arrow:hover {
+  background: rgb(255 255 255 / 0.24);
+}
+.login-hero-arrow:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 .login-hero-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  padding: 0;
   background: rgb(255 255 255 / 0.35);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    width 0.2s ease,
+    border-radius 0.2s ease,
+    background-color 0.2s ease;
+}
+.login-hero-dot:hover {
+  background: rgb(255 255 255 / 0.6);
+}
+.login-hero-dot:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 .login-hero-dot--active {
   width: 18px;
   border-radius: 4px;
+  background: #fff;
+}
+.login-hero-dot--active:hover {
   background: #fff;
 }
 

@@ -103,11 +103,11 @@ const PANEL = `
         <p>Real-time room status, automated night audits, and instant guest messaging.</p>
       </div>
       <div class="login-hero-dots" id="dots">
-        <span class="login-hero-arrow">&lsaquo;</span>
-        <span class="login-hero-dot"></span>
-        <span class="login-hero-dot login-hero-dot--active"></span>
-        <span class="login-hero-dot"></span>
-        <span class="login-hero-arrow">&rsaquo;</span>
+        <button type="button" class="login-hero-arrow">&lsaquo;</button>
+        <button type="button" class="login-hero-dot"></button>
+        <button type="button" class="login-hero-dot login-hero-dot--active"></button>
+        <button type="button" class="login-hero-dot"></button>
+        <button type="button" class="login-hero-arrow">&rsaquo;</button>
       </div>
     </div>
   </div>
@@ -170,6 +170,17 @@ if (wide) {
      'stat ' + Math.round(box(stat).top) + '-' + Math.round(box(stat).bottom) + ', highlight bottom ' + Math.round(box(highlight).bottom));
   ok('features block sits below the highlight card', box(features).top >= box(highlight).bottom);
   ok('carousel dots sit below the features text', box(dots).top >= box(features).bottom);
+
+  // ── The carousel is real controls, not decorative markers: buttons, one
+  // marked as the current slide, all cursor:pointer. ─────────────────────
+  const dotButtons = [...dots.querySelectorAll('button.login-hero-dot')];
+  const arrowButtons = [...dots.querySelectorAll('button.login-hero-arrow')];
+  ok('carousel renders real <button> controls for dots and arrows',
+     dotButtons.length >= 2 && arrowButtons.length === 2,
+     dotButtons.length + ' dots, ' + arrowButtons.length + ' arrows');
+  ok('dot and arrow buttons show a pointer cursor',
+     [...dotButtons, ...arrowButtons].every((b) => styleOf(b).cursor === 'pointer'));
+
 } else {
   ok('narrow: hero is hidden, form gets the room', styleOf(hero).display === 'none', styleOf(hero).display);
 }
