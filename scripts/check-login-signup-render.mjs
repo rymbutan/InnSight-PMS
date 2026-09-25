@@ -60,6 +60,8 @@ const PANEL = `
     <aside class="login-figure" id="figure">
       <img class="login-figure-img" id="figureImg" src="${PIXEL}" alt="" aria-hidden="true" />
       <div class="login-figure-scrim" aria-hidden="true"></div>
+      <div class="login-figure-notch login-figure-notch--tl" id="notchTL" aria-hidden="true"></div>
+      <div class="login-figure-notch login-figure-notch--br" id="notchBR" aria-hidden="true"></div>
       <div class="login-figure-body">
         <div class="login-figure-top" id="figureTop">
           <button type="button" class="login-figure-back" id="backBtn" aria-label="Go back">&larr;</button>
@@ -69,20 +71,16 @@ const PANEL = `
         </div>
         <div class="login-figure-quote" id="quote">
           <h2>Every Stay,<br />Perfectly Run</h2>
-          <div class="login-testimonial-row" id="testimonialRow">
-            <div class="login-testimonial" id="testimonial">
-              <p>A modern PMS for front-desk, housekeeping, and night audit.</p>
-              <div class="login-testimonial-byline">
-                <strong>Front Desk, Simplified</strong>
-                <span>Built for hotel operations teams</span>
-              </div>
-            </div>
-            <div class="login-testimonial-nav" id="testimonialNav" aria-hidden="true">
-              <span>&uarr;</span><span>&darr;</span>
+          <div class="login-testimonial" id="testimonial">
+            <p>A modern PMS for front-desk, housekeeping, and night audit.</p>
+            <div class="login-testimonial-byline">
+              <strong>Front Desk, Simplified</strong>
+              <span>Built for hotel operations teams</span>
             </div>
           </div>
         </div>
       </div>
+      <div class="login-figure-forward" id="forwardBtn" aria-hidden="true">&rarr;</div>
     </aside>
     <div class="login-form-side">
       <form class="login-card">
@@ -129,44 +127,50 @@ if (wide) {
   ok('photograph is visible', box(img).width > 0 && box(img).height > 0);
   ok('photograph has a grayscale filter applied', styleOf(img).filter.includes('grayscale'), styleOf(img).filter);
 
-  // ── Container shape: one exaggerated "swoop" corner (bottom-right),
-  // not a plain uniform rounded rectangle. ────────────────────────────────
-  // border-radius serializes as 1-4 values using the same collapsing rule as
-  // other 4-value shorthands (margin, etc.): missing trailing values mirror
-  // back through the list (2nd, then 1st).
+  // ── Container shape: a plain, modest rounded rectangle (traced from the
+  // reference — NOT an exaggerated swoop or organic blob). ────────────────
   const r = styleOf(figure).borderRadius.split(' ').map(parseFloat);
-  const tl = r[0];
-  const tr = r.length > 1 ? r[1] : r[0];
-  const br = r.length > 2 ? r[2] : r[0];
-  const bl = r.length > 3 ? r[3] : tr;
-  ok('figure has one exaggerated corner radius, not a uniform rounded rect',
-     br > tl * 2 && br > tr * 2 && br > bl * 2,
-     'tl ' + tl + ', tr ' + tr + ', br ' + br + ', bl ' + bl);
+  const maxRadius = Math.max(...r);
+  const minRadius = Math.min(...r);
+  ok('figure has a uniform, modest corner radius (no exaggerated swoop)',
+     maxRadius <= 40 && maxRadius === minRadius, styleOf(figure).borderRadius);
 
-  // ── Back button sits top-LEFT of the figure, beside the brand mark (not
-  // overlapping it) — matching the reference's back-arrow placement. ──────
+  // ── Back/forward buttons sit RECESSED into card-colored notches cut from
+  // the two opposite corners (top-left, bottom-right) — the actual shape
+  // traced from the reference, rather than floating on the bare photo. ────
   const backBtn = document.getElementById('backBtn');
-  const figureTop = document.getElementById('figureTop');
+  const forwardBtn = document.getElementById('forwardBtn');
+  const notchTL = document.getElementById('notchTL');
+  const notchBR = document.getElementById('notchBR');
+
   ok('back button is visible over the photograph', box(backBtn).width > 0 && box(backBtn).height > 0);
   ok('back button sits inside the figure bounds', box(backBtn).left >= box(figure).left - 1 && box(backBtn).top >= box(figure).top - 1);
-  ok('back button is the leftmost element in the top row (top-left placement)',
-     box(backBtn).left <= box(figureTop).left + 1, 'back left ' + Math.round(box(backBtn).left) + ', row left ' + Math.round(box(figureTop).left));
+  ok('top-left notch is anchored flush to the figure top-left corner',
+     Math.abs(box(notchTL).left - box(figure).left) <= 1 && Math.abs(box(notchTL).top - box(figure).top) <= 1);
+  ok('back button is fully contained within the top-left notch',
+     box(backBtn).left >= box(notchTL).left && box(backBtn).right <= box(notchTL).right &&
+     box(backBtn).top >= box(notchTL).top && box(backBtn).bottom <= box(notchTL).bottom,
+     'btn ' + JSON.stringify({l:Math.round(box(backBtn).left),t:Math.round(box(backBtn).top),r:Math.round(box(backBtn).right),b:Math.round(box(backBtn).bottom)}) +
+     ' notch ' + JSON.stringify({l:Math.round(box(notchTL).left),t:Math.round(box(notchTL).top),r:Math.round(box(notchTL).right),b:Math.round(box(notchTL).bottom)}));
 
-  // ── Testimonial: an inset rounded card, with pagination stacked
-  // VERTICALLY beside it (not a horizontal ‹ › pair) — matching the
-  // reference's up/down carousel controls. ───────────────────────────────
+  ok('forward affordance is visible over the photograph', box(forwardBtn).width > 0 && box(forwardBtn).height > 0);
+  ok('bottom-right notch is anchored flush to the figure bottom-right corner',
+     Math.abs(box(notchBR).right - box(figure).right) <= 1 && Math.abs(box(notchBR).bottom - box(figure).bottom) <= 1);
+  ok('forward affordance is fully contained within the bottom-right notch',
+     box(forwardBtn).left >= box(notchBR).left && box(forwardBtn).right <= box(notchBR).right &&
+     box(forwardBtn).top >= box(notchBR).top && box(forwardBtn).bottom <= box(notchBR).bottom,
+     'btn ' + JSON.stringify({l:Math.round(box(forwardBtn).left),t:Math.round(box(forwardBtn).top),r:Math.round(box(forwardBtn).right),b:Math.round(box(forwardBtn).bottom)}) +
+     ' notch ' + JSON.stringify({l:Math.round(box(notchBR).left),t:Math.round(box(notchBR).top),r:Math.round(box(notchBR).right),b:Math.round(box(notchBR).bottom)}));
+
+  // ── Testimonial: an inset rounded card, clear of the forward notch. ─────
   const testimonial = document.getElementById('testimonial');
-  const nav = document.getElementById('testimonialNav');
-  const navSpans = [...nav.querySelectorAll('span')];
-  ok('testimonial row renders inside the figure', box(document.getElementById('testimonialRow')).bottom <= box(figure).bottom + 1);
+  ok('testimonial card renders inside the figure', box(testimonial).bottom <= box(figure).bottom + 1);
   ok('testimonial card is inset from the figure edges (not full-bleed)',
      box(testimonial).left > box(figure).left + 4 && box(testimonial).right < box(figure).right - 4,
      'card ' + Math.round(box(testimonial).left) + '-' + Math.round(box(testimonial).right) + ' vs figure ' + Math.round(box(figure).left) + '-' + Math.round(box(figure).right));
-  ok('pagination sits beside the testimonial card, not below it',
-     box(nav).left > box(testimonial).left, 'nav left ' + Math.round(box(nav).left) + ', card left ' + Math.round(box(testimonial).left));
-  ok('pagination controls stack vertically (up above down)',
-     navSpans.length === 2 && box(navSpans[0]).bottom <= box(navSpans[1]).top + 1,
-     navSpans.map((s) => Math.round(box(s).top)).join(', '));
+  ok('testimonial card does not run under the forward notch',
+     box(testimonial).right <= box(notchBR).left + 1,
+     'card right ' + Math.round(box(testimonial).right) + ', notch left ' + Math.round(box(notchBR).left));
 } else {
   ok('narrow: figure is hidden, form gets the room', styleOf(figure).display === 'none', styleOf(figure).display);
   ok('narrow: chrome dots remain visible above the form', box(chromeDots).width > 0);
