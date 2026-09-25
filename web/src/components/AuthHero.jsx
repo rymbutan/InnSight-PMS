@@ -38,7 +38,7 @@ const SLIDES = [
   },
   {
     id: 'night-audit',
-    photo: '/brand/hotel.jpg',
+    photo: '/brand/hero-night-audit.jpg',
     heading: 'Close the night audit in minutes',
     body: 'Automated reconciliation catches discrepancies before they become problems.',
     statValue: '3 min',

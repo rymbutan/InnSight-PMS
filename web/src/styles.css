@@ -4377,11 +4377,30 @@ tr.active td {
   background: var(--accent-hover);
   text-decoration: none !important;
 }
+/* Photo set inline (LearnMore.jsx, reusing the sign-in carousel's
+   front-desk photo) rather than the flat gradient this band started with —
+   same "give it personality" reasoning as the carousel itself. The scrim
+   (::before) keeps the heading/subtitle legible over any photo. */
 .learn-hero {
+  position: relative;
   padding: 64px 28px 80px;
   text-align: center;
   color: #fff;
-  background: linear-gradient(150deg, #052e1c 0%, #0a6b3d 55%, #12995e 100%);
+  background-color: #0a6b3d;
+  background-size: cover;
+  background-position: center;
+}
+.learn-hero::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(5 26 16 / 0.7) 0%, rgb(5 26 16 / 0.55) 100%);
+  pointer-events: none;
+}
+.learn-hero > * {
+  position: relative;
+  z-index: 1;
 }
 .learn-hero h1 {
   margin: 0 0 12px;
@@ -4428,10 +4447,13 @@ tr.active td {
   background: rgb(255 255 255 / 0.1);
   text-decoration: none;
 }
+/* Used to pull up -40px into the hero band to "float" over it — harmless
+   against a flat gradient, but with a real photo there it clipped detail
+   and put the first card's heading half on the photo, half on the card. */
 .learn-features {
   max-width: 900px;
-  margin: -40px auto 0;
-  padding: 0 28px 60px;
+  margin: 0 auto;
+  padding: 48px 28px 60px;
   display: flex;
   flex-direction: column;
   gap: 20px;
