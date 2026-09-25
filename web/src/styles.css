@@ -3784,8 +3784,13 @@ tr.active td {
   background: #28c840;
 }
 
-/* ── Left: photograph ───────────────────────────────────────────────────── */
+/* ── Right: photograph ──────────────────────────────────────────────────── */
 .login-figure {
+  /* Visually on the right (matching the reference layout: form on the left,
+     photograph on the right) while staying first in the DOM/tab order —
+     `order` is purely presentational, so keyboard and screen-reader flow are
+     unaffected. */
+  order: 2;
   position: relative;
   margin: 14px;
   border-radius: 16px;
@@ -3925,8 +3930,9 @@ tr.active td {
   border-radius: 50%;
 }
 
-/* ── Right: the form ────────────────────────────────────────────────────── */
+/* ── Left: the form ─────────────────────────────────────────────────────── */
 .login-form-side {
+  order: 1;
   display: flex;
   align-items: center;
   justify-content: center;
