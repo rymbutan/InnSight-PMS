@@ -52,7 +52,7 @@ export default function LearnMore() {
         </nav>
       </header>
 
-      <section className="learn-hero">
+      <section className="learn-hero" style={{ backgroundImage: 'url(/brand/hero-front-desk.jpg)' }}>
         <h1>Every Stay, Perfectly Run</h1>
         <p>A modern property management system for front-desk, housekeeping, and night audit.</p>
         <div className="learn-hero-actions">
