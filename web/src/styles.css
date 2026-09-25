@@ -4030,10 +4030,20 @@ tr.active td {
 }
 .login-hero-topbar {
   position: relative;
-  z-index: 1;
+  /* Higher than .login-hero-highlight's z-index: 1 — the two are sibling
+     stacking contexts, so without this the highlight card (later in the
+     DOM, same z-index) would paint over the support popover nested here,
+     regardless of the popover's own z-index (that only competes within
+     this stacking context, not against the highlight card's separate one). */
+  z-index: 3;
   display: flex;
   justify-content: flex-end;
 }
+.login-hero-support-wrap {
+  position: relative;
+}
+/* A real control now — opens the help popover below — so it gets the same
+   button-chrome reset and hover/focus treatment as the carousel controls. */
 .login-hero-support {
   display: inline-flex;
   align-items: center;
@@ -4045,6 +4055,62 @@ tr.active td {
   background: rgb(255 255 255 / 0.12);
   border: 1px solid rgb(255 255 255 / 0.22);
   border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.login-hero-support:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+.login-hero-support:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+/* The help popover itself: a small white card, matching the highlight
+   card's material rather than the green panel it floats over. */
+.login-hero-support-pop {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 240px;
+  padding: 16px 18px;
+  background: #fff;
+  color: #334155;
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgb(0 0 0 / 0.3);
+  animation: login-hero-fade-in 0.2s ease;
+}
+.login-hero-support-pop p {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.login-hero-support-pop p:last-of-type {
+  margin-bottom: 0;
+}
+.login-hero-support-pop strong {
+  color: #0f172a;
+}
+.login-hero-support-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: #64748b;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.login-hero-support-close:hover {
+  background: #f1f5f9;
 }
 /* The feature-highlight card: a white "product preview" floating on the
    green panel, matching the reference's card + photo composition. */
@@ -4089,6 +4155,8 @@ tr.active td {
   line-height: 1.5;
   color: #64748b;
 }
+/* Advances the carousel — "learn more" about the next feature — rather
+   than linking to a marketing page this project doesn't have. */
 .login-hero-cta {
   display: inline-block;
   padding: 9px 16px;
@@ -4096,7 +4164,17 @@ tr.active td {
   font-weight: 700;
   color: var(--on-accent);
   background: var(--accent);
+  border: 0;
   border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.login-hero-cta:hover {
+  background: var(--accent-hover);
+}
+.login-hero-cta:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .login-hero-highlight-art {
   width: 96px;
@@ -4139,7 +4217,11 @@ tr.active td {
   z-index: 1;
   margin-top: 48px;
 }
+/* Now varies per slide (was a fixed "Introducing new features" repeated
+   under every slide's paragraph), so it gets the same fade-in as the text
+   beside it. */
 .login-hero-features h3 {
+  animation: login-hero-fade-in 0.4s ease;
   margin: 0 0 10px;
   font-size: 21px;
   font-weight: 700;
