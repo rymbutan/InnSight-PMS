@@ -8,9 +8,10 @@ import { Link } from 'react-router-dom';
 // stale.
 //
 // A real carousel, not decorative dots: each slide pairs a full-bleed photo
-// with the highlight card's pitch and a stat AND its own "features" heading
-// + sentence below — all four vary per slide, not just the paragraph, so
-// the block doesn't read as the same copy/color repeated three times.
+// with the highlight card's pitch and its own "features" heading + sentence
+// below — both vary per slide, not just the paragraph, so the block doesn't
+// read as the same copy/color repeated three times. (No stat pill any more
+// — the invented numbers read as clutter once the card went transparent.)
 // Auto-advances but is fully driven by the same index a click on an arrow
 // or a dot sets. Each slide's `id` matches a section id on the /learn-more
 // page (LearnMore.jsx), so "Learn more" jumps straight to that slide's
@@ -21,8 +22,6 @@ const SLIDES = [
     photo: '/brand/hero-front-desk.jpg',
     heading: 'Every Stay, Perfectly Run',
     body: 'Check guests in, track housekeeping, and close the night audit — all from one dashboard.',
-    statValue: '87%',
-    statLabel: 'Occupancy today',
     featuresTitle: 'Introducing new features',
     feature: 'Real-time room status, automated night audits, and instant guest messaging — all in one place.',
   },
@@ -31,8 +30,6 @@ const SLIDES = [
     photo: '/brand/hero-housekeeping.jpg',
     heading: 'Housekeeping, in real time',
     body: "See every room's status the moment it changes, from dirty to inspected.",
-    statValue: '42',
-    statLabel: 'Rooms turned today',
     featuresTitle: 'Housekeeping, simplified',
     feature: 'Housekeepers update room status from any device — the front desk sees it instantly.',
   },
@@ -41,8 +38,6 @@ const SLIDES = [
     photo: '/brand/hero-night-audit.jpg',
     heading: 'Close the night audit in minutes',
     body: 'Automated reconciliation catches discrepancies before they become problems.',
-    statValue: '3 min',
-    statLabel: 'Average audit time',
     featuresTitle: 'Audits that run themselves',
     feature: 'Nightly reports run themselves, so your team can focus on guests instead of spreadsheets.',
   },
@@ -128,15 +123,6 @@ export default function AuthHero() {
           <Link to={`/learn-more#${slide.id}`} className="login-hero-cta">
             Learn more
           </Link>
-        </div>
-      </div>
-      <div className="login-hero-stat" key={`stat-${index}`}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 20V10M12 20V4M20 20v-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-        <div>
-          <strong>{slide.statValue}</strong>
-          <span>{slide.statLabel}</span>
         </div>
       </div>
 

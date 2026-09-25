@@ -4143,11 +4143,11 @@ tr.active td {
   max-width: 300px;
   margin-top: 36px;
   padding: 20px 22px;
-  background: rgb(255 255 255 / 0.82);
-  border: 1px solid rgb(255 255 255 / 0.5);
+  background: rgb(255 255 255 / 0.58);
+  border: 1px solid rgb(255 255 255 / 0.4);
   border-radius: 20px;
   box-shadow: 0 24px 45px rgb(0 0 0 / 0.3);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(16px);
 }
 /* Re-keyed on every slide change, so this replays on each advance instead of
    only once on mount — the actual "slideshow" motion. */
@@ -4175,7 +4175,11 @@ tr.active td {
   margin: 0 0 14px;
   font-size: 13px;
   line-height: 1.55;
-  color: #64748b;
+  /* Darker than the usual muted-gray body color: at this card's alpha, a
+     light gray washed out almost completely against the brighter photos
+     and vanished against the dark one. Solid dark text keeps its own
+     contrast regardless of what's behind the glass. */
+  color: #1f2937;
 }
 /* Links to the matching section of /learn-more (a real <a>, via react-router
    Link) — text-decoration reset because the global `a` rule underlines on
@@ -4201,37 +4205,6 @@ tr.active td {
 .login-hero-cta:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-/* Small stat pill, overlapping the highlight card's bottom edge. */
-.login-hero-stat {
-  position: relative;
-  z-index: 2;
-  align-self: flex-start;
-  margin: -18px 0 0 22px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  background: rgb(255 255 255 / 0.82);
-  border: 1px solid rgb(255 255 255 / 0.5);
-  color: var(--accent);
-  border-radius: 14px;
-  box-shadow: 0 14px 26px rgb(0 0 0 / 0.25);
-  backdrop-filter: blur(14px);
-  animation: login-hero-fade-in 0.4s ease;
-}
-.login-hero-stat div {
-  line-height: 1.2;
-}
-.login-hero-stat strong {
-  display: block;
-  font-size: 15px;
-  color: #0f172a;
-}
-.login-hero-stat span {
-  display: block;
-  font-size: 10.5px;
-  color: #64748b;
 }
 .login-hero-features {
   position: relative;
