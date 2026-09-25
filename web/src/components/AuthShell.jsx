@@ -33,9 +33,6 @@ export default function AuthShell({ title, lede, children, onSubmit }) {
           <Link to="/login" aria-label="InnSight — back to sign in">
             <img className="login-illustration-logo" src="/brand/innsight-logo-icon.png" alt="InnSight" />
           </Link>
-          <p className="login-illustration-caption">
-            A modern PMS for front-desk, housekeeping, and night audit.
-          </p>
         </aside>
 
         <div className="login-form-side">
