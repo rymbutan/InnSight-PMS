@@ -4130,17 +4130,15 @@ tr.active td {
    second small photo here was redundant clutter rather than added
    personality.
 
-   Capped to a max-width rather than stretching to fill the column: at full
-   width, with no image to anchor the right side any more, the card read as
-   a big mostly-empty box with a couple of overlong, thin lines of text in
-   the corner — and it hid more of the photo than a compact callout needs
-   to. Shrinking it to fit its own text lets the photo show around it and
-   gives the paragraph natural, book-width line lengths instead of ~70-
-   character lines at 12.5px. */
+   max-width extended back up once the card went translucent: the earlier,
+   tighter cap (300px) was fixing a "big mostly-empty solid-white box"
+   problem that a glass card sitting over a visible photo doesn't have —
+   there's no dead space to hide any more, so a wider card just gives the
+   text more natural room. */
 .login-hero-highlight {
   position: relative;
   z-index: 1;
-  max-width: 300px;
+  max-width: 400px;
   margin-top: 36px;
   padding: 20px 22px;
   background: rgb(255 255 255 / 0.58);
