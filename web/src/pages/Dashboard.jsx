@@ -478,9 +478,6 @@ function FrontOfficeDashboard() {
               <button className="icon" title="Refresh" onClick={load}>
                 <Icon name="refresh-cw" size={14} />
               </button>
-              <button className="icon" title="Print">
-                <Icon name="printer" size={14} />
-              </button>
             </div>
           </div>
           <div className="tabs-pill" style={{ marginBottom: 8 }}>
