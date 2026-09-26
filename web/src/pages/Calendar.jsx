@@ -105,6 +105,11 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      <div className="mobile-wide-notice">
+        <Icon name="alert-circle" size={14} />
+        <span>This {DAYS}-day board is easiest to read on a larger screen. Swipe sideways to scroll it here.</span>
+      </div>
+
       {view === 'facilities' ? (
         <FacilityBoard startDate={startDate} days={days} />
       ) : (

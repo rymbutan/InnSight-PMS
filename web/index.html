@@ -4,8 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" sizes="96x96" href="/brand/favicon-96.png" />
-    <link rel="apple-touch-icon" href="/brand/innsight-mark.png" />
+    <link rel="apple-touch-icon" href="/brand/icon-192.png" />
+    <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0a6b3d" />
+    <!-- iOS ignores the manifest's display:standalone; these are the
+         equivalent instruction for Safari's "Add to Home Screen". -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="InnSight" />
     <title>InnSight PMS — SLSU Hospitality Management</title>
   </head>
   <body>
