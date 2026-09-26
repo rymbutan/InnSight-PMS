@@ -12,6 +12,7 @@ import {
   clampPan,
   clampZoom,
   fitView,
+  initialView,
   stickKnob,
   stickVector,
   touchDistance,
@@ -224,6 +225,45 @@ test('fitView degrades to identity when nothing has been measured yet', () => {
   // The panel's size is read from the DOM, so the first render has zeroes.
   assert.deepEqual(fitView({ w: 0, h: 0 }, { w: 0, h: 0 }), { x: 0, y: 0, z: 1 });
   assert.deepEqual(fitView({ w: 800, h: 600 }, { w: 0, h: 500 }), { x: 0, y: 0, z: 1 });
+});
+
+// ── Initial open (distinct from the "Fit" button) ──────────────────────────
+
+test('a tall, many-floor property opens legible, not crushed to fit the height', () => {
+  // The bug this documents: a 12-floor property (a realistic hotel — see
+  // scripts/seed-hotel-map-filler.mjs) is roughly 980x3970 content. `.pz-host`
+  // on a tablet is height-capped to at most 560px (styles.css). fitView takes
+  // the SMALLER of the width and height ratios to show everything at once,
+  // and here that is the height ratio — z ~ 0.13, shrinking a 96px-min room
+  // down to about 13px, illegible on the very first thing anyone sees.
+  const viewport = { w: 700, h: 560 };
+  const content = { w: 980, h: 3970 };
+  const whole = fitView(viewport, content);
+  const opened = initialView(viewport, content);
+  assert.ok(opened.z > whole.z * 4, `opened at ${opened.z}, whole-property fit was ${whole.z}`);
+  // Width-fit, same as fitView would compute if height were not the limiter.
+  assert.ok(near(opened.z, (viewport.w - 32) / content.w, 1e-9));
+});
+
+test('initialView anchors to the top of the drawing (floor 1 first), not centred', () => {
+  const viewport = { w: 700, h: 560 };
+  const content = { w: 980, h: 3970 };
+  const v = initialView(viewport, content, 16);
+  assert.equal(v.y, 16);
+});
+
+test('initialView does not blow a sparse property up past native size', () => {
+  // A panel wider than the drawing should open it at 1:1, not stretched to
+  // fill the width — the desktop map already renders at native size for
+  // exactly this reason (see .hk-map in styles.css).
+  const viewport = { w: 1400, h: 900 };
+  const content = { w: 500, h: 400 };
+  assert.equal(initialView(viewport, content).z, 1);
+});
+
+test('initialView degrades to identity when nothing has been measured yet', () => {
+  assert.deepEqual(initialView({ w: 0, h: 0 }, { w: 0, h: 0 }), { x: 0, y: 0, z: 1 });
+  assert.deepEqual(initialView({ w: 800, h: 600 }, { w: 0, h: 500 }), { x: 0, y: 0, z: 1 });
 });
 
 test('a drawing wider than its panel can still be pinched back out to fit', () => {

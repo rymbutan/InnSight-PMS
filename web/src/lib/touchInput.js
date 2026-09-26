@@ -215,8 +215,10 @@ export function clampPan(view, viewport, content, margin = 80) {
   };
 }
 
-/** The pan/zoom that fits the content in the viewport, centred — what the reset
- *  control returns to and what the map opens at. */
+/** The pan/zoom that fits the WHOLE content in the viewport, centred — what
+ *  the "Fit" reset control returns to. NOT what the map opens at (see
+ *  initialView below) — showing the entire property, however small that
+ *  makes it, is exactly what that button is for. */
 export function fitView(viewport, content, pad = 16) {
   if (!content.w || !content.h || !viewport.w || !viewport.h) return { x: 0, y: 0, z: 1 };
   const z = clampZoom(
@@ -224,6 +226,27 @@ export function fitView(viewport, content, pad = 16) {
     MAP_FIT_MIN
   );
   return { x: (viewport.w - content.w * z) / 2, y: (viewport.h - content.h * z) / 2, z };
+}
+
+/** The view the map actually opens at, and re-opens at when its content
+ *  changes size — WIDTH only, unlike fitView. A real property is commonly
+ *  many floors stacked (see hotelMap.js's own multi-floor design), and
+ *  `.pz-host`'s height is capped hardest on a tablet (clamp(320px, 52vh,
+ *  560px) in styles.css) — fitting a 12-floor property into that on BOTH
+ *  axes crushed every room tile down with the whole drawing, well past
+ *  legible, as the very first thing anyone saw opening the page on an iPad.
+ *  hotelMap.js already refuses to do this to WIDTH ("a legible map you
+ *  scroll beats an illegible one that fits") by growing the drawing past its
+ *  container instead of shrinking rooms below MIN_ROOM_W; this is the same
+ *  principle applied to height, reached from the zoom side instead — rooms
+ *  open at a legible, width-fit size, anchored to the top of the drawing
+ *  (floor 1 first), with the rest reachable by panning down rather than by
+ *  shrinking further. Capped at native size (z=1): a sparse property should
+ *  not open blown up just to fill the panel's width either. */
+export function initialView(viewport, content, pad = 16) {
+  if (!content.w || !content.h || !viewport.w || !viewport.h) return { x: 0, y: 0, z: 1 };
+  const z = clampZoom(Math.min(1, (viewport.w - pad * 2) / content.w));
+  return { x: (viewport.w - content.w * z) / 2, y: pad, z };
 }
 
 /** How far the user may pinch out: the interactive floor, or the fit if the

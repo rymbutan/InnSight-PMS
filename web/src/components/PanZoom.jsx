@@ -5,6 +5,7 @@ import {
   clampPan,
   clampZoom,
   fitView,
+  initialView,
   minUserZoom,
   touchDistance,
   touchMidpoint,
@@ -71,15 +72,22 @@ export default function PanZoom({ enabled, contentW, contentH, className = '', l
     return () => ro.disconnect();
   }, [enabled]);
 
+  // The explicit "Fit" button only — shows the WHOLE property, however small
+  // that makes a many-floor one. NOT used to open the map; see the effect
+  // below.
   const fit = useCallback(() => {
     setView(fitView(viewport, content));
   }, [viewport.w, viewport.h, content.w, content.h]);
 
-  // Open fitted, so the whole property is visible before anyone touches it —
-  // and re-fit when the drawing itself changes size (a floor added, a property
-  // seeded), which is a different drawing rather than the same one moved.
+  // Open at a legible, width-fit size instead of fitView's whole-property
+  // fit — a real property is commonly many floors stacked, and fitting all of
+  // them into `.pz-host`'s capped height (worst on a tablet) crushed every
+  // room tile down with it, illegible on the very first thing anyone saw. See
+  // initialView's own comment. Re-opens the same way when the drawing itself
+  // changes size (a floor added, a property seeded), which is a different
+  // drawing rather than the same one moved.
   useEffect(() => {
-    if (enabled && viewport.w && content.w) fit();
+    if (enabled && viewport.w && content.w) setView(initialView(viewport, content));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, viewport.w, viewport.h, content.w, content.h]);
 
