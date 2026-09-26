@@ -3964,6 +3964,11 @@ tr.active td {
   height: 1px;
   background: #e2e8f0;
 }
+.login-lockout-hint {
+  margin: -8px 0 14px;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .login-forgot {
   margin: -6px 0 18px;
   text-align: right;

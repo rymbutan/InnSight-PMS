@@ -123,6 +123,11 @@ export default function Login() {
               </button>
             </div>
 
+            <p className="login-lockout-hint muted">
+              5 incorrect attempts locks your account. An administrator has to re-enable it — it
+              won&rsquo;t unlock on its own.
+            </p>
+
             <p className="login-forgot">
               <Link to="/forgot-password">Forgot password?</Link>
             </p>
