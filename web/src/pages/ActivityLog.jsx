@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import EmptyState from '../components/EmptyState';
 import { FilterField } from '../components/FilterPanel';
@@ -32,11 +33,16 @@ function initialFilters() {
 
 export default function ActivityLog() {
   const toast = useToast();
-  const [filters, setFilters] = useState(initialFilters);
+  // A `?q=` on the URL (the global search box's "Activity" results link here)
+  // seeds both the input and the committed term, so the first load already
+  // reflects it instead of waiting out the debounce below.
+  const [searchParams] = useSearchParams();
+  const initialQ = searchParams.get('q') || '';
+  const [filters, setFilters] = useState(() => ({ ...initialFilters(), q: initialQ }));
   // The committed search term. `filters.q` updates on every keystroke so the
   // input stays responsive; this one lags it by the debounce and is what the
   // query actually uses.
-  const [term, setTerm] = useState('');
+  const [term, setTerm] = useState(initialQ);
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ rows: [], total: 0, pageCount: 1 });
   const [options, setOptions] = useState({ services: [], actions: [], actors: [] });

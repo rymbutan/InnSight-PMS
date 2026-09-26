@@ -285,10 +285,13 @@ export default function Amenities() {
       .get('/api/in-house')
       .then(({ data }) => setInHouse(data || []))
       .catch(() => setInHouse([]));
-    // Arriving from the top bar's "Book a facility": put the desk in view. The
-    // panel is already the first thing in row 1, so this only matters on a
-    // short window where the overview strip fills the fold.
-    if (new URLSearchParams(window.location.search).get('book') === '1') {
+    // Arriving from the top bar's "Book a facility", or from the global search
+    // bar with a specific facility already chosen (bookForm.facilityCode,
+    // above): put the desk in view. The panel is already the first thing in
+    // row 1, so this only matters on a short window where the overview strip
+    // fills the fold.
+    const q0 = new URLSearchParams(window.location.search);
+    if (q0.get('book') === '1' || q0.get('facility')) {
       requestAnimationFrame(() =>
         document.querySelector('.bf-head')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
       );
