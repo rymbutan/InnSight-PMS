@@ -674,7 +674,7 @@ export default function Layout() {
           scoped to the content column alone. */}
       <header className="cb-topbar">
           <Link to="/" className="cb-brand" aria-label="InnSight — go to dashboard">
-            <img src="/brand/innsight-mark.png" alt="" aria-hidden="true" />
+            <img src="/brand/innsight-logo-full.png" alt="" aria-hidden="true" />
           </Link>
 
           <button

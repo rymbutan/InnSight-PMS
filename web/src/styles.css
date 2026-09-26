@@ -468,17 +468,15 @@ button.danger {
 
 /* The one piece of brand chrome that's on screen regardless of route or
    whether the sidebar is collapsed/drawer-hidden — the rail's own mark
-   scrolls away with it on a narrow screen, this doesn't. Just the icon, not
-   the full wordmark lockup: the topbar's real job is the search bar next to
-   it, not a second logo treatment competing with the sidebar's. */
+   scrolls away with it on a narrow screen, this doesn't. */
 .cb-brand {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 .cb-brand img {
-  height: 28px;
-  width: 28px;
+  height: 30px;
+  width: auto;
   object-fit: contain;
   display: block;
 }
