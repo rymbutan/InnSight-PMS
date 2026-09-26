@@ -50,6 +50,7 @@ router.post('/login', async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
       const failed = user.failedAttempts + 1;
+      const locked = user.status === 'LOCKED' || failed >= MAX_FAILED;
       await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -57,12 +58,25 @@ router.post('/login', async (req, res) => {
           status: failed >= MAX_FAILED ? 'LOCKED' : user.status,
         },
       });
+      // The lockout itself IS told to a wrong-password attempt, by request —
+      // someone locked out needs to know why, rather than retrying a
+      // possibly-correct password against a dead end. This is a narrower
+      // reveal than account status in general: a DISABLED account (an admin
+      // action, not a lockout) still falls through to the generic message
+      // below, unchanged.
+      if (locked) {
+        return res.status(403).json({ error: 'Account is locked.' });
+      }
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
     // Only reveal that an account is non-usable AFTER a correct password, so a
-    // wrong-password attacker can't probe account existence or status.
+    // wrong-password attacker can't probe account existence or status. (LOCKED
+    // is handled above, before this point, since a locked account is already
+    // revealed on a wrong password.)
     if (user.status !== 'ACTIVE') {
-      return res.status(403).json({ error: `Account ${user.status.toLowerCase()}.` });
+      return res
+        .status(403)
+        .json({ error: user.status === 'LOCKED' ? 'Account is locked.' : `Account ${user.status.toLowerCase()}.` });
     }
 
     const ctx = await loadUserContext(user.id);
