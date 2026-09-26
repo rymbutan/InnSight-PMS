@@ -80,12 +80,6 @@ export default function InspectionScenarios({ showTitle = true }) {
           </div>
         </div>
       )}
-      <p className="muted" style={{ marginTop: 0 }}>
-        Author what is <strong>wrong</strong> with a room. Place things where they should not be, tag each one
-        with the kind of fault it is, and set the booking the room is wrong for. Students inspecting that tier
-        get one of your active scenarios; tiers with none fall back to generated faults, so nothing breaks
-        while you build a library.
-      </p>
 
       <div className="panel">
         <div className="panel-head">

@@ -3,7 +3,7 @@ import api from '../api';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
-import { pesosToCents, formatPeso } from '../lib/money';
+import { formatPeso } from '../lib/money';
 import { labelize } from '../lib/labels';
 import SectionSwitcher, { REPORTS_SECTIONS } from '../components/SectionSwitcher';
 
@@ -12,7 +12,6 @@ export default function Audit() {
   const confirm = useConfirm();
   const [current, setCurrent] = useState(null);
   const [days, setDays] = useState([]);
-  const [nightlyRate, setNightlyRate] = useState('');
   const [inHouseCount, setInHouseCount] = useState(0);
   const [running, setRunning] = useState(false);
 
@@ -47,20 +46,16 @@ export default function Audit() {
     }
   }
   async function run() {
-    if (!nightlyRate) {
-      toast.error('Enter nightly rate first.');
-      return;
-    }
     const ok = await confirm({
       title: 'Run night audit',
       message: 'Run night audit and close the business day?',
-      detail: `Posts a ₱${nightlyRate} room charge to ${inHouseCount} in-house stay(s), marks unarrived confirmed bookings as no-show, and auto-cancels overdue unconfirmed ones.`,
+      detail: `Posts each of ${inHouseCount} in-house stay's own room charge, marks unarrived confirmed bookings as no-show, and auto-cancels overdue unconfirmed ones.`,
       confirmLabel: 'Run audit',
     });
     if (!ok) return;
     setRunning(true);
     try {
-      await api.post('/api/audit/run', { nightlyRateCents: pesosToCents(nightlyRate) });
+      await api.post('/api/audit/run', {});
       toast.success('Audit completed.');
       load();
     } catch (e) {
@@ -115,23 +110,10 @@ export default function Audit() {
                 </div>
               </div>
             </div>
-            <div className="row">
-              <div>
-                <label>Nightly rate (₱)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="e.g. 1500.00"
-                  value={nightlyRate}
-                  onChange={(e) => setNightlyRate(e.target.value)}
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end' }} data-tour="tour-process-audit">
-                <button onClick={run} disabled={running}>
-                  {running ? <span className="spinner" /> : 'Run audit'}
-                </button>
-              </div>
+            <div data-tour="tour-process-audit">
+              <button onClick={run} disabled={running}>
+                {running ? <span className="spinner" /> : 'Run audit'}
+              </button>
             </div>
             <p className="muted">
               The audit posts a room charge to each in-house folio, combines all of the day's sales — rooms
