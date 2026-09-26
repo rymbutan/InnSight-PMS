@@ -67,7 +67,10 @@ router.post('/login', async (req, res) => {
       if (locked) {
         return res.status(403).json({ error: 'Account is locked.' });
       }
-      return res.status(401).json({ error: 'Invalid credentials.' });
+      // attemptsLeft drives the sign-in page's countdown ("4 attempts left",
+      // "3 attempts left", ...) so it has to be sent on every miss, not just
+      // logged server-side.
+      return res.status(401).json({ error: 'Invalid credentials.', attemptsLeft: MAX_FAILED - failed });
     }
     // Only reveal that an account is non-usable AFTER a correct password, so a
     // wrong-password attacker can't probe account existence or status. (LOCKED

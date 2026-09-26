@@ -7,6 +7,11 @@ import AuthHero from '../components/AuthHero';
 import AuthBrandMark from '../components/AuthBrandMark';
 import EyeIcon from '../components/EyeIcon';
 
+// Mirrors services/auth/src/routes/auth.routes.js's MAX_FAILED — the two are
+// two copies of one fixed policy (not configurable anywhere in the app), so
+// the countdown below starts at the same number the backend locks out at.
+const MAX_LOGIN_ATTEMPTS = 5;
+
 export default function Login() {
   const { user, login, loginWithGoogle, loading } = useAuth();
   const navigate = useNavigate();
@@ -20,6 +25,13 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [backend, setBackend] = useState({ checking: true, ok: false, msg: '' });
+  // Counts down from the full allowance on every wrong password (the backend
+  // sends the real remaining count alongside "Invalid credentials." — this is
+  // never computed locally). Reset to the full allowance on mount only: a
+  // reload starts the countdown over on-screen even though the server-side
+  // count is unaffected, same tradeoff the rest of this hint already makes by
+  // not fetching a username's attempt count before anything is submitted.
+  const [attemptsLeft, setAttemptsLeft] = useState(MAX_LOGIN_ATTEMPTS);
 
   // On mount, ping the backend so we can give a useful message instead of a
   // generic "network error" if the gateway is down or unreachable.
@@ -61,7 +73,10 @@ export default function Login() {
       const u = await login(username, password);
       navigate(u?.mustChangePwd ? '/change-password' : '/');
     } catch (err) {
-      setError(err.response?.data?.error || err.message);
+      const data = err.response?.data;
+      setError(data?.error || err.message);
+      if (typeof data?.attemptsLeft === 'number') setAttemptsLeft(data.attemptsLeft);
+      else if (data?.error === 'Account is locked.') setAttemptsLeft(0);
     }
   }
 
@@ -124,8 +139,16 @@ export default function Login() {
             </div>
 
             <p className="login-lockout-hint muted">
-              5 incorrect attempts locks your account. An administrator has to re-enable it — it
-              won&rsquo;t unlock on its own.
+              {attemptsLeft > 0 ? (
+                <>
+                  {attemptsLeft} attempt{attemptsLeft === 1 ? '' : 's'} left before your account locks.
+                </>
+              ) : (
+                <>
+                  Account is locked. An administrator has to re-enable it — it won&rsquo;t unlock on its
+                  own.
+                </>
+              )}
             </p>
 
             <p className="login-forgot">
