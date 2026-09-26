@@ -46,7 +46,11 @@ export default function ChangePassword() {
 
   return (
     <div>
-      <h2>Change password</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Change password</h1>
+        </div>
+      </div>
       <div className="panel" style={{ maxWidth: 480 }}>
         {user?.mustChangePwd && (
           <p

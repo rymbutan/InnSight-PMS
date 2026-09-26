@@ -795,7 +795,11 @@ export default function Folios() {
 
   return (
     <div>
-      <h2>Folios</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Folios</h1>
+        </div>
+      </div>
 
       <div className="panel">
         {/* No heading once a folio is chosen — a label over a lone search box,

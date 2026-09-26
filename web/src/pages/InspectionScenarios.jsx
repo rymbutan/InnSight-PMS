@@ -73,7 +73,13 @@ export default function InspectionScenarios({ showTitle = true }) {
 
   return (
     <div>
-      {showTitle && <h2>Inspection Scenarios (3D)</h2>}
+      {showTitle && (
+        <div className="page-head">
+          <div className="page-head-title">
+            <h1>Inspection Scenarios (3D)</h1>
+          </div>
+        </div>
+      )}
       <p className="muted" style={{ marginTop: 0 }}>
         Author what is <strong>wrong</strong> with a room. Place things where they should not be, tag each one
         with the kind of fault it is, and set the booking the room is wrong for. Students inspecting that tier

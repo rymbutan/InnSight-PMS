@@ -344,7 +344,11 @@ export default function Users() {
 
   return (
     <div>
-      <h2>Users & Roles</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Users & Roles</h1>
+        </div>
+      </div>
       {msg && (
         <div className="muted" style={{ marginBottom: 12 }}>
           {msg}
