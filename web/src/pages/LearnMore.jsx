@@ -11,20 +11,20 @@ const FEATURES = [
   {
     id: 'front-desk',
     title: 'Every stay, perfectly run',
-    body: 'Check guests in, track housekeeping, and close the night audit — all from one dashboard. Front-desk staff see occupancy, arrivals, and room status the moment they change, without switching between spreadsheets or paper logs.',
-    stat: { value: '87%', label: 'Typical occupancy visibility, in real time' },
+    body: 'A live 14-day room-type outlook makes overselling structurally impossible, Arrivals checks guests into a clean, inspected room in a couple of clicks, and a 4-step wizard walks a walk-in through rooms, details, guests, and payment. Every booking, cancellation, and check-in updates the dashboard the moment it happens — no manual refresh.',
+    stat: { value: 'Live', label: 'Dashboard updates the instant a booking, stay, or folio changes' },
   },
   {
     id: 'housekeeping',
     title: 'Housekeeping, in real time',
-    body: "See every room's status the moment it changes, from dirty to inspected. Housekeepers update rooms from any device on the floor, so the front desk always knows what's ready to sell — no radio calls, no guesswork.",
-    stat: { value: '42', label: 'Rooms a mid-size property turns on a busy day' },
+    body: "An interactive floor map shows every room's status — dirty, clean, inspected, occupied — the moment it changes. Front desk can call a housekeeper about a specific room, and turnover isn't done until a supervisor signs off: housekeeping can clean a room, but only ADMIN/MANAGER can mark it Inspected.",
+    stat: { value: '2-step', label: 'Cleaned, then supervisor-inspected — never self-certified' },
   },
   {
     id: 'night-audit',
     title: 'Night audits that run themselves',
-    body: 'Automated reconciliation catches discrepancies before they become problems. Nightly reports run on their own, so your team spends the graveyard shift on guests instead of spreadsheets.',
-    stat: { value: '3 min', label: 'Average time to close a night audit' },
+    body: 'One button posts a room charge to every in-house folio, combines every revenue source — rooms, amenities, laundry, spa — marks no-shows, auto-cancels overdue unconfirmed bookings, and closes the business day. A full history of every past day (occupancy, ADR, RevPAR, revenue breakdown) is there to review afterward.',
+    stat: { value: '1 button', label: 'Runs the full reconciliation and closes the day' },
   },
 ];
 
