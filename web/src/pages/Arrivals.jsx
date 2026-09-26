@@ -210,7 +210,11 @@ export default function Arrivals() {
 
   return (
     <div>
-      <h2>Arrivals &amp; Departures</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Arrivals &amp; Departures</h1>
+        </div>
+      </div>
 
       <div className="panel" data-tour="tour-process-arrivals">
         <div className="panel-head">

@@ -421,7 +421,11 @@ export default function Guests() {
 
   return (
     <div>
-      <h2>Guest Profiles</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Guest Profiles</h1>
+        </div>
+      </div>
 
       <div className="panel">
         <h3>Create guest</h3>

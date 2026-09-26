@@ -77,7 +77,11 @@ export default function Health() {
 
   return (
     <div>
-      <h2>Service Health</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>Service Health</h1>
+        </div>
+      </div>
 
       {/* Outbound mail, above the service table rather than inside it: it is not
           a container that is up or down, and burying it in a row of nine would

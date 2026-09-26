@@ -185,7 +185,11 @@ export default function Rooms() {
 
   return (
     <div className="rooms-fixed">
-      <h2>{isAdmin ? 'Hotel Room Information Editor' : 'Hotel Rooms'}</h2>
+      <div className="page-head">
+        <div className="page-head-title">
+          <h1>{isAdmin ? 'Hotel Room Information Editor' : 'Hotel Rooms'}</h1>
+        </div>
+      </div>
 
       {/* The only non-admin who reaches this page now is a Manager — Front Desk
           and Housekeeping no longer have it at all — so the note says what a
