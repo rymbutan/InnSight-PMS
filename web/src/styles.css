@@ -4348,7 +4348,11 @@ tr.active td {
 .login-hero-features {
   position: relative;
   z-index: 1;
-  margin-top: 48px;
+  /* Pushed down to sit right above the dots/arrow control instead of the
+     control itself soaking up the leftover space below the highlight card —
+     keeps the text and the control it belongs with visually grouped. */
+  margin-top: auto;
+  padding-top: 48px;
 }
 /* Now varies per slide (was a fixed "Introducing new features" repeated
    under every slide's paragraph), so it gets the same fade-in as the text
@@ -4370,7 +4374,6 @@ tr.active td {
 .login-hero-dots {
   position: relative;
   z-index: 1;
-  margin-top: auto;
   padding-top: 28px;
   display: flex;
   align-items: center;
