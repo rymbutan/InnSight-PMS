@@ -3907,6 +3907,7 @@ tr.active td {
 .login-brandmark {
   display: flex;
   align-items: center;
+  justify-content: center;
   margin-bottom: 32px;
 }
 .login-brandmark img {
