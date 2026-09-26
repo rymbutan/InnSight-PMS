@@ -226,6 +226,33 @@ body,
 html {
   zoom: 0.9;
 }
+/* The same zoom quirk --vh-full exists for, on the other axis: `body`'s
+   width, with no explicit size of its own, is "auto" — 100% of `html` —
+   but that percentage is resolved INSIDE the zoomed coordinate space, where
+   html's box is already the pre-inflated 111.111% a `zoom: 0.9` needs to
+   land on the real size after shrinking. The result measures ~11% wider
+   than the real viewport (390px measured as ~433px). Harmless on desktop —
+   whitespace absorbs it — but on a phone-width page with a table close to
+   the panel's edge, that extra 11% is what let the table's own scroll
+   container end up not actually clipping to the panel's visible edge: the
+   table was correctly contained relative to an ancestor that was ITSELF
+   11% too wide, so "contained" still overflowed the real screen.
+
+   `100vw` resolves against the real, already-zoomed-out viewport the same
+   way `vh` does (confirmed by measuring, not assumed) — unlike vh, it does
+   not need the ×1.11111 counter-inflation, it already lands on the true
+   390px directly. Scoped to phone width ONLY, deliberately: `100vw`
+   includes a reserved scrollbar's own width where `100%` would not, and
+   measuring a tall desktop page confirmed exactly that gap (10px+,
+   OS/browser-dependent) — safe on a phone, where the scrollbar is an
+   overlay that reserves no space (measured: no gap, at any content
+   height), but a real regression on desktop, which was never broken to
+   begin with. */
+@media (max-width: 640px) {
+  body {
+    width: 100vw;
+  }
+}
 a {
   color: var(--accent);
   text-decoration: none;
