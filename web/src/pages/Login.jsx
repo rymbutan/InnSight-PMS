@@ -5,6 +5,7 @@ import { pingBackend } from '../api';
 import GoogleSignIn from '../components/GoogleSignIn';
 import AuthHero from '../components/AuthHero';
 import AuthBrandMark from '../components/AuthBrandMark';
+import EyeIcon from '../components/EyeIcon';
 
 export default function Login() {
   const { user, login, loginWithGoogle, loading } = useAuth();
@@ -118,7 +119,7 @@ export default function Login() {
                 aria-pressed={showPassword}
                 title={showPassword ? 'Hide password' : 'Show password'}
               >
-                {showPassword ? '🙈' : '👁'}
+                <EyeIcon off={showPassword} />
               </button>
             </div>
 

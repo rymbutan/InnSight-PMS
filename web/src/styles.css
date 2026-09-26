@@ -4010,11 +4010,13 @@ tr.active td {
   position: absolute;
   top: 12px;
   right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 30px;
   height: 26px;
   padding: 0;
-  font-size: 14px;
-  line-height: 1;
+  color: #64748b;
   background: none;
   border: 0;
   border-radius: 6px;
