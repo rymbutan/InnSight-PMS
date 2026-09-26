@@ -9455,6 +9455,15 @@ tr.is-linked > td {
   margin-top: 2px;
 }
 
+/* A deep link from the global search bar (?id=) briefly flashes the row it
+   pointed at — the table has no separate profile view for it to open into
+   instead. Removed by a JS timeout (Users.jsx), not an animation end event,
+   so the transition just needs to fade smoothly either way. */
+.row-flash {
+  background: rgb(10 107 61 / 0.14) !important;
+  transition: background-color 1.6s ease;
+}
+
 /* ── User directory filter ───────────────────────────────────────────────── */
 /* Mirrors the guest search bar's layout, kept as its own rule rather than
    reusing .guest-search-bar: the two sit on unrelated pages, and sharing a

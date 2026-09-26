@@ -433,6 +433,30 @@ router.get('/rooms', requireRole(...ROLE_GROUPS.ALL_STAFF), async (req, res) => 
   }
 });
 
+// GET /api/rooms/search?q= — for the global search bar. Registered ahead of
+// GET /api/rooms/:id so "search" is never swallowed as a room id.
+router.get('/rooms/search', requireRole(...ROLE_GROUPS.ALL_STAFF), async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const rooms = await prisma.room.findMany({
+      where: {
+        OR: [
+          { number: { contains: q, mode: 'insensitive' } },
+          { roomType: { name: { contains: q, mode: 'insensitive' } } },
+        ],
+      },
+      take: 10,
+      orderBy: { number: 'asc' },
+      include: { roomType: { select: { name: true } } },
+    });
+    res.json(rooms);
+  } catch (err) {
+    console.error('[Inventory] Search rooms error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/rooms/:id
 // Single room lookup. Added so other services can validate a room assignment
 // server-side instead of trusting a client-supplied roomId — the stay service
@@ -741,6 +765,30 @@ router.get('/facilities', requireRole(...ROLE_GROUPS.ALL_STAFF), async (req, res
     res.json(list);
   } catch (err) {
     console.error('[Inventory] List facilities error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/facilities/search?q= — for the global search bar. Registered
+// ahead of GET /api/facilities/:code so "search" is never swallowed as a code.
+router.get('/facilities/search', requireRole(...ROLE_GROUPS.ALL_STAFF), async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const list = await prisma.facility.findMany({
+      where: {
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { category: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      take: 10,
+      orderBy: { name: 'asc' },
+      select: { id: true, code: true, name: true, category: true },
+    });
+    res.json(list);
+  } catch (err) {
+    console.error('[Inventory] Search facilities error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

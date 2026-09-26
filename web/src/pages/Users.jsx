@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import RoleBadge from '../components/RoleBadge';
 import Modal from '../components/Modal';
@@ -10,6 +11,12 @@ import { roleLabel } from '../lib/roles';
 
 export default function Users() {
   const confirm = useConfirm();
+  const [searchParams] = useSearchParams();
+  // Scrolled to and briefly flashed when the global search bar links here
+  // with `?id=` — the table has no separate profile view to open into, so a
+  // deep link's only job is to bring the matching row into sight.
+  const [highlightId, setHighlightId] = useState(null);
+  const rowRefs = useRef({});
   // MANAGER has the same account-management privilege as ADMIN, with one
   // carve-out: an account that already holds (or would be given) the ADMIN
   // role is off-limits — see the matching guards in
@@ -102,6 +109,22 @@ export default function Users() {
   useEffect(() => {
     load();
   }, []);
+
+  // `?id=` deep link from the global search bar. Clears any in-progress text
+  // filter (the row search results linked here must be visible), then
+  // scrolls to and flashes the matching row for a couple of seconds.
+  useEffect(() => {
+    const qid = searchParams.get('id');
+    if (!qid || users.length === 0) return;
+    setUserQuery('');
+    setHighlightId(qid);
+    requestAnimationFrame(() => {
+      rowRefs.current[qid]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    const t = setTimeout(() => setHighlightId(null), 2000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, users]);
 
   async function create(e) {
     e.preventDefault();
@@ -519,7 +542,14 @@ export default function Users() {
               </tr>
             )}
             {visibleUsers.map((u) => (
-              <tr key={u.id}>
+              <tr
+                key={u.id}
+                ref={(el) => {
+                  if (el) rowRefs.current[u.id] = el;
+                  else delete rowRefs.current[u.id];
+                }}
+                className={highlightId === u.id ? 'row-flash' : undefined}
+              >
                 <td>{u.username}</td>
                 <td>{u.displayName}</td>
                 {/* An em dash, not an empty cell: email is optional on a user

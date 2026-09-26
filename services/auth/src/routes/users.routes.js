@@ -200,6 +200,35 @@ router.get('/users/directory', verifyToken, async (_req, res) => {
   }
 });
 
+// GET /api/users/search?q= — staff lookup for the global search bar.
+// Same STAFF_ROLES gate as the full /users list above: this is still whole
+// staff-account data (email, status), just narrowed by a text match, so it
+// gets no wider an audience than the Users page itself already has.
+//
+// MUST be declared before /users/:id, or the param route swallows "search".
+router.get('/users/search', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
+  try {
+    const term = String(req.query.q || '').trim();
+    if (!term) return res.json([]);
+    const users = await prisma.user.findMany({
+      where: {
+        OR: [
+          { displayName: { contains: term, mode: 'insensitive' } },
+          { username: { contains: term, mode: 'insensitive' } },
+          { email: { contains: term, mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true, username: true, displayName: true, email: true, status: true },
+      take: 10,
+      orderBy: { displayName: 'asc' },
+    });
+    res.json(users);
+  } catch (err) {
+    console.error('[Auth] User search error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/users/:id
 router.get('/users/:id', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {

@@ -154,6 +154,44 @@ router.get('/messages/contacts', async (req, res) => {
   }
 });
 
+// GET /api/messages/search?q= — free-text search over MY OWN conversations,
+// for the global search box. Ownership-bounded exactly like every other route
+// here: the OR below is senderId/recipientId against `me`, never a parameter,
+// so this can never be pointed at someone else's inbox.
+router.get('/messages/search', async (req, res) => {
+  try {
+    const me = req.user.sub;
+    const q = String(req.query.q || '').trim();
+    // Under 2 characters is a cheap way to enumerate common substrings across a
+    // whole message history rather than a real search, so it just comes back
+    // empty instead of running.
+    if (q.length < 2) return res.json([]);
+
+    const rows = await prisma.message.findMany({
+      where: {
+        OR: [{ senderId: me }, { recipientId: me }],
+        body: { contains: q.slice(0, 200), mode: 'insensitive' },
+        ...(await retention.createdAtFilter()),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    res.json(
+      rows.map((m) => ({
+        id: m.id,
+        body: messagePreview(m, 120),
+        senderId: m.senderId,
+        recipientId: m.recipientId,
+        createdAt: m.createdAt,
+      }))
+    );
+  } catch (err) {
+    console.error('[Messaging] Search error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // GET /api/messages/unread-count — one number, for the sidebar badge.
 //
 // Separate from /contacts on purpose: the badge is rendered on every page and

@@ -39,6 +39,36 @@ const NAV_SECTIONS = CATALOGUE.sections;
 
 const COLLAPSE_KEY = 'innsight_sidebar_collapsed';
 
+// The record categories the search popover fans out to, beyond the
+// already-loaded `pages` match — kept as one object so a fresh keystroke can
+// spread last render's results under the new `pages` match without every
+// category needing to be named twice (see onSearchChange).
+const EMPTY_RECORD_RESULTS = {
+  guests: [],
+  reservations: [],
+  rooms: [],
+  facilities: [],
+  folios: [],
+  users: [],
+  activity: [],
+  messages: [],
+};
+
+// One category of the search popover — a heading plus its rows. Pulled out
+// once there were eight of these (pages, guests, reservations, rooms,
+// facilities, folios, staff, activity, messages): each still renders its own
+// row shape via `renderItem`, only the "heading + hide when empty" wrapper is
+// shared.
+function SearchSection({ title, items, renderItem }) {
+  if (!items?.length) return null;
+  return (
+    <>
+      <div className="cb-search-section">{title}</div>
+      {items.map(renderItem)}
+    </>
+  );
+}
+
 // ── The "click the background" collapse gesture ──────────────────────────────
 // Both the rail and the content pane collapse the rail when you click their
 // empty space. They used to carry two DIFFERENT hand-written guard selectors,
@@ -456,21 +486,43 @@ export default function Layout() {
     const pages = matchFeatures(v);
     // Painted immediately, ahead of the debounce below — a page match is
     // already-loaded data, so there is no reason to make it wait on the
-    // network round trip the guest/reservation lookups need.
-    setSearchResults((prev) => ({ pages, guests: prev?.guests || [], reservations: prev?.reservations || [] }));
+    // network round trip the record lookups below need.
+    setSearchResults((prev) => ({ ...EMPTY_RECORD_RESULTS, ...prev, pages }));
     const seq = ++searchSeq.current;
     searchTimer.current = setTimeout(async () => {
       try {
-        const [g, r] = await Promise.all([
-          api.get(`/api/guests/search?q=${encodeURIComponent(v)}`).catch(() => ({ data: [] })),
-          api.get(`/api/reservations?q=${encodeURIComponent(v)}`).catch(() => ({ data: [] })),
+        const q = encodeURIComponent(v);
+        // Every one of these is fail-soft on purpose, same as the guest/
+        // reservation lookups always were: a role the backend refuses (a
+        // housekeeper hitting /api/users/search, say) just gets an empty
+        // section back instead of an error, exactly like a role with no
+        // reservations access already saw an empty default above. Literally
+        // everything the system holds is one box now — guests, reservations,
+        // rooms, facilities, folios, staff, activity log entries, and a
+        // person's own messages — so nothing needs its own gate here; the
+        // service that owns each record still enforces who may read it.
+        const [guests, reservations, rooms, facilities, folios, users, activity, messages] = await Promise.all([
+          api.get(`/api/guests/search?q=${q}`).catch(() => ({ data: [] })),
+          api.get(`/api/reservations?q=${q}`).catch(() => ({ data: [] })),
+          api.get(`/api/rooms/search?q=${q}`).catch(() => ({ data: [] })),
+          api.get(`/api/facilities/search?q=${q}`).catch(() => ({ data: [] })),
+          api.get(`/api/folios?q=${q}`).catch(() => ({ data: [] })),
+          api.get(`/api/users/search?q=${q}`).catch(() => ({ data: [] })),
+          api.get(`/api/activity?q=${q}&pageSize=5`).catch(() => ({ data: { rows: [] } })),
+          api.get(`/api/messages/search?q=${q}`).catch(() => ({ data: [] })),
         ]);
         // Ignore a slow response that a newer query has superseded.
         if (seq !== searchSeq.current) return;
         setSearchResults({
           pages,
-          guests: (g.data || []).slice(0, 5),
-          reservations: (r.data || []).slice(0, 5),
+          guests: (guests.data || []).slice(0, 5),
+          reservations: (reservations.data || []).slice(0, 5),
+          rooms: (rooms.data || []).slice(0, 5),
+          facilities: (facilities.data || []).slice(0, 5),
+          folios: (folios.data || []).slice(0, 5),
+          users: (users.data || []).slice(0, 5),
+          activity: (activity.data?.rows || []).slice(0, 5),
+          messages: (messages.data || []).slice(0, 5),
         });
       } catch {
         /* swallow */
@@ -645,71 +697,168 @@ export default function Layout() {
           <div className="cb-search-wrap" data-tour="tour-search" ref={searchRef}>
             <input
               className="cb-search"
-              placeholder="Search reservations, guests, and more"
+              placeholder="Search guests, reservations, rooms, folios, staff, and more"
               value={searchQ}
               onChange={(e) => onSearchChange(e.target.value)}
               onFocus={() => setSearchOpen(true)}
             />
-            {searchOpen &&
-            searchResults &&
-            (searchResults.pages.length || searchResults.guests.length || searchResults.reservations.length) ? (
+            {searchOpen && searchResults && Object.values(searchResults).some((list) => list.length) ? (
               <div className="cb-search-pop">
-                {searchResults.pages.length > 0 && (
-                  <>
-                    <div className="cb-search-section">Pages</div>
-                    {searchResults.pages.map((n) => (
-                      <button
-                        key={n.key}
-                        className="cb-search-item"
-                        onClick={() => {
-                          setSearchOpen(false);
-                          navigate(n.to);
-                        }}
-                      >
-                        <span>
-                          <Icon name={n.icon} size={14} strokeWidth={2} /> {n.label}
-                        </span>
-                        <span className="muted">{n.group}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-                {searchResults.guests.length > 0 && (
-                  <>
-                    <div className="cb-search-section">Guests</div>
-                    {searchResults.guests.map((g) => (
-                      <button
-                        key={g.id}
-                        className="cb-search-item"
-                        onClick={() => {
-                          setSearchOpen(false);
-                          navigate(`/guests?id=${g.id}`);
-                        }}
-                      >
-                        <span>{g.displayName}</span>
-                        <span className="muted">{g.profileNumber}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-                {searchResults.reservations.length > 0 && (
-                  <>
-                    <div className="cb-search-section">Reservations</div>
-                    {searchResults.reservations.map((r) => (
-                      <button
-                        key={r.id}
-                        className="cb-search-item"
-                        onClick={() => {
-                          setSearchOpen(false);
-                          navigate(`/reservations/${r.id}`);
-                        }}
-                      >
-                        <span>{r.guestName || r.confirmationNumber || r.id.slice(0, 8)}</span>
-                        <span className="muted">{r.confirmationNumber}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
+                <SearchSection
+                  title="Pages"
+                  items={searchResults.pages}
+                  renderItem={(n) => (
+                    <button
+                      key={n.key}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(n.to);
+                      }}
+                    >
+                      <span>
+                        <Icon name={n.icon} size={14} strokeWidth={2} /> {n.label}
+                      </span>
+                      <span className="muted">{n.group}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Guests"
+                  items={searchResults.guests}
+                  renderItem={(g) => (
+                    <button
+                      key={g.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/guests?id=${g.id}`);
+                      }}
+                    >
+                      <span>{g.displayName}</span>
+                      <span className="muted">{g.profileNumber}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Reservations"
+                  items={searchResults.reservations}
+                  renderItem={(r) => (
+                    <button
+                      key={r.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/reservations/${r.id}`);
+                      }}
+                    >
+                      <span>{r.guestName || r.confirmationNumber || r.id.slice(0, 8)}</span>
+                      <span className="muted">{r.confirmationNumber}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Rooms"
+                  items={searchResults.rooms}
+                  renderItem={(r) => (
+                    <button
+                      key={r.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/rooms?highlight=${r.id}`);
+                      }}
+                    >
+                      <span>Room {r.number}</span>
+                      <span className="muted">{r.roomType?.name}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Facilities"
+                  items={searchResults.facilities}
+                  renderItem={(f) => (
+                    <button
+                      key={f.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/amenities?facility=${f.code}`);
+                      }}
+                    >
+                      <span>{f.name}</span>
+                      <span className="muted">{f.category}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Folios"
+                  items={searchResults.folios}
+                  renderItem={(fo) => (
+                    <button
+                      key={fo.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/folios/${fo.id}`);
+                      }}
+                    >
+                      <span>{fo.folioNumber}</span>
+                      <span className="muted">{fo.guestName || fo.status}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Staff"
+                  items={searchResults.users}
+                  renderItem={(u) => (
+                    <button
+                      key={u.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/users?id=${u.id}`);
+                      }}
+                    >
+                      <span>{u.displayName}</span>
+                      <span className="muted">{u.username}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Activity log"
+                  items={searchResults.activity}
+                  renderItem={(a) => (
+                    <button
+                      key={a.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate(`/activity?q=${encodeURIComponent(searchQ)}`);
+                      }}
+                    >
+                      <span>{a.summary}</span>
+                      <span className="muted">{a.actorName}</span>
+                    </button>
+                  )}
+                />
+                <SearchSection
+                  title="Messages"
+                  items={searchResults.messages}
+                  renderItem={(m) => (
+                    <button
+                      key={m.id}
+                      className="cb-search-item"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        openChat(m.senderId === user.id ? m.recipientId : m.senderId);
+                      }}
+                    >
+                      <span>{m.body}</span>
+                      <span className="muted">{new Date(m.createdAt).toLocaleDateString()}</span>
+                    </button>
+                  )}
+                />
               </div>
             ) : searchOpen && !searchQ.trim() && defaultReservations.length > 0 ? (
               // Nothing typed yet — show the soonest arrivals instead of an

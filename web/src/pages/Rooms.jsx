@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api';
 import { STATUS_ORDER as ROOM_STATUSES, statusMeta } from '../sim/statusMeta';
 import { labelize } from '../lib/labels';
@@ -43,6 +44,12 @@ export default function Rooms() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupTab, setSetupTab] = useState('room');
 
+  const [searchParams] = useSearchParams();
+  // The room the global search bar linked here for — briefly highlighted and
+  // scrolled to once the list has loaded, then cleared so it doesn't linger
+  // as a permanently-selected row.
+  const [highlightId, setHighlightId] = useState(null);
+
   const [priceEdit, setPriceEdit] = useState({}); // { [code]: pesosString }
   // The room type being fully edited, or null. One at a time — two open cards
   // in a 300px rail would leave neither readable.
@@ -65,6 +72,20 @@ export default function Rooms() {
   // Live scope — the room list with housekeeping status, plus out-of-service /
   // restored transitions from work orders.
   useLiveRefresh(load, { channels: channels('rooms', 'maintenance') });
+
+  // The global search bar links here as /rooms?highlight=<roomId>. Wait for
+  // the list to actually contain that row before scrolling to it — on a cold
+  // load `rooms` is still empty on the first render the query param arrives.
+  useEffect(() => {
+    const id = searchParams.get('highlight');
+    if (!id || !rooms.some((r) => r.id === id)) return;
+    setHighlightId(id);
+    const row = document.getElementById(`room-row-${id}`);
+    row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const t = setTimeout(() => setHighlightId(null), 2400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, searchParams]);
 
   async function setStatus(id, status) {
     try {
@@ -263,7 +284,11 @@ export default function Rooms() {
                       // kind of thing that gets a room double-assigned.
                       const meta = statusMeta(r.status);
                       return (
-                        <tr key={r.id}>
+                        <tr
+                          key={r.id}
+                          id={`room-row-${r.id}`}
+                          className={r.id === highlightId ? 'is-linked' : undefined}
+                        >
                           <td>
                             <span className="status-dot" style={{ background: meta.color }} />
                             {r.number}
