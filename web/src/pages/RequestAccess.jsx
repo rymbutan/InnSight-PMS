@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../api';
 import AuthHero from '../components/AuthHero';
 import AuthBrandMark from '../components/AuthBrandMark';
+import EyeIcon from '../components/EyeIcon';
 
 // Survives a refresh or a closed tab: approval can take anywhere from
 // minutes to days, and losing the waiting screen on reload would dump
@@ -308,7 +309,7 @@ export default function RequestAccess() {
                     aria-pressed={showPassword}
                     title={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? '🙈' : '👁'}
+                    <EyeIcon off={showPassword} />
                   </button>
                 </div>
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
 import AuthShell from '../components/AuthShell';
+import EyeIcon from '../components/EyeIcon';
 
 // Redeem a reset link. The token arrives in the query string, never typed.
 //
@@ -103,7 +104,7 @@ export default function ResetPassword() {
           aria-pressed={show}
           title={show ? 'Hide password' : 'Show password'}
         >
-          {show ? '🙈' : '👁'}
+          <EyeIcon off={show} />
         </button>
       </div>
 
