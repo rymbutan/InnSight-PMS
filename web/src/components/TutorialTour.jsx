@@ -22,11 +22,22 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import Icon from './Icon';
 
+// The sidebar step has a phone-width alternate rather than just vanishing
+// there: below 640px the rail itself is display:none (see .mobile-tabbar in
+// styles.css) and a fixed bottom tab bar is the real primary navigation, so
+// the tour should point at THAT, not silently skip explaining navigation
+// altogether on a phone. Which one applies is decided once per tour open —
+// see `isPhone` below — the same snapshot-and-don't-recheck approach already
+// used for role/section visibility in this file.
 const CHROME_STEPS = [
   {
     target: '[data-tour="tour-sidebar"]',
+    phoneTarget: '[data-tour="tour-mobile-nav"]',
     title: 'Your navigation',
+    phoneTitle: 'Your navigation',
     body: 'Every module you can reach lives here, grouped by section. Collapse it to an icon rail with the arrow at the top.',
+    phoneBody:
+      'Home, Bookings, Rooms, and Messages sit in this bar — tap More for everything else, the same full list the sidebar shows on a larger screen. You can also add InnSight to your home screen from your browser menu, so it opens like an app.',
   },
   {
     target: '[data-tour="tour-search"]',
@@ -234,6 +245,20 @@ function resolveTarget(target) {
   return document.querySelector(target);
 }
 
+// A chrome target can EXIST while being irrelevant — the permanent sidebar
+// and the phone tab bar are both always in the DOM (see the file header on
+// CHROME_STEPS) with CSS `display: none` hiding whichever one the current
+// width doesn't use. A plain querySelector match would still highlight it —
+// as a zero-size ring in the corner of the screen, since a display:none
+// element's rect is all zeroes. Checking the rect itself, not just presence,
+// is what tells "exists" apart from "exists but hidden right now".
+function isVisibleTarget(target) {
+  const el = resolveTarget(target);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
 const INTRO_STEP = {
   target: null,
   title: 'Welcome to InnSight PMS',
@@ -285,7 +310,18 @@ export default function TutorialTour({ open, onFinish }) {
   // a role that cannot change mid-tour anyway.
   const steps = useMemo(() => {
     if (!open) return [];
-    const chrome = CHROME_STEPS.filter((s) => !s.target || resolveTarget(s.target));
+    // Matches styles.css's own phone breakpoint (.mobile-tabbar's @media
+    // (max-width: 640px)) exactly — this has to agree with the CSS or the
+    // sidebar-vs-tab-bar choice below picks the one that's actually hidden.
+    const isPhone = window.innerWidth <= 640;
+    const chrome = CHROME_STEPS.map((s) => {
+      const target = isPhone && s.phoneTarget ? s.phoneTarget : s.target;
+      return {
+        target,
+        title: isPhone && s.phoneTitle ? s.phoneTitle : s.title,
+        body: isPhone && s.phoneBody ? s.phoneBody : s.body,
+      };
+    }).filter((s) => !s.target || isVisibleTarget(s.target));
     const pages = PAGES.filter(
       (p) => (!p.roles || hasRole(...p.roles)) && (p.core || hasSection(p.key))
     ).flatMap((p) => {
