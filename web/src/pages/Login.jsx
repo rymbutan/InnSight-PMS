@@ -132,18 +132,12 @@ export default function Login() {
               </button>
             </div>
 
-            {attemptsLeft !== null && (
+            {/* Nothing once locked — the red error below already says "Account
+                is locked.", and repeating it here just above the same button
+                that produced it read as the page talking to itself. */}
+            {attemptsLeft !== null && attemptsLeft > 0 && (
               <p className="login-lockout-hint muted">
-                {attemptsLeft > 0 ? (
-                  <>
-                    {attemptsLeft} attempt{attemptsLeft === 1 ? '' : 's'} left before your account locks.
-                  </>
-                ) : (
-                  <>
-                    Account is locked. An administrator has to re-enable it — it won&rsquo;t unlock on
-                    its own.
-                  </>
-                )}
+                {attemptsLeft} attempt{attemptsLeft === 1 ? '' : 's'} left before your account locks.
               </p>
             )}
 
