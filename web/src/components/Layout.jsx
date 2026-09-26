@@ -1187,7 +1187,7 @@ export default function Layout() {
           so this costs nothing on the desktop/tablet rail layout above. "More"
           reuses the drawer state the hamburger already drives; it is not a
           sixth destination, it is the same drawer with a second door. */}
-      <nav className="mobile-tabbar" aria-label="Primary">
+      <nav className="mobile-tabbar" aria-label="Primary" data-tour="tour-mobile-nav">
         {mobileTabs.map((n) => {
           const label = MOBILE_TAB_LABELS[n.key] || n.label;
           return (
