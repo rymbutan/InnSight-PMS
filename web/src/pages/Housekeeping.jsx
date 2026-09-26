@@ -216,6 +216,15 @@ export default function Housekeeping() {
   const [rooms, setRooms] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [game, setGame] = useState(null); // { type, room, reservation }
+  // The last inspection's outcome for whichever room ran it — a FAIL leaves
+  // the status exactly where it was (a DIRTY room that fails stays DIRTY),
+  // so the map tile and the panel's action buttons look identical to before
+  // anything happened. Without this, the only sign anything ran at all was a
+  // toast that had already faded by the time someone looked back at the
+  // panel — indistinguishable from the button not working. Keyed by room id
+  // so it only ever shows for the room it's actually about, and cleared the
+  // moment that room's next game starts.
+  const [lastResult, setLastResult] = useState(null); // { roomId, ok, message }
   const [hover, setHover] = useState(null); // { room, x, y }
   const [flash, setFlash] = useState(() => new Set());
   const flashTimers = useRef({});
@@ -231,7 +240,13 @@ export default function Housekeeping() {
   // SignOffLockNotice, and the matching 403 in the inventory service. Held
   // separately from `canClean` precisely so an account with only the
   // housekeeping role gets one and not the other.
-  const canSignOff = isSupervisor;
+  //
+  // NOT the same list as `isSupervisor`: the inventory service's
+  // INSPECTION_SIGNOFF_ROLES (services/inventory/src/routes/inventory.routes.js)
+  // also trusts FRONT_DESK with this specific action, so gating the button on
+  // `isSupervisor` alone showed a front-desk account SignOffLockNotice for a
+  // request the backend would actually have accepted.
+  const canSignOff = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   // Who may ring housekeeping. Mirrors CALLERS on POST /api/housekeeping-calls.
   const canCall = hasRole('ADMIN', 'MANAGER', 'FRONT_DESK');
   const [callReason, setCallReason] = useState('CLEANING');
@@ -299,6 +314,7 @@ export default function Housekeeping() {
         reservation = null;
       }
     }
+    setLastResult(null);
     setGame({ type, room, reservation });
   }
 
@@ -420,7 +436,11 @@ export default function Housekeeping() {
     },
   };
 
-  async function act(roomId, status, msg) {
+  // `toastKind` defaults to 'success' for every other caller (Mark Out of
+  // Service, Report Inadequate Cleaning, ...) — all genuinely successful
+  // status changes. The inspection-fail path below passes 'error' because a
+  // room going DIRTY-to-DIRTY has nothing else to show that it happened.
+  async function act(roomId, status, msg, toastKind = 'success') {
     const guard = NEEDS_CONFIRM[status];
     if (guard) {
       const room = rooms.find((r) => r.id === roomId);
@@ -436,7 +456,7 @@ export default function Housekeeping() {
       await api.patch(`/api/rooms/${roomId}/status`, { status });
       setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, status } : r)));
       flashRoom(roomId);
-      toast.success(msg);
+      toast[toastKind](msg);
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -709,6 +729,16 @@ export default function Housekeeping() {
                   </p>
                 </div>
               )}
+              {/* Persists until this room's next attempt (cleared in
+                  launchInspection), unlike the toast that reported the same
+                  thing — a FAIL leaves the status and the buttons below
+                  looking exactly like nothing was ever tried. */}
+              {lastResult && lastResult.roomId === selected.id && (
+                <p className={lastResult.ok ? 'hk-result hk-result--pass' : 'hk-result hk-result--fail'}>
+                  <Icon name={lastResult.ok ? 'check-circle' : 'alert-circle'} size={14} strokeWidth={2} />
+                  {lastResult.message}
+                </p>
+              )}
               <div className="hk-actions">
                 {panelActions(
                   selected,
@@ -780,13 +810,15 @@ export default function Housekeeping() {
                   // credit sends the room back for another turnover rather
                   // than through on a best-effort pass.
                   if (passesInspection(items)) {
+                    setLastResult({ roomId: room.id, ok: true, message: passMessage });
                     act(room.id, passStatus, passMessage);
                   } else {
-                    act(
-                      room.id,
-                      'DIRTY',
-                      `Room ${room.number} inspection found problems — needs re-cleaning.`
-                    );
+                    const failMessage = `Room ${room.number} inspection found problems — needs re-cleaning.`;
+                    // Recorded even though the room started and ends DIRTY: that
+                    // no-op status write is exactly why this needs its own
+                    // signal, not just the toast below.
+                    setLastResult({ roomId: room.id, ok: false, message: failMessage });
+                    act(room.id, 'DIRTY', failMessage, 'error');
                   }
                 }}
               />

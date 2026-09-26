@@ -6857,6 +6857,34 @@ html[data-theme='dark'] .hk-tooltip {
   grid-column: 1 / -1;
 }
 
+/* The last inspection's outcome for the room in the panel right now — see
+   Housekeeping.jsx's `lastResult`. A FAIL is the one that matters: it leaves
+   the room's status (and so the buttons right below this) unchanged, so this
+   is the only thing on screen saying the attempt happened at all. */
+.hk-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+.hk-result svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.hk-result--pass {
+  background: var(--green-soft);
+  color: var(--on-green-soft);
+}
+.hk-result--fail {
+  background: var(--danger-soft);
+  color: var(--on-danger-soft);
+}
+
 /* — game access gating notice — */
 .hk-game-lock {
   display: flex;
