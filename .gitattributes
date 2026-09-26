@@ -15,3 +15,15 @@
 *.js text eol=lf
 *.jsx text eol=lf
 *.css text eol=lf
+
+# Not caught by the prettier/CI reasoning above (`*.json` isn't in that
+# --check glob) — this is a DEPLOY-time bug instead: `git archive` run on
+# Windows (core.autocrlf=true) applies the same text-conversion a checkout
+# would, so a plain `git archive` of a new .json file — e.g. web/public/
+# manifest.json, added for PWA installability — came out CRLF even though
+# the committed blob is LF, while scp'd straight to the Linux deploy
+# directory with no checkout step to convert it back. Harmless for JSON
+# parsing itself, but pointless drift from the committed content once it is
+# actually deployed, and confusing when hash-verifying a deploy against the
+# source finds a diff that reads as identical.
+*.json text eol=lf
