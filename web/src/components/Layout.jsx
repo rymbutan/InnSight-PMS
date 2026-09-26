@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useTheme } from '../theme';
 import api from '../api';
@@ -673,6 +673,10 @@ export default function Layout() {
           content column as a row underneath it, rather than the topbar being
           scoped to the content column alone. */}
       <header className="cb-topbar">
+          <Link to="/" className="cb-brand" aria-label="InnSight — go to dashboard">
+            <img src="/brand/innsight-mark.png" alt="" aria-hidden="true" />
+          </Link>
+
           <button
             type="button"
             className="cb-hamburger"
