@@ -466,6 +466,26 @@ button.danger {
   z-index: 120;
 }
 
+/* The one piece of brand chrome that's on screen regardless of route or
+   whether the sidebar is collapsed/drawer-hidden — the rail's own mark
+   scrolls away with it on a narrow screen, this doesn't. Just the icon, not
+   the full wordmark lockup: the topbar's real job is the search bar next to
+   it, not a second logo treatment competing with the sidebar's. */
+.cb-brand {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.cb-brand img {
+  height: 28px;
+  width: 28px;
+  object-fit: contain;
+  display: block;
+}
+html[data-theme='dark'] .cb-brand img {
+  filter: brightness(1.12);
+}
+
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
    so this is the small-screen affordance only. */
 .cb-hamburger {
