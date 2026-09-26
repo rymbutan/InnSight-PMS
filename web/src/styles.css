@@ -456,7 +456,14 @@ button.danger {
   margin-top: -16px;
   position: sticky;
   top: 0;
-  z-index: 100;
+  /* Above .cb-sidebar (110): the topbar's own popovers — search, notifications,
+     account — extend down past the topbar's height into the row the sidebar
+     occupies, and at a LOWER z-index than the sidebar they painted underneath
+     it there (the search results dropdown's left edge went missing behind the
+     rail). A child's own z-index can't rescue this — .cb-search-pop is 200,
+     but that only wins within .cb-topbar's own stacking context, which was
+     itself still behind the sidebar. */
+  z-index: 120;
 }
 
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
