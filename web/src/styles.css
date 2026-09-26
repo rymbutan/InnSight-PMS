@@ -4353,6 +4353,10 @@ tr.active td {
   position: relative;
   z-index: 1;
   margin-top: 48px;
+  /* Matches .login-hero-highlight's left padding so its text lines up with
+     the highlight card's text above it instead of sitting flush against
+     the panel edge while the card's copy is inset. */
+  padding-left: 22px;
 }
 /* Now varies per slide (was a fixed "Introducing new features" repeated
    under every slide's paragraph), so it gets the same fade-in as the text
