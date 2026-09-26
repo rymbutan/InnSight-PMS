@@ -165,11 +165,24 @@ const WORDS = [
   'burat',
   'pekpek',
   'puki',
+  // '-ng' linker form ("puki" + ng, "titi" + ng, "tite" + ng): added as its
+  // own root rather than by teaching SUFFIX a bare "ng" — that suffix would
+  // attach to every other word in this list too, and nothing here checked
+  // whether each of those collides with something ordinary the way "spic" +
+  // "y" does. 'puke' and 'puking' are deliberately ABSENT from this family:
+  // both are the ordinary English word for vomiting, and "guest puked in the
+  // elevator" is exactly the incident report this filter must not block.
+  'pukeng',
   'titi',
+  'tite',
+  'titeng',
+  'titing',
   'otin',
+  'bayag',
   'jakol',
   'kantot',
   'kantutan',
+  'kantutin',
   'chupa',
   'tangna',
   'tangena',
@@ -253,6 +266,7 @@ const PHRASES = [
   // linen) and 'touch me' — that last one is how someone reports being touched,
   // and blocking the report is worse than the word.
   'have sex',
+  'sex tayo',
   'sex with me',
   'sex with you',
   'sleep with me',

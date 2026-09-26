@@ -49,6 +49,11 @@ const CLEAN = [
   'Post the minibar sale through the POS terminal.',
   'Rate code BS applies to the AF block this week.',
   'Room 214 needs 2 sht and 1 blanket.',
+  // 'puke'/'puking' are deliberately absent from the Tagalog '-ng' family
+  // (see profanity.js) because they are the ordinary English word for
+  // vomiting, and this is exactly the incident report that must get through.
+  'The guest puked in the elevator, please send housekeeping.',
+  'She was puking all night, can we get her a doctor.',
 ];
 
 const DIRTY = [
@@ -88,6 +93,13 @@ const DIRTY = [
   'lmfao',
   'tangna naman',
   'putragis',
+  // Newly added roots and their '-ng' linker variants.
+  'tite mo',
+  'titeng laki',
+  'titing laki',
+  'pukeng ina mo',
+  'bayag mo',
+  'kantutin kita',
 ];
 
 test('ordinary hotel messages are never blocked', () => {
@@ -134,6 +146,7 @@ test('blocks a sexual proposition made of otherwise ordinary words', () => {
     "let's have sex",
     'Lets have sex tonight',
     'do you want to have sex',
+    'sex tayo mamaya',
     'i want to sleep with me later', // awkward, but the phrase is the trigger
     'can we make love',
     'send nudes',
