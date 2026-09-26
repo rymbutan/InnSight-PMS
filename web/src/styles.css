@@ -1613,6 +1613,67 @@ html[data-theme='dark'] .cb-brand img {
   }
 }
 
+/* ── Phone app shell: bottom tab bar ──────────────────────────────────────
+   Hidden everywhere above phone width — the rail and its drawer (above) are
+   the whole nav story down to tablet width. Below 640px a bottom tab bar
+   takes over as the primary navigation surface, the same pattern a native
+   app uses; "More" opens the identical drawer the hamburger already drove,
+   so nothing reachable from the rail becomes unreachable here (see
+   Layout.jsx's mobileTabs). */
+.mobile-tabbar {
+  display: none;
+}
+@media (max-width: 640px) {
+  .mobile-tabbar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 130;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.08);
+  }
+  .mobile-tab {
+    flex: 1;
+    /* A flex item's default min-width is its content's, not 0 — without this
+       "Housekeeping" alone refused to shrink below its own label width and
+       shoved the fifth tab (More) off the right edge of the bar entirely. */
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--muted-2);
+    font-size: 11px;
+    line-height: 1.15;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .mobile-tab span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-tab.active {
+    color: var(--accent);
+  }
+
+  /* "More" already reaches the whole rail from the tab bar; the topbar's own
+     hamburger would just be a second door to the same drawer. */
+  .cb-hamburger {
+    display: none;
+  }
+}
+
 .cb-main {
   flex: 1;
   /* A bit more breathing room under the topbar specifically than on the
@@ -1621,6 +1682,15 @@ html[data-theme='dark'] .cb-brand img {
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
+}
+@media (max-width: 640px) {
+  .cb-main {
+    /* The bottom tab bar sits fixed over this space on every page, so the
+       last thing on the page must clear it rather than end up half-hidden
+       behind it — 48px of bar plus its own 12px vertical padding, plus
+       whatever the home-indicator safe area adds on top. */
+    padding: 16px 16px calc(76px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* ==========================================================================
@@ -1969,6 +2039,44 @@ html[data-theme='dark'] .cb-brand img {
   font-size: 26px;
   font-weight: 600;
 }
+@media (max-width: 640px) {
+  .page-head h1 {
+    font-size: 21px;
+  }
+  .page-head {
+    margin-bottom: 14px;
+  }
+}
+
+/* Honest, not blocking: shown above the 3D room/scenario editor and the
+   14-day calendar boards — a drag-and-drop 3D scene and a wide scheduling
+   grid are not things a phone screen makes native-feeling no matter how the
+   rest of the shell is dressed up, and pretending otherwise is worse than
+   saying so. The page underneath still opens; this is a heads-up, not a
+   wall. Hidden above phone width — desktop/tablet never see it. */
+.mobile-wide-notice {
+  display: none;
+}
+@media (max-width: 640px) {
+  .mobile-wide-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--control-radius);
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .mobile-wide-notice svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: var(--muted-2);
+  }
+}
 /* Title and its section switcher travel together, so the pair wraps as one unit
    instead of the switcher dropping to its own line before the title does. */
 .page-head-title {
@@ -1994,6 +2102,38 @@ html[data-theme='dark'] .cb-brand img {
   margin: 0 0 14px;
   font-size: 15px;
   font-weight: 600;
+}
+@media (max-width: 640px) {
+  .panel,
+  .panel-tinted {
+    padding: 14px;
+  }
+
+  /* Every page in this app hands the browser a bare <table> with no
+     wrapper div to scroll — see the pages under web/src/pages/. Rather than
+     add a wrapper to each one, the table itself becomes the scroll
+     container: giving it `display: block` here does not break the table
+     layout algorithm, because thead/tr/td keep their own table-display
+     values and the browser synthesizes the anonymous table box they still
+     need (CSS Display §2.7) — it only changes what scrolls.
+
+     `white-space: nowrap` on the cells is load-bearing, not cosmetic: the
+     auto table-layout algorithm's first instinct is to WRAP text to fit
+     100% width rather than overflow it, which is exactly wrong here — a
+     phone reading five wrapped words per cell is worse than one it can
+     swipe sideways to see unwrapped. Forcing nowrap is what makes the
+     table wider than the screen, which is what gives `overflow-x` above
+     something to actually scroll. */
+  table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table th,
+  table td {
+    white-space: nowrap;
+  }
 }
 
 /* ==========================================================================

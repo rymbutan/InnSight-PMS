@@ -569,6 +569,25 @@ export default function Layout() {
     }))
   );
 
+  // Bottom tab bar destinations, phone width only (see .mobile-tabbar in
+  // styles.css) — a curated subset, not every reachable section: five slots
+  // is the ceiling before a bottom bar stops reading as navigation. The
+  // fifth slot is always "More", which opens the same drawer the hamburger
+  // does rather than a sixth route, so nothing reachable from the rail
+  // becomes unreachable on a phone. Messages comes from `messagesEntry`
+  // rather than `sections` because it is chrome:'topbar' and `sections`
+  // filters those out.
+  const MOBILE_TAB_KEYS = ['dashboard', 'reservations', 'housekeeping'];
+  // Short forms for a ~78px-wide tab, not the sidebar's full label — "Map &
+  // Housekeeping" or "Booking & Reservations" would each need the ellipsis
+  // this bar's CSS provides as a fallback, not as the everyday reading.
+  const MOBILE_TAB_LABELS = { dashboard: 'Home', reservations: 'Bookings', housekeeping: 'Rooms' };
+  const allNavItems = NAV_SECTIONS.flatMap((s) => s.items);
+  const mobileTabs = [
+    ...MOBILE_TAB_KEYS.map((k) => allNavItems.find((n) => n.key === k)).filter((n) => n && reachable(n)),
+    ...(messagesEntry ? [messagesEntry] : []),
+  ];
+
   const initial = (user?.displayName || '?').slice(0, 1).toUpperCase();
 
   const sidebar = (
@@ -1163,6 +1182,40 @@ export default function Layout() {
           <NotificationPopups items={popups} onDismiss={dismissPopup} />
         </div>
       </div>
+
+      {/* Phone width only (see .mobile-tabbar) — hidden by CSS everywhere else,
+          so this costs nothing on the desktop/tablet rail layout above. "More"
+          reuses the drawer state the hamburger already drives; it is not a
+          sixth destination, it is the same drawer with a second door. */}
+      <nav className="mobile-tabbar" aria-label="Primary">
+        {mobileTabs.map((n) => {
+          const label = MOBILE_TAB_LABELS[n.key] || n.label;
+          return (
+            <NavLink
+              key={n.key}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) =>
+                `mobile-tab${
+                  isActive || n.matchPaths?.some((p) => location.pathname.startsWith(p)) ? ' active' : ''
+                }`
+              }
+            >
+              <Icon name={n.icon} size={22} strokeWidth={1.9} />
+              <span>{label}</span>
+            </NavLink>
+          );
+        })}
+        <button
+          type="button"
+          className={`mobile-tab${drawerOpen ? ' active' : ''}`}
+          onClick={() => setDrawerOpen(true)}
+        >
+          <Icon name="more-horizontal" size={22} strokeWidth={1.9} />
+          <span>More</span>
+        </button>
+      </nav>
+
       <KeyboardShortcuts />
       {/* In the SHELL, not on a page: a call has to interrupt wherever the
           housekeeper happens to be, which is the difference between a call and

@@ -195,6 +195,11 @@ export default function RoomLayouts() {
         </div>
       </div>
 
+      <div className="mobile-wide-notice">
+        <Icon name="alert-circle" size={14} />
+        <span>The 3D editor needs a mouse and a larger screen — it opens here, but is not built for a phone.</span>
+      </div>
+
       {view === 'scenarios' ? (
         <InspectionScenarios showTitle={false} />
       ) : (
