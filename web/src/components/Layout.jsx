@@ -575,8 +575,7 @@ export default function Layout() {
     <>
       <div className="side-head">
         <div className="side-brand">
-          <img className="side-brand-mark" src="/brand/innsight-mark.png" alt="InnSight" />
-          <img className="side-brand-wordmark" src="/brand/innsight-wordmark.png" alt="" aria-hidden="true" />
+          <img className="side-brand-mark" src="/brand/innsight-logo-full.png" alt="InnSight" />
         </div>
         {/* Desktop: collapse to an icon rail. Mobile: close the drawer. */}
         <button

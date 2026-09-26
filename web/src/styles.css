@@ -480,8 +480,11 @@ button.danger {
   object-fit: contain;
   display: block;
 }
+/* Same stronger lift the sidebar's .side-brand-mark uses now — this lockup
+   is mostly text, which needs more than the old icon-only mark's lift to
+   stay visible against the dark panel. */
 html[data-theme='dark'] .cb-brand img {
-  filter: brightness(1.12);
+  filter: brightness(1.85) saturate(0.9);
 }
 
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
@@ -537,25 +540,18 @@ html[data-theme='dark'] .cb-brand img {
 }
 .side-brand-mark {
   height: 30px;
-  width: 30px;
+  width: auto;
   object-fit: contain;
   display: block;
   flex-shrink: 0;
 }
-.side-brand-wordmark {
-  height: 18px;
-  width: auto;
-  object-fit: contain;
-  display: block;
-}
-/* The wordmark is deep green on transparent — on the dark theme it disappears
-   into the panel, so it is lifted rather than recoloured (recolouring a logo is
-   how a brand ends up with four unofficial versions). */
-html[data-theme='dark'] .side-brand-wordmark {
-  filter: brightness(1.85) saturate(0.9);
-}
+/* Deep green on transparent — on the dark theme it disappears into the panel,
+   so it is lifted rather than recoloured (recolouring a logo is how a brand
+   ends up with four unofficial versions). Same stronger lift the old
+   wordmark-only image needed, not the old icon-only mark's lighter one: this
+   is mostly text now, same as that wordmark was. */
 html[data-theme='dark'] .side-brand-mark {
-  filter: brightness(1.12);
+  filter: brightness(1.85) saturate(0.9);
 }
 .cb-search-wrap {
   position: relative;
