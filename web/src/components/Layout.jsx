@@ -574,9 +574,6 @@ export default function Layout() {
   const sidebar = (
     <>
       <div className="side-head">
-        <div className="side-brand">
-          <img className="side-brand-mark" src="/brand/innsight-logo-full.png" alt="InnSight" />
-        </div>
         {/* Desktop: collapse to an icon rail. Mobile: close the drawer. */}
         <button
           type="button"
@@ -673,7 +670,7 @@ export default function Layout() {
           scoped to the content column alone. */}
       <header className="cb-topbar">
           <Link to="/" className="cb-brand" aria-label="InnSight — go to dashboard">
-            <img src="/brand/innsight-logo-full.png" alt="" aria-hidden="true" />
+            <img src="/brand/innsight-logo-mark.png" alt="" aria-hidden="true" />
           </Link>
 
           <button
