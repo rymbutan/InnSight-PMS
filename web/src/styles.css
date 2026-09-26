@@ -3878,10 +3878,11 @@ tr.active td {
   background: var(--bg);
 }
 .login-panel {
-  width: min(1080px, 100%);
+  width: min(1240px, 100%);
+  min-height: min(620px, calc(var(--vh-full) - 56px));
   display: grid;
   grid-template-columns: 1fr 1.05fr;
-  border-radius: 32px;
+  border-radius: 44px;
   overflow: hidden;
   box-shadow: 0 30px 70px rgb(15 23 42 / 0.16);
 }
@@ -3891,12 +3892,12 @@ tr.active td {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 40px;
+  padding: 56px 56px;
   background: #fff;
 }
 .login-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 420px;
 }
 /* AuthShell wraps the mark in a Link back to sign-in. */
 .login-brandmark-link {
@@ -3906,19 +3907,20 @@ tr.active td {
 .login-brandmark {
   display: flex;
   align-items: center;
-  gap: 8px;
   margin-bottom: 32px;
 }
 .login-brandmark img {
-  width: 26px;
-  height: 26px;
+  height: 36px;
+  width: auto;
   object-fit: contain;
 }
-.login-brandmark span {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: #0a6b3d;
+/* Bigger, more noticeable lockup inside the auth card specifically — the
+   learn-more nav bar reuses .login-brandmark too and stays compact. */
+.login-card .login-brandmark {
+  margin-bottom: 36px;
+}
+.login-card .login-brandmark img {
+  height: 64px;
 }
 .login-card h1 {
   margin: 0 0 8px;
@@ -4439,6 +4441,12 @@ tr.active td {
   }
   .login-form-side {
     padding: 32px 24px;
+  }
+  .login-panel {
+    min-height: 0;
+  }
+  .login-card .login-brandmark img {
+    height: 48px;
   }
 }
 @media (max-width: 768px) {

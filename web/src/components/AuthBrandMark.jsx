@@ -4,8 +4,7 @@
 export default function AuthBrandMark() {
   return (
     <div className="login-brandmark">
-      <img src="/brand/innsight-logo-icon.png" alt="" aria-hidden="true" />
-      <span>InnSight</span>
+      <img src="/brand/innsight-logo-full.png" alt="InnSight Hotel PMS" />
     </div>
   );
 }
