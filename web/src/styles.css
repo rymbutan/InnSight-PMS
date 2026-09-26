@@ -466,25 +466,22 @@ button.danger {
   z-index: 120;
 }
 
-/* The one piece of brand chrome that's on screen regardless of route or
-   whether the sidebar is collapsed/drawer-hidden — the rail's own mark
-   scrolls away with it on a narrow screen, this doesn't. */
+/* The only piece of brand chrome left now that the sidebar carries none of
+   its own — the icon mark, not the full wordmark lockup: the topbar's real
+   job is the search bar next to it, not a logo treatment. */
 .cb-brand {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 .cb-brand img {
-  height: 30px;
-  width: auto;
+  height: 28px;
+  width: 28px;
   object-fit: contain;
   display: block;
 }
-/* Same stronger lift the sidebar's .side-brand-mark uses now — this lockup
-   is mostly text, which needs more than the old icon-only mark's lift to
-   stay visible against the dark panel. */
 html[data-theme='dark'] .cb-brand img {
-  filter: brightness(1.85) saturate(0.9);
+  filter: brightness(1.12);
 }
 
 /* Opens the sidebar as an overlay drawer. The rail is permanent from 1024px up,
@@ -529,30 +526,6 @@ html[data-theme='dark'] .cb-brand img {
   background: var(--row-hover);
 }
 
-/* The brand lockup at the top of the rail: the emblem plus its own wordmark
-   artwork, rather than the UI font approximating the letterforms. */
-.side-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  overflow: hidden;
-}
-.side-brand-mark {
-  height: 30px;
-  width: auto;
-  object-fit: contain;
-  display: block;
-  flex-shrink: 0;
-}
-/* Deep green on transparent — on the dark theme it disappears into the panel,
-   so it is lifted rather than recoloured (recolouring a logo is how a brand
-   ends up with four unofficial versions). Same stronger lift the old
-   wordmark-only image needed, not the old icon-only mark's lighter one: this
-   is mostly text now, same as that wordmark was. */
-html[data-theme='dark'] .side-brand-mark {
-  filter: brightness(1.85) saturate(0.9);
-}
 .cb-search-wrap {
   position: relative;
   flex: 1;
@@ -1232,22 +1205,25 @@ html[data-theme='dark'] .side-brand-mark {
   }
 }
 
+/* Sized by its own content now, not pinned to the topbar's height — that
+   height was room reserved for the brand image this row no longer carries;
+   with only the collapse toggle left, holding onto it just left a slab of
+   empty white space above the nav. */
 .side-head {
-  height: var(--topbar-h);
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  /* Right-aligned while the rail is open — collapsed, it's the only thing
+     left in the row and reads better centred (see .side-collapsed below). */
+  justify-content: flex-end;
   gap: 8px;
-  padding: 0 14px 0 18px;
+  padding: 8px 14px;
   border-bottom: 1px solid transparent;
 }
 
-/* A bare glyph, not a button-looking control: no ring, no fill. It is chrome on
-   the rail's edge rather than an action in the page. The 26px box is kept as an
-   invisible hit area so the target still clears the 24x24 minimum even though
-   only the arrow is drawn. */
+/* A bare glyph again, not a bordered button — accent-green so it still
+   reads as chrome without a ring or fill drawing a box around it. */
 .side-collapse {
-  margin-left: auto;
   width: 26px;
   height: 26px;
   min-height: 0;
@@ -1259,13 +1235,12 @@ html[data-theme='dark'] .side-brand-mark {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted-2);
+  color: var(--accent);
   cursor: pointer;
   transition: color 0.14s ease;
 }
 .side-collapse:hover {
-  background: transparent;
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 .side-collapse:focus-visible {
   outline: 2px solid var(--accent);
@@ -1288,9 +1263,7 @@ html[data-theme='dark'] .side-brand-mark {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  /* Generous top padding so the first section label sits clear of the divider
-     under the brand rather than crowding it. */
-  padding: 22px 12px 18px;
+  padding: 10px 12px 18px;
   /* Space for the scrollbar is RESERVED, present or not.
      Styling ::-webkit-scrollbar at all opts Chromium out of overlay scrollbars,
      so the bar is a real 9px strip taken out of this element's content box. The
@@ -1448,7 +1421,6 @@ html[data-theme='dark'] .side-brand-mark {
    Labels go, icons stay centred. The group headings would be unreadable at
    this width, so they collapse to a hairline that keeps the grouping legible. */
 .side-collapsed .side-link-label,
-.side-collapsed .side-brand,
 .side-collapsed .side-user-text,
 .side-collapsed .side-user-out {
   display: none;
@@ -1511,7 +1483,7 @@ html[data-theme='dark'] .side-brand-mark {
   display: none;
 }
 .side-collapsed .side-head {
-  padding: 0 12px;
+  padding: 10px 12px;
   justify-content: center;
 }
 .side-collapsed .side-collapse {
@@ -11102,7 +11074,6 @@ html[data-theme='dark'] .chat-launcher-pop {
     width: 76px;
   }
   .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link-label,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-brand,
   .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-text,
   .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-out {
     display: none;
