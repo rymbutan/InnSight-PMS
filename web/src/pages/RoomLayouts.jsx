@@ -204,12 +204,6 @@ export default function RoomLayouts() {
         <InspectionScenarios showTitle={false} />
       ) : (
         <>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Edit the 3D floor plan used by the housekeeping training sim — furniture, interior walls, task
-            stations and room dimensions. Changes autosave to the server and are{' '}
-            <strong>live for every browser</strong> the moment you make them.
-          </p>
-
           <div className="panel">
             <div className="panel-head">
               <h3>Choose a layout to edit</h3>
