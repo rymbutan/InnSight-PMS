@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const Redis = require('ioredis');
 const { requireRole, JWT_SECRET, ROLE_GROUPS } = require('../middleware/auth');
 const { cancellationFeeCents, paymentProcessingFeeCents } = require('../lib/policies');
+const { remainingDepositRefundCents } = require('../lib/depositRefund');
 const { missingDepositField } = require('../lib/missingDepositField');
 const { computeAddOns } = require('../lib/addOns');
 const { makeInventoryClient, NoInventoryError, INVENTORY_URL } = require('../lib/inventoryClient');
@@ -1288,6 +1289,92 @@ router.post('/reservations/:id/cancel', requireRole(...STAFF), async (req, res) 
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
+// POST /api/reservations/:id/deposit-refund — refund or forfeit what is left
+// of a cancelled reservation's deposit after the cancellation fee.
+//
+// MGMT_AUDIT (Admin/Manager/Auditor), not the broader STAFF group /cancel
+// uses: this moves money back to a guest, the same role group Folio's own
+// /folios/:id/refund and void-transaction routes require for exactly that
+// reason (services/folio/src/routes/folio.routes.js's FINANCE group) — Front
+// Desk cancels a booking, but does not decide what happens to its deposit.
+router.post(
+  '/reservations/:id/deposit-refund',
+  requireRole(...ROLE_GROUPS.MGMT_AUDIT),
+  async (req, res) => {
+    try {
+      const { action, amountCents, reason } = req.body;
+      if (action !== 'refund' && action !== 'forfeit') {
+        return res.status(400).json({ error: 'action must be "refund" or "forfeit".' });
+      }
+      const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+      if (!r) return res.status(404).json({ error: 'Not found.' });
+      if (r.status !== 'CANCELLED') {
+        return res.status(409).json({ error: 'Only a cancelled reservation has a deposit decision to make.' });
+      }
+      if (r.depositForfeitedAt) {
+        return res.status(409).json({ error: 'The remaining deposit was already forfeited.' });
+      }
+      const remaining = remainingDepositRefundCents(r);
+      if (remaining <= 0) {
+        return res.status(409).json({ error: 'Nothing left of this deposit to refund.' });
+      }
+
+      if (action === 'forfeit') {
+        const updated = await prisma.reservation.update({
+          where: { id: r.id },
+          data: { depositForfeitedAt: new Date(), depositForfeitedBy: req.user?.sub },
+        });
+        await logActivity(
+          r.id,
+          req.user,
+          'deposit_forfeit',
+          `Remaining deposit of ₱${(remaining / 100).toFixed(2)} forfeited${reason ? ` — reason: ${reason}` : ''}`
+        );
+        return res.json(updated);
+      }
+
+      const refundCents = Math.round(Number(amountCents));
+      if (!Number.isFinite(refundCents) || refundCents <= 0) {
+        return res.status(400).json({ error: 'amountCents must be a positive number.' });
+      }
+      if (refundCents > remaining) {
+        return res.status(400).json({
+          error: 'amountCents exceeds what remains of this deposit.',
+          remainingCents: remaining,
+        });
+      }
+      const updated = await prisma.reservation.update({
+        where: { id: r.id },
+        data: {
+          depositRefundedCents: BigInt(refundedCents + refundCents),
+          depositRefundedAt: new Date(),
+          depositRefundedBy: req.user?.sub,
+          depositRefundReason: reason || null,
+        },
+      });
+      await logActivity(
+        r.id,
+        req.user,
+        'deposit_refund',
+        `Refunded ₱${(refundCents / 100).toFixed(2)} of the deposit${reason ? ` — reason: ${reason}` : ''}`
+      );
+      redis.publish(
+        'reservation:deposit_refunded',
+        JSON.stringify({
+          reservationId: r.id,
+          confirmationNumber: r.confirmationNumber,
+          guestName: r.guestName,
+          amountCents: refundCents,
+        })
+      );
+      res.json(updated);
+    } catch (err) {
+      console.error('[Reservation] Deposit refund error:', err.message);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
 
 // DELETE /api/reservations/:id — Admin/Manager ONLY (not the broader STAFF
 // group every other write route here uses). Front desk still cancels a
