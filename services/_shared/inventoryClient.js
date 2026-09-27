@@ -144,7 +144,15 @@ function makeInventoryClient({ name, secret, baseUrl = INVENTORY_URL }) {
     return body?.room ? [body.room] : [];
   }
 
-  return { acquireHold, attachHold, releaseHold, commitHold, getRoom, roomCandidates, baseUrl };
+  // Every physical room, for walk-in auto-assign (POST /api/walk-in with no
+  // assignedRoomId) — the only caller here that needs the whole roster rather
+  // than one type or one id, since a walk-in has no room type step to narrow
+  // the search the way a reservation's roomCandidates does.
+  async function listRooms() {
+    return call(`${baseUrl}/api/rooms`);
+  }
+
+  return { acquireHold, attachHold, releaseHold, commitHold, getRoom, listRooms, roomCandidates, baseUrl };
 }
 
 module.exports = { makeInventoryClient, NoInventoryError, INVENTORY_URL };

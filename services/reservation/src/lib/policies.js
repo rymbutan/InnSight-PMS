@@ -171,12 +171,20 @@ function commissionCents({ totalEstimateCents, source = 'DIRECT' }) {
   return Math.round(Number(totalEstimateCents) * rate);
 }
 
-// ── Payment processing fee (CARD / BANK_TRANSFER surcharge) ───────────────
+// ── Payment processing fee ──────────────────────────────────────────
+// A surcharge added when a guest pays by a method that costs the property
+// something to process (a card network's interchange fee, a bank's transfer
+// fee) — CARD and BANK_TRANSFER, never cash (see the call site in
+// folio.routes.js's POST /folios/:id/payments).
+//
 // Same round-half-up, scaled-integer arithmetic as computeTax's own
-// per-component loop, kept separate: this fee is a percentage of the PAYMENT
-// (deposit) amount, not of a charge subtotal. Ported verbatim from
-// services/folio/src/lib/policies.js, which owns the property's configured
-// feePercent (Settings → payment_processing_fee_percent).
+// per-component loop, kept as its own function rather than folded into
+// computeTax: this fee is a percentage of the PAYMENT amount, not of a
+// charge's subtotal, and the two must never be able to drift into sharing —
+// then silently disagreeing about — one code path. BigInt division truncates
+// toward zero, which only equals floor for a non-negative dividend, hence the
+// sign handled explicitly (a refund of a processing fee, if ever posted,
+// would pass a negative amountCents here).
 function paymentProcessingFeeCents({ amountCents, feePercent }) {
   const rate = Number(feePercent) || 0;
   if (rate <= 0) return 0n;
