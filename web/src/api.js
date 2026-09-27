@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { chatDockStoreKey, notifsStoreKey } from './lib/messageStorageKeys';
 
 // API_BASE is intentionally empty by default. That makes the frontend issue
 // requests to the *same origin it was loaded from* (e.g. `/api/auth/login`
@@ -43,6 +44,21 @@ api.interceptors.response.use(
   (err) => {
     // Auth: drop session and redirect to login on 401
     if (err.response?.status === 401) {
+      // Same cleanup as auth.jsx's logout() and for the same reason: these two
+      // keys are scoped per user so they never leak to the NEXT signed-in
+      // account, but nothing ever purged the CURRENT user's own copy, so it sat
+      // in localStorage after every sign-out (or, here, forced sign-out on an
+      // expired/revoked token) until the same account logged back in and it
+      // silently reappeared. Read the id before innsight_user is removed below.
+      try {
+        const prevUser = JSON.parse(localStorage.getItem('innsight_user') || 'null');
+        if (prevUser?.id) {
+          localStorage.removeItem(chatDockStoreKey(prevUser.id));
+          localStorage.removeItem(notifsStoreKey(prevUser.id));
+        }
+      } catch {
+        /* malformed stored user — nothing to key the cleanup on, skip it */
+      }
       localStorage.removeItem('innsight_token');
       localStorage.removeItem('innsight_user');
       if (!window.location.pathname.startsWith('/login')) {

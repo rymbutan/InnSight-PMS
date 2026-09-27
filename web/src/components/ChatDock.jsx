@@ -11,6 +11,7 @@ import RecordPicker from './RecordPicker';
 import { groupMessages, initialsOf, previewOf } from '../lib/messageGroups';
 import { allowedRecordTypes } from '../lib/recordRefs';
 import { useContacts, useConversation } from '../lib/useMessaging';
+import { chatDockStoreKey } from '../lib/messageStorageKeys';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Docked chat windows, bottom-right — the Facebook-style chat bar.
@@ -48,7 +49,12 @@ const NARROW_PX = 700;
 // open conversations for whoever signs in next, showing one person's contacts —
 // and, on open, one person's threads — to another. The machines most likely to
 // be shared are exactly the ones this runs on.
-const storeKey = (userId) => `innsight_chat_dock_${userId || 'anon'}`;
+//
+// Lives in lib/messageStorageKeys.js (not here) so auth.jsx's logout() can
+// purge THIS user's entry without importing this component: being keyed per
+// user stops it leaking to the NEXT signed-in account, but sign-out itself
+// never removed it, so it sat in localStorage indefinitely after "Sign out".
+const storeKey = chatDockStoreKey;
 
 // The un-scoped key this used to write. Removed on mount so terminals that
 // already have one stop handing it around; without this the leak survives the
