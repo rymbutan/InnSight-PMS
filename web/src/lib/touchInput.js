@@ -255,3 +255,18 @@ export function initialView(viewport, content, pad = 16) {
 export function minUserZoom(viewport, content) {
   return Math.min(MAP_ZOOM_MIN, fitView(viewport, content).z);
 }
+
+/** Pan to centre a content-space rectangle in the viewport — what a "jump to
+ *  this floor" control uses (a floor tab/selector, so a many-floor property
+ *  doesn't need to be found by panning through it blind on a phone or an
+ *  iPad). Deliberately does NOT touch zoom: whatever legibility level the
+ *  person already chose (pinched in, pinched out) carries over to the floor
+ *  they jump to, rather than resetting it on every tap. Clamped the same way
+ *  a drag is, so a floor near either end of a tall property still leaves the
+ *  drawing overlapping the viewport instead of scrolling past its edge. */
+export function focusView(view, viewport, content, rect) {
+  const z = view.z;
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  return clampPan({ x: viewport.w / 2 - cx * z, y: viewport.h / 2 - cy * z, z }, viewport, content);
+}

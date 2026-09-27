@@ -74,6 +74,9 @@ export function computeLayout(rooms) {
     const topCount = Math.ceil(sorted.length / 2);
     const rows = [sorted.slice(0, topCount), sorted.slice(topCount)];
 
+    // This floor's own span, top to bottom — for a "jump to this floor"
+    // control (see PanZoom's focusRect) to pan to, not just for drawing.
+    const floorTopY = y;
     const labelY = y + FLOOR_LABEL_H - 8;
     const rowTopY = y + FLOOR_LABEL_H;
     const corridorY = rowTopY + ROW_H;
@@ -91,8 +94,9 @@ export function computeLayout(rooms) {
     });
 
     const bottomH = rows[1].length ? ROW_H : 0;
-    floors.push({ floor: f, labelY, corridorY, count: sorted.length });
-    y = rowBotY + bottomH + FLOOR_GAP;
+    const floorBottomY = rowBotY + bottomH;
+    floors.push({ floor: f, labelY, corridorY, topY: floorTopY, bottomY: floorBottomY, count: sorted.length });
+    y = floorBottomY + FLOOR_GAP;
   }
 
   return { slots, floors, mapW, mapH: y - FLOOR_GAP + MAP_PAD_TOP };

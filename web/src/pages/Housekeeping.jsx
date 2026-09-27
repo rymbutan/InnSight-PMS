@@ -475,6 +475,9 @@ export default function Housekeeping() {
   // the desktop ones without a reload.
   const touch = useCoarsePointer();
   const occupancy = rooms.length ? Math.round(((counts.OCCUPIED || 0) / rooms.length) * 100) : 0;
+  // The floor tabs below call through this to jump the map to a floor,
+  // without resetting whatever zoom the person already pinched to.
+  const panZoomRef = useRef(null);
 
   return (
     <div>
@@ -499,7 +502,37 @@ export default function Housekeeping() {
               over an SVG gets claimed by the page, and there is no way to zoom
               the part that matters. <PanZoom> takes over on a coarse pointer
               only, and leaves the desktop container exactly as it was. */}
+          {/* Floor tabs — touch only, same reasoning as PanZoom itself: a
+              mouse already has the native scrollbar to find a floor with, but
+              a phone or an iPad has to pan a many-floor property blind to
+              reach one, which is exactly what "fit the screen" asked for.
+              Jumps by panning (see PanZoom's focusRect), not by resetting
+              zoom, so whatever legibility level was already pinched to
+              carries over to the floor landed on. */}
+          {touch && floors.length > 1 && (
+            <div className="hk-floor-tabs" role="tablist" aria-label="Jump to floor">
+              {floors.map((f) => (
+                <button
+                  key={f.floor}
+                  type="button"
+                  role="tab"
+                  className="hk-floor-tab"
+                  onClick={() =>
+                    panZoomRef.current?.focusRect({
+                      x: 0,
+                      y: f.topY,
+                      w: mapW,
+                      h: f.bottomY - f.topY,
+                    })
+                  }
+                >
+                  Floor {f.floor}
+                </button>
+              ))}
+            </div>
+          )}
           <PanZoom
+            ref={panZoomRef}
             enabled={touch}
             className="hk-map-scroll"
             contentW={mapW}
