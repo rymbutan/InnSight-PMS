@@ -18,20 +18,25 @@ status=0
 # *.json as well as *.js since navSections.json — THE section catalogue — is
 # shared the same way. It is JSON precisely so that one file can be `require`d by
 # the CommonJS services and `import`ed by the ESM web build, which also means the
-# web is now a vendoring target and has to be searched too: a catalogue that
-# drifts between the sidebar and the server guard is exactly the failure this
-# script exists to catch.
+# web is now a vendoring target for JSON. *.js files are NOT vendored into web —
+# web/src/lib has its own independently-authored modules that happen to share a
+# basename with a services/_shared file (e.g. date.js), so searching web for them
+# by basename alone produces false-positive drift; only services vendors *.js.
 for shared in "$shared_dir"/*.js "$shared_dir"/*.json; do
   [ -e "$shared" ] || continue
   base="$(basename "$shared")"
-  # Every vendored copy of this file across the services and the web app.
+  case "$shared" in
+    *.json) search_roots="services web" ;;
+    *) search_roots="services" ;;
+  esac
+  # Every vendored copy of this file across the applicable app(s).
   while IFS= read -r copy; do
     [ -z "$copy" ] && continue
     if ! diff -q "$shared" "$copy" >/dev/null 2>&1; then
       echo "DRIFT: $copy differs from $shared"
       status=1
     fi
-  done < <(find services web -path '*/src/*' -name "$base" -not -path '*/node_modules/*' 2>/dev/null)
+  done < <(find $search_roots -path '*/src/*' -name "$base" -not -path '*/node_modules/*' 2>/dev/null)
 done
 
 if [ "$status" -eq 0 ]; then
