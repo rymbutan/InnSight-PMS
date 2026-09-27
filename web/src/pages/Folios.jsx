@@ -121,6 +121,14 @@ export default function Folios() {
   const [voidReason, setVoidReason] = useState('');
   const [voidScreenshot, setVoidScreenshot] = useState(null);
   const [voidBusy, setVoidBusy] = useState(false);
+  // Refunding a CASH/CARD/BANK_TRANSFER payment directly — the e-wallet
+  // Dispute button above files a claim for someone else to approve later;
+  // there is no gateway to dispute here, so this posts the refund straight
+  // through /folios/:id/refund, the same endpoint an approved e-wallet claim
+  // ends up calling anyway.
+  const [refundFor, setRefundFor] = useState(null); // the Payment being refunded
+  const [refundForm, setRefundForm] = useState({ reason: '', amount: '' });
+  const [refundBusy, setRefundBusy] = useState(false);
   // Which of the three "take an action" forms the sidebar shows. They used to
   // be three stacked full-width panels; one at a time in a tab is the same
   // three forms without scrolling past two you are not about to use.
@@ -204,6 +212,44 @@ export default function Folios() {
       toast.error(errMsg(err));
     } finally {
       setDisputeBusy(false);
+    }
+  }
+
+  function openRefund(p) {
+    // Same reasoning as openDispute: prefill what is still refundable, not
+    // the original amount, so a partly-refunded payment cannot be asked to
+    // give back more than is left on it.
+    const refundable = refundableCentsFor(p);
+    setRefundFor({ ...p, refundableCents: refundable });
+    setRefundForm({ reason: '', amount: (refundable / 100).toFixed(2) });
+  }
+
+  async function submitRefund(e) {
+    e.preventDefault();
+    if (!refundFor) return;
+    // The API takes the ledger TRANSACTION id, not the Payment id — the same
+    // lookup refundableCentsFor already does to find how much is left.
+    const paid = (folio.transactions || []).find((t) => t.type === 'PAYMENT' && t.reference === refundFor.id);
+    if (!paid) {
+      toast.error('No ledger entry found for this payment.');
+      return;
+    }
+    setRefundBusy(true);
+    try {
+      await api.post(`/api/folios/${folioId}/refund`, {
+        originalTxId: paid.id,
+        amountCents: pesosToCents(refundForm.amount),
+        reason: refundForm.reason || undefined,
+      });
+      toast.success('Refund posted.');
+      setRefundFor(null);
+      // Both the ledger and the payment's own status (CAPTURED -> REFUNDED
+      // once fully refunded) change, same as an approved dispute.
+      load(folioId);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setRefundBusy(false);
     }
   }
 
@@ -1317,6 +1363,14 @@ export default function Folios() {
                                       Dispute
                                     </button>
                                   )}
+                                {/* Cash/card/bank-transfer has no gateway to file a claim
+                                    against — refund it directly instead of routing through
+                                    the dispute queue an e-wallet payment needs. */}
+                                {!isEWallet(p.method) && canDispute && refundableCentsFor(p) > 0 && (
+                                  <button className="secondary small" onClick={() => openRefund(p)}>
+                                    Refund
+                                  </button>
+                                )}
                               </span>
                             )}
                           </td>
@@ -1831,6 +1885,59 @@ export default function Folios() {
             />
             <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
               Filing does not move any money. Approving the case later posts the actual refund.
+            </p>
+          </form>
+        )}
+      </Modal>
+
+      {/* Refunding a cash/card/bank-transfer payment directly — see the Refund
+          button on a non-wallet row in "Payments received" above. No claim,
+          no approval step: FINANCE (Admin/Manager/Auditor) posts the refund
+          straight through, same endpoint an approved e-wallet dispute uses. */}
+      <Modal
+        open={!!refundFor}
+        onClose={() => setRefundFor(null)}
+        title={refundFor ? `Refund — ${labelize(refundFor.method)}` : 'Refund'}
+        width={420}
+        footer={
+          <>
+            <button className="secondary" onClick={() => setRefundFor(null)}>
+              Cancel
+            </button>
+            <button onClick={submitRefund} disabled={refundBusy}>
+              {refundBusy ? 'Posting…' : 'Post refund'}
+            </button>
+          </>
+        }
+      >
+        {refundFor && (
+          <form onSubmit={submitRefund}>
+            <label>Amount (₱)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              max={(refundFor.refundableCents / 100).toFixed(2)}
+              value={refundForm.amount}
+              onChange={(e) => setRefundForm({ ...refundForm, amount: e.target.value })}
+            />
+            {/* Only worth saying when the two differ — on an untouched payment
+                the ceiling IS the amount and repeating it is noise. */}
+            {refundFor.refundableCents !== Number(refundFor.amountCents) && (
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {formatPeso(refundFor.refundableCents)} of the original {formatPeso(refundFor.amountCents)}{' '}
+                is still refundable — the rest has already gone back to the guest.
+              </p>
+            )}
+            <label style={{ marginTop: 10 }}>Reason</label>
+            <textarea
+              rows={3}
+              value={refundForm.reason}
+              onChange={(e) => setRefundForm({ ...refundForm, reason: e.target.value })}
+              placeholder="Why this is being refunded — a cancellation, an overcharge, a service issue."
+            />
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              This posts a real refund against the original payment. It cannot be undone.
             </p>
           </form>
         )}

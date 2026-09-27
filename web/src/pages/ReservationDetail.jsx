@@ -23,6 +23,17 @@ import { suggestedCancellationFeeCents } from '../lib/cancellationFee';
 
 const TABS = ['Accommodations', 'Folio', 'Guest Details', 'Banking Details', 'Notes', 'Documents', 'Reservation Activity'];
 
+// Mirrors services/reservation/src/lib/depositRefund.js exactly — what the
+// cancellation fee did not already claim, less whatever has already been
+// refunded. Kept in sync by hand rather than shared across the service
+// boundary; the arithmetic is three lines and unlikely to drift silently.
+function remainingDepositRefundCents(reservation) {
+  const depositCents = Number(reservation.depositCents || 0);
+  const feeCents = Number(reservation.cancellationFeeCents || 0);
+  const refundedCents = Number(reservation.depositRefundedCents || 0);
+  return Math.max(0, depositCents - feeCents - refundedCents);
+}
+
 export default function ReservationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -46,6 +57,7 @@ export default function ReservationDetail() {
   const [chargeOpen, setChargeOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [depositRefundOpen, setDepositRefundOpen] = useState(false);
   const [quickEditOpen, setQuickEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [stay, setStay] = useState(null);
@@ -262,6 +274,19 @@ export default function ReservationDetail() {
                   onClick: () => setCancelOpen(true),
                   danger: true,
                 },
+                // No Folio exists yet for a pre-arrival cancellation (one is
+                // only created at check-in), so the refund/forfeit decision
+                // for what the cancellation fee didn't already claim lives on
+                // the reservation itself — see services/reservation's
+                // /deposit-refund route. Same FINANCE role group as every
+                // other refund action in the app.
+                res.status === 'CANCELLED' &&
+                  !res.depositForfeitedAt &&
+                  remainingDepositRefundCents(res) > 0 &&
+                  hasRole('ADMIN', 'MANAGER', 'AUDITOR') && {
+                    label: 'Refund/Forfeit Deposit',
+                    onClick: () => setDepositRefundOpen(true),
+                  },
                 // Not offered at all to a role the server would refuse anyway —
                 // a visible-but-rejected button reads as broken, not showing it
                 // reads as "not yours to do" (same reasoning Users.jsx documents
@@ -350,6 +375,25 @@ export default function ReservationDetail() {
                   <div className="res-field-label">Cancelation Reason</div>
                   <div className="res-field-value">{res.cancellationReason || '—'}</div>
                 </div>
+                {Number(res.depositCents) > 0 && (
+                  <div>
+                    <div className="res-field-label">Deposit Refund</div>
+                    <div className="res-field-value">
+                      {res.depositForfeitedAt ? (
+                        'Forfeited'
+                      ) : remainingDepositRefundCents(res) > 0 ? (
+                        `${formatPeso(remainingDepositRefundCents(res))} refundable`
+                      ) : Number(res.depositRefundedCents) > 0 ? (
+                        'Fully refunded'
+                      ) : (
+                        '—'
+                      )}
+                      {Number(res.depositRefundedCents) > 0 && (
+                        <span className="muted"> ({formatPeso(res.depositRefundedCents)} refunded so far)</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -387,6 +431,7 @@ export default function ReservationDetail() {
           onAddCharge={() => setChargeOpen(true)}
           onAddPayment={() => setPaymentOpen(true)}
           onRefund={() => setRefundOpen(true)}
+          hasRole={hasRole}
         />
       )}
       {activeTab === 'Guest Details' && <GuestDetailsTab res={res} onSaved={load} canEdit={canEditGuest} />}
@@ -442,6 +487,16 @@ export default function ReservationDetail() {
         txns={folioTxns}
         onDone={() => {
           setRefundOpen(false);
+          load();
+        }}
+      />
+      <DepositRefundModal
+        open={depositRefundOpen}
+        onClose={() => setDepositRefundOpen(false)}
+        reservationId={id}
+        reservation={res}
+        onDone={() => {
+          setDepositRefundOpen(false);
           load();
         }}
       />
@@ -573,7 +628,7 @@ function AccommodationsTab({ res, stay, onQuickEdit, navigate }) {
   );
 }
 
-function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
+function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund, hasRole }) {
   if (!folio) {
     return (
       <div className="panel">
@@ -608,7 +663,11 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund }) {
             variant="cta"
             items={[
               { label: 'Add Payment', onClick: onAddPayment },
-              { label: 'Refund Payment', onClick: onRefund },
+              // Not offered at all to a role the server would refuse anyway —
+              // matches FINANCE on the folio API (services/folio/src/routes/
+              // folio.routes.js), the same group every other money-reversal
+              // action there (void, adjustments, close) already requires.
+              hasRole('ADMIN', 'MANAGER', 'AUDITOR') && { label: 'Refund Payment', onClick: onRefund },
             ]}
           />
           <ActionsMenu
@@ -1513,9 +1572,115 @@ function PaymentModal({ open, onClose, folio, balanceCents, onDone }) {
   );
 }
 
+// Deciding what happens to what's left of a CANCELLED reservation's deposit
+// after the cancellation fee — refund it (in full or in part) or forfeit the
+// remainder outright. See services/reservation's /deposit-refund route: no
+// Folio exists yet for a pre-arrival cancellation, so this posts against the
+// reservation itself rather than the folio /refund endpoint RefundModal
+// above uses.
+function DepositRefundModal({ open, onClose, reservationId, reservation, onDone }) {
+  const toast = useToast();
+  const remaining = reservation ? remainingDepositRefundCents(reservation) : 0;
+  const [action, setAction] = useState('refund');
+  const [amountPesos, setAmountPesos] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Reopens fresh each time rather than carrying over the last reservation's
+  // numbers — a partial refund already posted changes what's left next time.
+  useEffect(() => {
+    if (!open) return;
+    setAction('refund');
+    setAmountPesos(centsToPesos(remaining));
+    setReason('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, reservation?.id]);
+  async function submit() {
+    setBusy(true);
+    try {
+      await api.post(`/api/reservations/${reservationId}/deposit-refund`, {
+        action,
+        amountCents: action === 'refund' ? pesosToCents(amountPesos) : undefined,
+        reason: reason || undefined,
+      });
+      toast.success(action === 'refund' ? 'Refund recorded.' : 'Remaining deposit forfeited.');
+      onDone();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Refund / Forfeit Deposit"
+      footer={
+        <>
+          <button className="secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className={action === 'forfeit' ? 'danger' : undefined}
+            onClick={submit}
+            disabled={busy || (action === 'refund' && !amountPesos)}
+          >
+            {busy ? '…' : action === 'refund' ? 'Post Refund' : 'Forfeit Remainder'}
+          </button>
+        </>
+      }
+    >
+      <p className="muted" style={{ marginTop: 0 }}>
+        {formatPeso(remaining)} of the deposit remains after the cancellation fee. This is a bookkeeping
+        record only — it does not move money through a payment gateway.
+      </p>
+      <label>Decision</label>
+      <select value={action} onChange={(e) => setAction(e.target.value)}>
+        <option value="refund">Refund to the guest (in full or in part)</option>
+        <option value="forfeit">Forfeit the remainder — nothing further owed</option>
+      </select>
+      {action === 'refund' && (
+        <>
+          <label style={{ marginTop: 10 }}>Refund amount (₱)</label>
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            max={centsToPesos(remaining)}
+            value={amountPesos}
+            onChange={(e) => setAmountPesos(e.target.value)}
+          />
+        </>
+      )}
+      <label style={{ marginTop: 10 }}>Reason</label>
+      <textarea
+        rows={2}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={action === 'refund' ? 'How the guest was actually paid back.' : 'Why nothing further is owed.'}
+      />
+    </Modal>
+  );
+}
+
 function RefundModal({ open, onClose, folio, txns, onDone }) {
   const toast = useToast();
-  const payments = txns.filter((t) => t.type === 'PAYMENT' && Number(t.amountCents) > 0);
+  // How much of a payment has NOT gone back to the guest yet — the payment's
+  // own ledger line less every refund already posted against it. The folio
+  // service caps /refund at exactly this (services/folio/src/lib/refund.js),
+  // so mirroring it here (same as Folios.jsx's refundableCentsFor) is what
+  // stops this form offering an amount the server will only turn down, and
+  // what drops an already-fully-refunded payment from the picker entirely.
+  function refundableCentsFor(paymentTx) {
+    const refunded = txns
+      .filter((t) => t.type === 'REFUND' && t.refundOfId === paymentTx.id)
+      .reduce((sum, t) => sum + Number(t.amountCents), 0);
+    return Math.max(0, Number(paymentTx.amountCents) - refunded);
+  }
+  const payments = txns
+    .filter((t) => t.type === 'PAYMENT' && Number(t.amountCents) > 0)
+    .map((t) => ({ ...t, refundableCents: refundableCentsFor(t) }))
+    .filter((t) => t.refundableCents > 0);
   const [pickedTxId, setPickedTxId] = useState('');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('Cancelled within policy');
@@ -1576,13 +1741,18 @@ function RefundModal({ open, onClose, folio, txns, onDone }) {
                 checked={pickedTxId === p.id}
                 onChange={() => {
                   setPickedTxId(p.id);
-                  setAmount((Number(p.amountCents) / 100).toFixed(2));
+                  setAmount((p.refundableCents / 100).toFixed(2));
                 }}
                 style={{ width: 'auto' }}
               />
               <span>
                 {p.postedAt || p.createdAt ? new Date(p.postedAt || p.createdAt).toLocaleDateString() : '—'} ·{' '}
                 {p.method || p.paymentMethod || 'Payment'} · {formatPeso(p.amountCents)}
+                {/* Only worth saying when the two differ — on an untouched
+                    payment the ceiling IS the amount and repeating it is noise. */}
+                {p.refundableCents !== Number(p.amountCents) && (
+                  <span className="muted"> ({formatPeso(p.refundableCents)} left to refund)</span>
+                )}
               </span>
             </label>
           ))}
@@ -1591,12 +1761,13 @@ function RefundModal({ open, onClose, folio, txns, onDone }) {
             type="number"
             min="0"
             step="0.01"
+            max={picked ? (picked.refundableCents / 100).toFixed(2) : undefined}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
           {picked && (
             <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-              Max {formatPeso(picked.amountCents)}
+              Max {formatPeso(picked.refundableCents)}
             </div>
           )}
           <label style={{ marginTop: 12 }}>Reason</label>
