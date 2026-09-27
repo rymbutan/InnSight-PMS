@@ -9,9 +9,14 @@ const TEST_SERVICE_SECRET = 'test_service_secret_0123456789_0123456789';
 process.env.JWT_SECRET = TEST_SECRET;
 process.env.SERVICE_JWT_SECRET = TEST_SERVICE_SECRET;
 
-// verifyToken consults the Redis-backed revocation store (see lib/tokenRevocation.js).
-// Stub it: a unit test must not open a socket, and an un-stubbed ioredis client keeps
-// the event loop alive so `node --test` never exits.
+// verifyToken consults the Redis-backed revocation store (see lib/tokenRevocation.js)
+// AND, via lib/navScope.js's own module-level createNavScope(), a second real
+// ioredis client for sidebar-visibility config. Stub both: a unit test must not
+// open a socket, and an un-stubbed ioredis client keeps retrying to connect
+// forever, which keeps the event loop alive so `node --test` never exits — this
+// file used to stub only tokenRevocation, leaving navScope's client real, which
+// is exactly the hang (see the reservation-service convention of stubbing
+// `ioredis` itself in services/reservation/src/routes/authz.test.js).
 let revokedNext = false;
 require.cache[require.resolve('../lib/tokenRevocation')] = {
   exports: {
@@ -21,6 +26,11 @@ require.cache[require.resolve('../lib/tokenRevocation')] = {
       revokeAllForUser: async () => true,
       disconnect: () => {},
     }),
+  },
+};
+require.cache[require.resolve('ioredis')] = {
+  exports: function Redis() {
+    return { get: async () => null, set: async () => {}, on: () => {}, disconnect: () => {} };
   },
 };
 const { verifyToken, requireRole, requirePermission, ALG, ISS_HUMAN, ISS_SERVICE, AUD } = require('./auth');
