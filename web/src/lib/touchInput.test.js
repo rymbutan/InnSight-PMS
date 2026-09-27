@@ -12,6 +12,7 @@ import {
   clampPan,
   clampZoom,
   fitView,
+  focusView,
   initialView,
   stickKnob,
   stickVector,
@@ -264,6 +265,31 @@ test('initialView does not blow a sparse property up past native size', () => {
 test('initialView degrades to identity when nothing has been measured yet', () => {
   assert.deepEqual(initialView({ w: 0, h: 0 }, { w: 0, h: 0 }), { x: 0, y: 0, z: 1 });
   assert.deepEqual(initialView({ w: 800, h: 600 }, { w: 0, h: 500 }), { x: 0, y: 0, z: 1 });
+});
+
+test('focusView centres the target rect without changing zoom', () => {
+  const view = { x: 5, y: 5, z: 2 }; // an arbitrary zoom the user already chose
+  const viewport = { w: 400, h: 600 };
+  const content = { w: 1000, h: 4000 };
+  const rect = { x: 100, y: 1000, w: 800, h: 300 }; // e.g. one floor's span
+  const out = focusView(view, viewport, content, rect);
+  assert.equal(out.z, view.z, 'zoom must carry over, not reset');
+  // The rect's centre, at this zoom, lands on the viewport's centre.
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  assert.ok(near(out.x + cx * out.z, viewport.w / 2, 1e-9));
+  assert.ok(near(out.y + cy * out.z, viewport.h / 2, 1e-9));
+});
+
+test('focusView stays clamped for a floor near the very top or bottom', () => {
+  const view = { x: 0, y: 0, z: 1 };
+  const viewport = { w: 400, h: 600 };
+  const content = { w: 1000, h: 4000 };
+  const topFloor = focusView(view, viewport, content, { x: 0, y: 0, w: 1000, h: 300 });
+  const bottomFloor = focusView(view, viewport, content, { x: 0, y: 3700, w: 1000, h: 300 });
+  // Same bounds clampPan itself enforces elsewhere in this file.
+  assert.ok(topFloor.y <= viewport.h - 80);
+  assert.ok(bottomFloor.y >= 80 - content.h * bottomFloor.z);
 });
 
 test('a drawing wider than its panel can still be pinched back out to fit', () => {

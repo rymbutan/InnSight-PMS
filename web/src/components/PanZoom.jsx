@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 import {
   MAP_ZOOM_MAX,
   clampPan,
   clampZoom,
   fitView,
+  focusView,
   initialView,
   minUserZoom,
   touchDistance,
@@ -42,7 +43,10 @@ import {
 const TAP_SLOP_PX = 8;
 const ZOOM_STEP = 1.45;
 
-export default function PanZoom({ enabled, contentW, contentH, className = '', label = 'Map', children }) {
+const PanZoom = forwardRef(function PanZoom(
+  { enabled, contentW, contentH, className = '', label = 'Map', children },
+  ref
+) {
   const hostRef = useRef(null);
   const [view, setView] = useState({ x: 0, y: 0, z: 1 });
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
@@ -99,6 +103,20 @@ export default function PanZoom({ enabled, contentW, contentH, className = '', l
       const next = clampZoom(v.z * factor, floor, MAP_ZOOM_MAX);
       setView(clampPan(zoomAbout(v, next, a), viewport, content));
     },
+    [viewport.w, viewport.h, content.w, content.h]
+  );
+
+  // A "jump to floor" control (see Housekeeping.jsx's floor tabs) calling
+  // through a ref — the alternative, a `focusRect` PROP, would need the
+  // parent to guess when viewport/content are actually ready rather than
+  // just calling this when a tab is clicked and letting current state answer.
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusRect(rect) {
+        setView((v) => focusView(v, viewport, content, rect));
+      },
+    }),
     [viewport.w, viewport.h, content.w, content.h]
   );
 
@@ -234,4 +252,6 @@ export default function PanZoom({ enabled, contentW, contentH, className = '', l
       </div>
     </div>
   );
-}
+});
+
+export default PanZoom;

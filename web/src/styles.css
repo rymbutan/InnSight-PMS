@@ -6355,6 +6355,33 @@ html[data-theme='dark'] .skel {
   min-width: 0;
   padding: 10px;
 }
+/* Touch only (see Housekeeping.jsx) — a mouse already has the native
+   scrollbar to find a floor with. Horizontally scrollable rather than
+   wrapping: a property with a dozen floors turning this into several rows
+   would push the map itself further down the panel with every floor added,
+   which is the opposite of what a compact "jump to floor" strip is for. */
+.hk-floor-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+.hk-floor-tab {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.hk-floor-tab:hover {
+  background: var(--row-hover);
+}
 /* Rendered at its native size (width/height attributes set from mapW/mapH in
    JS) rather than stretched to fill the panel via width:100%/height:auto —
    that stretch used to scale mapH right along with mapW, so a sparse property

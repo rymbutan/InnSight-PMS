@@ -119,6 +119,31 @@ test('the two rows of a floor sit either side of its corridor', () => {
   }
 });
 
+test("a floor's topY/bottomY span bounds every room drawn on it", () => {
+  // What a "jump to this floor" control (a floor tab/selector on mobile —
+  // see PanZoom's focusRect) pans to. Has to actually contain the floor's
+  // own rooms, not just its label and corridor.
+  const { slots, floors } = computeLayout(property(3));
+  for (const f of floors) {
+    const mine = slots.filter((s) => String(s.room.floor) === String(f.floor));
+    for (const s of mine) {
+      assert.ok(s.y >= f.topY, `floor ${f.floor}: a room sits above its own topY`);
+      assert.ok(s.y + s.h <= f.bottomY, `floor ${f.floor}: a room sits below its own bottomY`);
+    }
+  }
+});
+
+test('consecutive floors do not overlap in y', () => {
+  const { floors } = computeLayout(property(4));
+  const byFloorNum = [...floors].sort((a, b) => a.floor - b.floor);
+  for (let i = 0; i < byFloorNum.length - 1; i += 1) {
+    assert.ok(
+      byFloorNum[i].bottomY <= byFloorNum[i + 1].topY,
+      `floor ${byFloorNum[i].floor} overlaps floor ${byFloorNum[i + 1].floor}`
+    );
+  }
+});
+
 test('the map is tall enough for everything drawn on it', () => {
   for (const n of [1, 2, 3, 5]) {
     const { slots, mapH } = computeLayout(property(n));
