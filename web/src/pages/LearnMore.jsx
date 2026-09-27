@@ -17,13 +17,13 @@ const FEATURES = [
   {
     id: 'housekeeping',
     title: 'Housekeeping, in real time',
-    body: "An interactive floor map shows every room's status — dirty, clean, inspected, occupied — the moment it changes. Front desk can call a housekeeper about a specific room, and turnover isn't done until a supervisor signs off: housekeeping can clean a room, but only ADMIN/MANAGER can mark it Inspected.",
+    body: "An interactive floor map shows every room's status — dirty, clean, inspected, occupied — the moment it changes. Front desk can call a housekeeper about a specific room, and turnover isn't done until a supervisor signs off: housekeeping can clean a room, but only a supervisor can mark it Inspected — status always means what it says.",
     stat: { value: '2-step', label: 'Cleaned, then supervisor-inspected — never self-certified' },
   },
   {
     id: 'night-audit',
-    title: 'Night audits that run themselves',
-    body: 'One button posts a room charge to every in-house folio, combines every revenue source — rooms, amenities, laundry, spa — marks no-shows, auto-cancels overdue unconfirmed bookings, and closes the business day. A full history of every past day (occupancy, ADR, RevPAR, revenue breakdown) is there to review afterward.',
+    title: 'Close the night audit in one click',
+    body: 'One button posts a room charge to every in-house folio, combines every revenue source — rooms, amenities, laundry, spa — marks no-shows, auto-cancels overdue unconfirmed bookings, and closes the business day. Folios track every charge, payment, and refund, and an auditor has to approve one before a guest can check out. A full history of every past day (occupancy, ADR, RevPAR, revenue breakdown) is there to review afterward.',
     stat: { value: '1 button', label: 'Runs the full reconciliation and closes the day' },
   },
 ];
