@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import api from './api';
 import { hydrateRoomLayouts } from './sim/layoutSync';
 import { hydrateCategories } from './sim/inspection/categorySync';
+import { chatDockStoreKey, notifsStoreKey } from './lib/messageStorageKeys';
 
 const AuthContext = createContext(null);
 
@@ -110,6 +111,15 @@ export function AuthProvider({ children }) {
       await api.post('/api/auth/logout');
     } catch {
       /* offline, or the token had already expired — either way, continue */
+    }
+    // Chat dock windows and notification history (which stores message PREVIEWS
+    // — see lib/notifications.js) are keyed per user so the NEXT person to sign
+    // in never inherits them, but that keying alone leaves this user's own copy
+    // sitting in localStorage forever once they sign out. Purge them for the
+    // user who is actually leaving, before their id is gone from state.
+    if (user?.id) {
+      localStorage.removeItem(chatDockStoreKey(user.id));
+      localStorage.removeItem(notifsStoreKey(user.id));
     }
     localStorage.removeItem('innsight_token');
     localStorage.removeItem('innsight_user');

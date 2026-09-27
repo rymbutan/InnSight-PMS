@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveEvents, LIVE_CHANNELS } from './useLiveEvents';
 import { labelize } from './labels';
+import { notifsStoreKey } from './messageStorageKeys';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // In-app notification feed.
@@ -264,7 +265,13 @@ const MAX_ITEMS = 120;
 // person to sign in the previous user's notification history out of
 // localStorage, which would undo the server-side role filtering for exactly the
 // machines most likely to be shared.
-const storeKey = (userId) => `innsight_notifs_${userId || 'anon'}`;
+//
+// Lives in lib/messageStorageKeys.js so auth.jsx's logout() can purge THIS
+// user's entry: this feed stores message PREVIEWS (see describeEvent's
+// `messaging:message_sent` case above) and sender identity, and being keyed per
+// user only stops it leaking to the NEXT signed-in account — sign-out itself
+// never removed it, so it sat in localStorage indefinitely.
+const storeKey = notifsStoreKey;
 
 const EMPTY = { items: [], lastReadAt: 0 };
 
