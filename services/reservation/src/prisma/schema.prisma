@@ -51,6 +51,21 @@ model Reservation {
   cancellationFeeCents  BigInt                 @default(0)
   cancelledAt           DateTime?
   cancelledBy           String?
+  // A cancelled reservation's deposit has nowhere else to be tracked — no
+  // Folio exists yet pre-arrival (see services/folio's subscriber, which only
+  // creates one at check-in), so the refund decision lives here instead.
+  // Cumulative, mirroring Folio's own refund model (services/folio/src/lib/
+  // refund.js): supports a partial refund now and the rest later, capped at
+  // depositCents - cancellationFeeCents by the route, not the schema.
+  depositRefundedCents  BigInt                 @default(0)
+  depositRefundedAt     DateTime?
+  depositRefundedBy     String?
+  depositRefundReason   String?
+  // A deliberate "the remainder is not owed back" close-out, distinct from a
+  // zero-amount refund: once set, the route refuses any further refund
+  // against this deposit.
+  depositForfeitedAt    DateTime?
+  depositForfeitedBy    String?
   createdBy             String?
   // The inventory hold group that reserves this booking's capacity. Written at
   // creation so a cancellation or date change can release exactly the right
