@@ -101,7 +101,15 @@ router.get('/users', verifyToken, requireRole(...STAFF_ROLES), async (req, res) 
 // POST /api/users
 router.post('/users', verifyToken, requireRole(...STAFF_ROLES), async (req, res) => {
   try {
-    const { username, email, password, displayName, roles } = req.body;
+    const { username, password, displayName, roles } = req.body;
+    // Lowercased here for the same reason /access-request and /change-email
+    // lowercase it: `email` is only a case-SENSITIVE unique index in Postgres,
+    // so an admin-created "User@x.com" and a self-service "user@x.com" would
+    // otherwise silently become two different rows. forgot-password resolves
+    // an account by email case-insensitively — a mismatch here is how a
+    // password reset can succeed against the wrong account while this one's
+    // real password never changes.
+    const email = req.body.email ? String(req.body.email).trim().toLowerCase() : req.body.email;
     if (!username || !password || !displayName) {
       return res.status(400).json({ error: 'username, password, displayName required.' });
     }
@@ -250,7 +258,8 @@ router.patch('/users/:id', verifyToken, requireRole(...STAFF_ROLES), async (req,
     const { displayName, email, status } = req.body;
     const data = {};
     if (displayName !== undefined) data.displayName = displayName;
-    if (email !== undefined) data.email = email;
+    // Same normalization as POST /users — see the comment there.
+    if (email !== undefined) data.email = email ? String(email).trim().toLowerCase() : email;
     if (status !== undefined) data.status = status;
 
     // Fetched unconditionally now, not just for a status change: a MANAGER

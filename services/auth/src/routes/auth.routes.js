@@ -650,6 +650,10 @@ const RESET_TTL_MIN = 30;
 const RESET_THROTTLE_MIN = 2; // one email per user per this window
 const hashResetToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 
+// Thrown inside the reset-password transaction to abort it without touching
+// the user row — see the comment at its `catch` site.
+class AlreadySpentError extends Error {}
+
 // POST /api/auth/forgot-password  { email }
 //
 // ALWAYS answers 202 with the same body, whether or not the address belongs to
@@ -719,6 +723,22 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
+// GET /api/auth/reset-password/status?token=  — lets the page know, before the
+// person types anything, whether this link is still good. Same yes/no either
+// way regardless of WHY it's not (missing, spent, expired): see the comment
+// on `invalid` below.
+router.get('/reset-password/status', async (req, res) => {
+  try {
+    const token = String(req.query?.token || '');
+    if (!token) return res.json({ valid: false });
+    const row = await prisma.passwordReset.findUnique({ where: { tokenHash: hashResetToken(token) } });
+    res.json({ valid: Boolean(row && !row.usedAt && row.expiresAt > new Date()) });
+  } catch (err) {
+    console.error('[Auth] Reset status error:', err.message);
+    res.status(500).json({ valid: false });
+  }
+});
+
 // POST /api/auth/reset-password  { token, newPassword }
 router.post('/reset-password', async (req, res) => {
   try {
@@ -738,22 +758,36 @@ router.post('/reset-password', async (req, res) => {
     if (!user || user.status !== 'ACTIVE') return res.status(400).json(invalid);
 
     const passwordHash = await bcrypt.hash(String(newPassword), 10);
-    // Spend the token in the SAME transaction that changes the password, so a
-    // failure cannot leave a used password with a still-live link.
-    await prisma.$transaction([
-      prisma.passwordReset.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
-      prisma.user.update({
-        where: { id: user.id },
-        data: {
-          passwordHash,
-          // They chose this one themselves, so there is nothing to force a
-          // change of — unlike an admin-issued reset, which is a temporary
-          // credential someone else knows.
-          mustChangePwd: false,
-          failedAttempts: 0,
-        },
-      }),
-    ]);
+    // Spending the token and reading it back (above) are two round trips, so two
+    // requests racing on the SAME link can both pass the `!row.usedAt` check
+    // before either commits — the classic reset-link-worked-twice bug. The
+    // `updateMany({ where: { usedAt: null } })` below is the fix: it is a single
+    // atomic compare-and-set, so only one of two concurrent requests can ever
+    // flip usedAt from null, and the loser is told the link already got used
+    // (via the interactive transaction throwing before the password write).
+    try {
+      await prisma.$transaction(async (tx) => {
+        const spent = await tx.passwordReset.updateMany({
+          where: { id: row.id, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        if (spent.count === 0) throw new AlreadySpentError();
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            passwordHash,
+            // They chose this one themselves, so there is nothing to force a
+            // change of — unlike an admin-issued reset, which is a temporary
+            // credential someone else knows.
+            mustChangePwd: false,
+            failedAttempts: 0,
+          },
+        });
+      });
+    } catch (err) {
+      if (err instanceof AlreadySpentError) return res.status(400).json(invalid);
+      throw err;
+    }
 
     // The old credential is gone; every session opened with it goes too. This is
     // also the lockout cure: whoever reset it is back in without an admin.
