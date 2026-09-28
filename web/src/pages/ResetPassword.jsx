@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
 import AuthShell from '../components/AuthShell';
@@ -23,6 +23,29 @@ export default function ResetPassword() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  // null while we haven't asked yet, then true/false. A used or expired link
+  // otherwise re-showed this exact form on every visit — nothing checked the
+  // token until SUBMIT — so clicking an old email link looked like it might
+  // still work right up until you typed a password and got told no.
+  const [linkValid, setLinkValid] = useState(token ? null : false);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let cancelled = false;
+    api
+      .get('/api/auth/reset-password/status', { params: { token } })
+      .then((res) => {
+        if (!cancelled) setLinkValid(Boolean(res.data?.valid));
+      })
+      .catch(() => {
+        // A network hiccup here should not block someone from trying to
+        // submit — SUBMIT still re-checks server-side either way.
+        if (!cancelled) setLinkValid(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -68,6 +91,28 @@ export default function ResetPassword() {
       <AuthShell title="Password updated" lede="You have been signed out everywhere. Taking you to sign in…">
         <p className="login-alt">
           <Link to="/login">Sign in now</Link>
+        </p>
+      </AuthShell>
+    );
+  }
+
+  // Still asking the server whether this link is spent — do not flash the form
+  // and then yank it away a moment later.
+  if (linkValid === null) {
+    return <AuthShell title="Checking your link" lede="One moment…" />;
+  }
+
+  // Same copy as the missing-token case above: a used or expired link is
+  // exactly as dead as one with no token, so it gets exactly the same answer
+  // rather than a form that only fails once you've typed a new password.
+  if (!linkValid) {
+    return (
+      <AuthShell title="Link expired" lede="This reset link has already been used or has expired.">
+        <p className="login-alt">
+          Links expire after 30 minutes and work once. <Link to="/forgot-password">Request a new one</Link>.
+        </p>
+        <p className="login-alt">
+          <Link to="/login">Back to sign in</Link>
         </p>
       </AuthShell>
     );
