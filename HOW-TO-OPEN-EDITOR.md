@@ -58,10 +58,8 @@ Then:
    | | |
    |---|---|
    | Username | `admin` |
-   | Password | `***REMOVED-SEE-UNLOCK-ADMIN-SCRIPT***` |
+   | Password | *(ask whoever last reset it — not recorded here; this repo is public)* |
 
-   - **On THIS machine's current database**, that is the working password and
-     there is no forced password change — it has already been done.
    - **On a brand-new database** (a fresh clone, or after
      `docker compose down -v`) it is instead the `ADMIN_INITIAL_PASSWORD` that
      step 3 printed, and you are **forced to change it** on first sign-in. Read
