@@ -276,7 +276,21 @@ const POP_W = 320;
 const MEASURE_RETRIES = 30; // ~1.5s at 50ms apart — long enough for a route change plus first paint.
 const MEASURE_INTERVAL_MS = 50;
 
-function computePopStyle(rect) {
+// The app renders at `zoom: 0.9` (see the note on `html` in styles.css). A
+// DOMRect from getBoundingClientRect() already comes back in real, post-zoom
+// screen pixels — but every element THIS component positions (the mask, the
+// ring, the popover) is itself a descendant of that zoomed `html`, so the
+// browser zooms it AGAIN when it renders our inline `top`/`left`/`width`/
+// `height`. Left uncorrected, a target at real screen x=1545 gets a ring
+// painted at 1545 * 0.9 ≈ 1391 — visibly pointing at the wrong element.
+// Dividing by the zoom factor before handing a number to `style` cancels that
+// second pass out, so the ring ends up back at the real, measured position.
+function getZoomFactor() {
+  const z = parseFloat(getComputedStyle(document.documentElement).zoom);
+  return Number.isFinite(z) && z > 0 ? z : 1;
+}
+
+function computePopStyle(rect, zoom) {
   if (!rect) {
     return { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
   }
@@ -287,14 +301,14 @@ function computePopStyle(rect) {
   if (isTall) {
     return {
       position: 'fixed',
-      top: Math.min(120, Math.max(HOLE_PAD, window.innerHeight - 280)),
-      left: Math.min(rect.right + 16, window.innerWidth - POP_W - HOLE_PAD),
+      top: Math.min(120, Math.max(HOLE_PAD, window.innerHeight - 280)) / zoom,
+      left: Math.min(rect.right + 16, window.innerWidth - POP_W - HOLE_PAD) / zoom,
     };
   }
   const spaceBelow = window.innerHeight - rect.bottom;
   const top = spaceBelow > 240 ? rect.bottom + 16 : Math.max(HOLE_PAD, rect.top - 236);
   const left = Math.min(Math.max(HOLE_PAD, rect.left), window.innerWidth - POP_W - HOLE_PAD);
-  return { position: 'fixed', top, left };
+  return { position: 'fixed', top: top / zoom, left: left / zoom };
 }
 
 export default function TutorialTour({ open, onFinish }) {
@@ -405,31 +419,39 @@ export default function TutorialTour({ open, onFinish }) {
   const next = () => (isLast ? onFinish?.() : setIndex((i) => i + 1));
   const back = () => setIndex((i) => Math.max(0, i - 1));
 
+  // Every number below is a real, post-zoom screen pixel (that's what rect —
+  // a getBoundingClientRect() result — already is). Dividing by the zoom
+  // factor here, right where each value becomes a `style` prop, is what
+  // keeps the browser's own zoom on `html` from applying a second time. See
+  // getZoomFactor()'s comment for why that second pass would otherwise happen.
+  const zoom = getZoomFactor();
+  const z = (n) => n / zoom;
+
   return (
     <div className="tour-overlay">
       {rect ? (
         <>
           <div
             className="tour-mask"
-            style={{ top: 0, left: 0, right: 0, height: Math.max(0, rect.top - HOLE_PAD) }}
+            style={{ top: 0, left: 0, right: 0, height: z(Math.max(0, rect.top - HOLE_PAD)) }}
           />
-          <div className="tour-mask" style={{ top: rect.bottom + HOLE_PAD, left: 0, right: 0, bottom: 0 }} />
+          <div className="tour-mask" style={{ top: z(rect.bottom + HOLE_PAD), left: 0, right: 0, bottom: 0 }} />
           <div
             className="tour-mask"
             style={{
-              top: rect.top - HOLE_PAD,
+              top: z(rect.top - HOLE_PAD),
               left: 0,
-              width: Math.max(0, rect.left - HOLE_PAD),
-              height: rect.height + HOLE_PAD * 2,
+              width: z(Math.max(0, rect.left - HOLE_PAD)),
+              height: z(rect.height + HOLE_PAD * 2),
             }}
           />
           <div
             className="tour-mask"
             style={{
-              top: rect.top - HOLE_PAD,
-              left: rect.right + HOLE_PAD,
+              top: z(rect.top - HOLE_PAD),
+              left: z(rect.right + HOLE_PAD),
               right: 0,
-              height: rect.height + HOLE_PAD * 2,
+              height: z(rect.height + HOLE_PAD * 2),
             }}
           />
           {/* No background of its own — it exists to CAPTURE clicks over the
@@ -439,10 +461,10 @@ export default function TutorialTour({ open, onFinish }) {
           <div
             className="tour-ring"
             style={{
-              top: rect.top - HOLE_PAD,
-              left: rect.left - HOLE_PAD,
-              width: rect.width + HOLE_PAD * 2,
-              height: rect.height + HOLE_PAD * 2,
+              top: z(rect.top - HOLE_PAD),
+              left: z(rect.left - HOLE_PAD),
+              width: z(rect.width + HOLE_PAD * 2),
+              height: z(rect.height + HOLE_PAD * 2),
             }}
           />
         </>
@@ -450,7 +472,7 @@ export default function TutorialTour({ open, onFinish }) {
         <div className="tour-mask" style={{ inset: 0 }} />
       )}
 
-      <div className="tour-pop" style={computePopStyle(rect)}>
+      <div className="tour-pop" style={computePopStyle(rect, zoom)}>
         <div className="tour-pop-head">
           <span className="tour-step-count">
             {index + 1} of {steps.length}
