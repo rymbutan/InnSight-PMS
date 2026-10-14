@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
 import Icon from '../components/Icon';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 
 // Splits "Display Name <address>" into its two halves so the card can give
@@ -142,7 +143,7 @@ export default function Health() {
             </tbody>
           </table>
         ) : (
-          <div className="loading-row">Loading…</div>
+          <SkeletonTableBlock rows={8} cols={4} label="Loading service status" />
         )}
       </div>
     </div>

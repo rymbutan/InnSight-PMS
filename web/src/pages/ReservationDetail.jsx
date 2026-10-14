@@ -14,6 +14,7 @@ import ShareRecordDialog from '../components/ShareRecordDialog';
 import { reservationRef } from '../lib/recordRefs';
 import FilterPanel, { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
+import { SkeletonPanel, SkeletonTableBlock } from '../components/Skeleton';
 import Timeline from '../components/Timeline';
 import { labelize } from '../lib/labels';
 import { SOURCES, SOURCE_LABELS } from '../lib/reservationOptions';
@@ -102,9 +103,9 @@ export default function ReservationDetail() {
   if (!res)
     return (
       <div className="panel">
-        <div className="loading-row">
-          <span className="spinner" /> Loading reservation…
-        </div>
+        <SkeletonPanel lines={6} label="Loading reservation" />
+        <div style={{ height: 18 }} />
+        <SkeletonTableBlock rows={4} cols={5} label="Loading details" />
       </div>
     );
 
@@ -992,9 +993,7 @@ function CreditCardsTab({ reservationId }) {
         )}
 
         {cards === null ? (
-          <div className="loading-row">
-            <span className="spinner" /> Loading…
-          </div>
+          <SkeletonPanel lines={3} label="Loading banking details" />
         ) : cards.length === 0 ? (
           <div className="muted" style={{ textAlign: 'center', padding: 36 }}>
             No banking details on file.
@@ -1216,9 +1215,7 @@ function DocumentsTab({ reservationId }) {
       </div>
 
       {docs === null ? (
-        <div className="loading-row">
-          <span className="spinner" /> Loading…
-        </div>
+        <SkeletonPanel lines={3} label="Loading documents" />
       ) : docs.length === 0 ? (
         <div className="muted" style={{ textAlign: 'center', padding: 24 }}>
           No documents uploaded yet.

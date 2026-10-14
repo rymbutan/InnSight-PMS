@@ -4,6 +4,7 @@ import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
+import { SkeletonList } from '../components/Skeleton';
 import RoleBadge from '../components/RoleBadge';
 import Transcript from '../components/Transcript';
 import TypingIndicator from '../components/TypingIndicator';
@@ -238,7 +239,7 @@ export default function Messages() {
           </div>
 
           <div className="msg-contact-list">
-            {loadingContacts && contacts.length === 0 && <p className="msg-note muted">Loading…</p>}
+            {loadingContacts && contacts.length === 0 && <SkeletonList rows={7} label="Loading staff" />}
 
             {!loadingContacts && contacts.length === 0 && (
               <p className="msg-note muted">No other staff accounts yet.</p>
