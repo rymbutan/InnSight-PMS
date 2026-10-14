@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Strips any AI-assistant credit from a commit message before it is recorded:
+# "Co-Authored-By: Claude …", "Co-Authored-By: … <noreply@anthropic.com>" and
+# "Generated with Claude Code" lines. Activate with: npx husky install
+# (or copy this file to .git/hooks/commit-msg).
+f="$1"
+[ -f "$f" ] || exit 0
+LC_ALL=C grep -v -i -E '^[[:space:]]*(co-authored-by:.*(claude|anthropic)|.*generated with .*claude)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+exit 0

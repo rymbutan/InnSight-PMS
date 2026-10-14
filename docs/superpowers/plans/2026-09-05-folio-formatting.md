@@ -293,7 +293,6 @@ plausible-looking invented rate would put fabricated tax on a guest's bill.
 
 computeTax and TAX_RULES had zero callers, so the signature change is safe.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -764,7 +763,6 @@ Hotel identity defaults to InnSight, never to the reference invoice's real
 property. A corrupt stored rate falls back to its default rather than
 becoming NaN tax on a guest's bill.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -978,7 +976,6 @@ taxAmountCents remains the single source of truth for every total. The new
 column is nullable, pre-migration rows print their whole tax as VAT, and
 folioSummary.test.js now locks in that a breakdown cannot affect a balance.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1476,7 +1473,6 @@ A transaction with no taxBreakdown attributes its whole tax to VAT, and a
 breakdown that does not account for the full amount puts the remainder there
 too -- the sections can never disagree with the balance.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1750,7 +1746,6 @@ amount paid, adjustment -- plus the totals rail and the notice block.
 
 Rendering only; the arithmetic is in lib/folioPrintModel.js and unit tested.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1944,7 +1939,6 @@ make Express match 'batch' as a guest id and silently 404.
 
 A missing ids param returns an empty list, not every guest in the hotel.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2193,7 +2187,6 @@ Names resolve in one batched call. If the guest service is unreachable the
 rows still render with a null name -- failing a folio list because a NAME
 could not be fetched would be worse than the missing search it replaces.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2509,7 +2502,6 @@ keyboard-reachable control.
 The folio card, ledger, payments table and posting forms are unchanged; the
 Print/Close/Split actions move onto the card's header.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2690,7 +2682,6 @@ real rates -- they vary by locality and were deliberately not invented.
 Hotel details fill the folio header block, which defaults to InnSight rather
 than to any real property.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```

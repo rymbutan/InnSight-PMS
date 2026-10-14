@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22, Express, Prisma 6 + Postgres 16, Redis (live events), PDFKit (already in `stay` and `folio`), React 18 + Vite, nginx gateway, Docker Compose. Tests are `node --test`.
 
-**Spec:** `docs/superpowers/specs/2026-09-04-client-requirements-round-2.md` — the published gap analysis at https://claude.ai/code/artifact/9f0d9a33-7e15-49d8-abd0-cb969a6cc6e3, derived from `_Ms.-Nichole-Lago-transcript-interview.docx`.
+**Spec:** `docs/superpowers/specs/2026-09-04-client-requirements-round-2.md` — the gap analysis, derived from `_Ms.-Nichole-Lago-transcript-interview.docx`.
 
 ---
 
