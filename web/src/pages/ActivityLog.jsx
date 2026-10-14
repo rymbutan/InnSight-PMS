@@ -4,7 +4,7 @@ import api from '../api';
 import EmptyState from '../components/EmptyState';
 import { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
-import RoleBadge from '../components/RoleBadge';
+import { roleLabel } from '../lib/roles';
 import { useToast, errMsg } from '../components/Toast';
 
 // System-wide activity log — who did what, across every service.
@@ -119,7 +119,7 @@ export default function ActivityLog() {
       </div>
 
       <div className="panel">
-        <div className="filter-grid" style={{ marginBottom: 12 }}>
+        <div className="filter-grid" style={{ marginBottom: 12 }} data-tour="g-activity-filters">
           <FilterField label="From">
             <input type="date" value={filters.from} onChange={(e) => setFilter('from', e.target.value)} />
           </FilterField>
@@ -127,7 +127,7 @@ export default function ActivityLog() {
             <input type="date" value={filters.to} onChange={(e) => setFilter('to', e.target.value)} />
           </FilterField>
           <FilterField label="User">
-            <select value={filters.actorId} onChange={(e) => setFilter('actorId', e.target.value)}>
+            <select data-tour="g-activity-user" value={filters.actorId} onChange={(e) => setFilter('actorId', e.target.value)}>
               <option value="">Everyone</option>
               {options.actors.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -158,6 +158,7 @@ export default function ActivityLog() {
           </FilterField>
           <FilterField label="Search">
             <input
+              data-tour="g-activity-search"
               type="search"
               placeholder="name, path or record id"
               value={filters.q}
@@ -166,7 +167,7 @@ export default function ActivityLog() {
           </FilterField>
         </div>
 
-        <div className="row" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div className="row" style={{ alignItems: 'center', marginBottom: 12 }} data-tour="g-activity-bar">
           <div className="muted">
             {data.total > 0 ? `${firstRow}–${lastRow} of ${data.total.toLocaleString()}` : 'No entries'}
             {activeCount > 0 && <span className="filter-count"> · {activeCount} filter(s)</span>}
@@ -201,7 +202,7 @@ export default function ActivityLog() {
             }
           />
         ) : (
-          <table>
+          <table data-tour="g-activity-table">
             <thead>
               <tr>
                 <th>When</th>
@@ -220,10 +221,8 @@ export default function ActivityLog() {
                   <td>
                     <div>{r.actorName}</div>
                     {r.actorRoles?.length > 0 && (
-                      <div className="muted" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {r.actorRoles.map((role) => (
-                          <RoleBadge key={role} code={role} />
-                        ))}
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {r.actorRoles.map((role) => roleLabel(role)).join(', ')}
                       </div>
                     )}
                   </td>
@@ -248,7 +247,11 @@ export default function ActivityLog() {
         )}
 
         {data.pageCount > 1 && (
-          <div className="row" style={{ alignItems: 'center', marginTop: 12, justifyContent: 'flex-end' }}>
+          <div
+            className="row"
+            style={{ alignItems: 'center', marginTop: 12, justifyContent: 'flex-end' }}
+            data-tour="g-activity-pager"
+          >
             <button
               className="btn-ghost"
               disabled={page <= 1 || loading}

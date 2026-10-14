@@ -12,7 +12,7 @@ import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 import { labelize } from '../lib/labels';
 
-const STATUS_OPTIONS = ['CONFIRMED', 'PENDING', 'CANCELLED', 'IN_HOUSE', 'CHECKED_OUT', 'NO_SHOW'];
+const STATUS_OPTIONS = ['CONFIRMED', 'PENDING', 'CANCELLED', 'CHECKED_IN', 'IN_HOUSE', 'CHECKED_OUT', 'NO_SHOW'];
 
 export default function Reservations() {
   const navigate = useNavigate();
@@ -120,6 +120,45 @@ export default function Reservations() {
   }, [totalPages, page]);
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
+  // Every row the filters currently match, not just the visible page.
+  function exportCsv() {
+    if (filtered.length === 0) {
+      toast.error('Nothing to export — no reservations match the filters.');
+      return;
+    }
+    const cols = [
+      ['Reservation', (r) => r.confirmationNumber || r.id?.slice(0, 8)],
+      ['Guest', (r) => r.guestName],
+      ['Guests', (r) => (r.adults == null ? '' : r.adults + (r.children || 0))],
+      ['Date Booked', (r) => (r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '')],
+      ['Room(s)', (r) => r.assignedRoomId || r.roomTypeCode || ''],
+      ['Check-In', (r) => new Date(r.checkIn).toLocaleDateString()],
+      ['Check-Out', (r) => new Date(r.checkOut).toLocaleDateString()],
+      ['Total Price', (r) => (Number(r.totalEstimateCents) || 0) / 100],
+      ['Status', (r) => r.status],
+      ['Source', (r) => labelize(r.source) || 'Direct'],
+    ];
+    // A cell that starts with = + - @ is read as a formula by Excel, and guest
+    // names are typed by users — prefix them so they stay text.
+    const cell = (v) => {
+      let t = v == null ? '' : String(v);
+      if (/^[=+\-@]/.test(t)) t = `'${t}`;
+      t = t.replace(/"/g, '""');
+      return /[",\n]/.test(t) ? `"${t}"` : t;
+    };
+    const csv = [cols.map((c) => cell(c[0])).join(',')]
+      .concat(filtered.map((r) => cols.map((c) => cell(c[1](r))).join(',')))
+      .join('\n');
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reservations-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   function toggleSort(key) {
     setSortBy((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   }
@@ -150,7 +189,7 @@ export default function Reservations() {
         {/* The trigger sits with the title, in the same wrapper Reports uses
             for its Reports ⇄ Revenue switcher, so the two pages put their
             header control in the same place. */}
-        <div className="page-head-title">
+        <div className="page-head-title" data-tour="g-reservations-head">
           <h1>Reservations</h1>
           <FilterPill open={filtersOpen} onClick={() => setFiltersOpen((o) => !o)} />
         </div>
@@ -235,7 +274,7 @@ export default function Reservations() {
         </FilterField>
       </FilterPanel>
 
-      <div className="panel" style={{ borderTop: '3px solid var(--accent)' }}>
+      <div className="panel" style={{ borderTop: '3px solid var(--accent)' }} data-tour="g-reservations-list">
         <div
           style={{
             display: 'flex',
@@ -247,24 +286,24 @@ export default function Reservations() {
           }}
         >
           <h3 style={{ margin: 0 }}>Reservations</h3>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="icon" title="Columns">
-              <Icon name="clipboard-list" size={14} />
-            </button>
-            <button className="icon" title="Export">
+          <div style={{ display: 'flex', gap: 6 }} data-tour="g-reservations-export">
+            <button className="icon" title="Export CSV" aria-label="Export CSV" onClick={exportCsv}>
               <Icon name="download" size={14} />
             </button>
-            <button className="icon" title="Print">
+            <button className="icon" title="Print" aria-label="Print" onClick={() => window.print()}>
               <Icon name="printer" size={14} />
             </button>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <div
+          style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}
+          data-tour="g-reservations-paging"
+        >
           {/* Suggestions jump straight to a reservation; the text also keeps
               filtering the table beneath, so typing without picking still
               narrows the list the way it always did. */}
-          <div style={{ maxWidth: 320, flex: '0 1 320px' }}>
+          <div style={{ maxWidth: 320, flex: '0 1 320px' }} data-tour="g-reservations-search">
             <Autocomplete
               value={search}
               onChange={(v) => {
@@ -325,7 +364,7 @@ export default function Reservations() {
             hint="Try adjusting filters or clearing the search."
           />
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto' }} data-tour="g-reservations-table">
             <table className="table-clickable">
               <thead>
                 <tr>

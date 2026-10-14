@@ -224,13 +224,13 @@ export default function ReservationDetail() {
       <ShareRecordDialog open={shareOpen} onClose={() => setShareOpen(false)} record={reservationRef(res)} />
 
       {/* Header */}
-      <div className="res-header">
+      <div className="res-header" data-tour="g-reservation-detail-header">
         <div className="res-head-top">
           <div>
             <h1>{res.guestName || '(No name)'}</h1>
             <div className="res-conf">{res.confirmationNumber || res.id}</div>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }} data-tour="g-reservation-detail-actions">
             <StatusPill status={res.status} />
             <ActionsMenu
               label="Select Guest Status"
@@ -301,7 +301,7 @@ export default function ReservationDetail() {
           </div>
         </div>
 
-        <div className="res-head-fields">
+        <div className="res-head-fields" data-tour="g-reservation-detail-summary">
           <div>
             <div className="res-field-label">Check-In</div>
             <div className="res-field-value">{new Date(res.checkIn).toLocaleDateString()}</div>
@@ -339,7 +339,7 @@ export default function ReservationDetail() {
             <div className="res-field-label">Rate Plan(s)</div>
             <div className="res-field-value">{res.ratePlan || 'Base Rate'}</div>
           </div>
-          <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+          <div style={{ marginLeft: 'auto', textAlign: 'right' }} data-tour="g-reservation-detail-balance">
             <div className="res-field-label">Balance Due</div>
             <div className={`res-balance ${balanceDue > 0 ? 'due' : 'zero'}`}>
               <Icon name={balanceDue > 0 ? 'alert-circle' : 'check-circle'} size={14} />{' '}
@@ -398,7 +398,7 @@ export default function ReservationDetail() {
             )}
           </div>
         )}
-        <div className="res-show-more">
+        <div className="res-show-more" data-tour="g-reservation-detail-more">
           <button className="btn-ghost" onClick={() => setShowMore(!showMore)}>
             <Icon name={showMore ? 'chevron-up' : 'chevron-down'} size={12} style={{ marginRight: 4 }} />
             {showMore ? 'Show less' : 'Show more'}
@@ -407,7 +407,7 @@ export default function ReservationDetail() {
       </div>
 
       {/* Tabs */}
-      <div className="tabs">
+      <div className="tabs" data-tour="g-reservation-detail-tabs">
         {TABS.map((t) => (
           <button key={t} className={activeTab === t ? 'active' : ''} onClick={() => setActiveTab(t)}>
             {t === 'Notes' ? `Notes (${notes.active.length})` : t}
@@ -522,7 +522,7 @@ function AccommodationsTab({ res, stay, onQuickEdit, navigate }) {
   const total = formatPeso(res.totalEstimateCents);
   return (
     <div className="panel">
-      <button className="btn-cta" style={{ marginBottom: 14 }} onClick={onQuickEdit}>
+      <button className="btn-cta" style={{ marginBottom: 14 }} onClick={onQuickEdit} data-tour="g-reservation-detail-edit">
         <Icon name="pencil" size={14} style={{ marginRight: 6 }} />
         Edit Reservation
       </button>
@@ -644,17 +644,7 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund, hasRole })
       <div className="folio-list">
         <div className="folio-list-item active">
           <span>{folio.folioNumber || 'Folio 1'}</span>
-          {/* Inherits the row's colour instead of forcing white. The row is
-              `background: var(--accent); color: var(--on-accent)`, and --on-accent
-              is dark ink under data-theme="dark" — so a hard-coded white pencil
-              sat on a light-green row and all but disappeared. */}
-          <button className="icon" style={{ color: 'inherit' }} aria-label="Edit folio">
-            <Icon name="pencil" size={12} />
-          </button>
         </div>
-        <button className="folio-add">
-          <Icon name="plus" size={12} style={{ marginRight: 4 }} /> ADD FOLIO
-        </button>
       </div>
       <div>
         <div className="folio-actions">
@@ -733,11 +723,7 @@ function FolioTab({ folio, txns, onAddCharge, onAddPayment, onRefund, hasRole })
                     <td className="t-c">{t.quantity || 1}</td>
                     <td className="t-n">{t.type === 'CHARGE' ? formatPeso(t.amountCents) : ''}</td>
                     <td className="t-n">{t.type === 'PAYMENT' ? formatPeso(t.amountCents) : ''}</td>
-                    <td className="t-actions">
-                      <button className="icon" aria-label="More">
-                        <Icon name="more-vertical" size={14} />
-                      </button>
-                    </td>
+                    <td className="t-actions" />
                   </tr>
                 ))
               )}

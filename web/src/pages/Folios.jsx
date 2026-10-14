@@ -864,6 +864,7 @@ export default function Folios() {
 
         <div className="guest-search-bar" data-tour="tour-process-folios">
           <input
+            data-tour="g-folios-search"
             className="guest-search-input"
             value={q}
             placeholder="Folio number or guest name"
@@ -908,7 +909,7 @@ export default function Folios() {
                 </button>
               </div>
             )}
-            <table className="table-clickable">
+            <table className="table-clickable" data-tour="g-folios-list">
               <thead>
                 <tr>
                   <th className="t-c"></th>
@@ -972,7 +973,7 @@ export default function Folios() {
               The folio's payer (set by a split) takes priority over the
               stay's overall guest, since a split folio bills a specific
               person, not necessarily whoever occupies the room. */}
-          <div className="panel">
+          <div className="panel" data-tour="g-folio-summary">
             <div className="folio-summary-top">
               <div className="folio-summary-guest">
                 <Avatar name={headerGuestName} size={40} />
@@ -1002,7 +1003,7 @@ export default function Folios() {
                   the one action actually gating checkout — see the banner right
                   below this row. Everything else reads as an equal, ordinary
                   choice, which is what it is. */}
-              <div className="folio-summary-actions">
+              <div className="folio-summary-actions" data-tour="g-folio-actions">
                 <div className="folio-action-group">
                   <button className="secondary small" onClick={printPdf}>
                     Print PDF
@@ -1081,7 +1082,7 @@ export default function Folios() {
                 message or a clerk re-reads an approval badge that no longer
                 means anything. */}
             {folio.status === 'OPEN' && (
-              <p className={`folio-audit-line ${folio.auditApproved ? 'is-ok' : 'is-pending'}`}>
+              <p data-tour="g-folio-audit" className={`folio-audit-line ${folio.auditApproved ? 'is-ok' : 'is-pending'}`}>
                 {folio.auditApproved ? (
                   <>Audit approved — this folio is cleared for check-out.</>
                 ) : folio.auditApprovalStale ? (
@@ -1101,7 +1102,7 @@ export default function Folios() {
                 charge to put it on another folio. Every folio must be settled before the guest can check out.
               </p>
             )}
-            <div className="metrics">
+            <div className="metrics" data-tour="g-folio-metrics">
               <div className="metric">
                 <div className="label">Balance</div>
                 <div className="value">
@@ -1122,7 +1123,7 @@ export default function Folios() {
           <div className="folio-layout">
             {/* ── Main: the ledger and what it produced ── */}
             <div className="folio-main">
-              <div className="panel">
+              <div className="panel" data-tour="g-folio-ledger">
                 <h3>Ledger</h3>
                 <table>
                   <thead>
@@ -1307,7 +1308,7 @@ export default function Folios() {
               </div>
 
               {statement?.folio?.payments?.length > 0 && (
-                <div className="panel">
+                <div className="panel" data-tour="g-folio-payments">
                   <h3>Payments received</h3>
                   <table className="table">
                     <thead>
@@ -1465,7 +1466,7 @@ export default function Folios() {
                 time instead of three stacked full-width forms ── */}
             <div className="folio-side">
               <div className="panel">
-                <div className="tabs-pill">
+                <div className="tabs-pill" data-tour="g-folio-tabs">
                   <button
                     type="button"
                     className={actionTab === 'charge' ? 'active' : ''}
@@ -1490,7 +1491,7 @@ export default function Folios() {
                 </div>
 
                 {actionTab === 'charge' && (
-                  <form onSubmit={postCharge}>
+                  <form onSubmit={postCharge} data-tour="g-folio-chargeform">
                     <label>Charge code</label>
                     <select
                       value={charge.chargeCode}
@@ -1524,7 +1525,7 @@ export default function Folios() {
 
                 {actionTab === 'payment' && (
                   <>
-                    <form onSubmit={postPayment}>
+                    <form onSubmit={postPayment} data-tour="g-folio-paymentform">
                       <label>Method</label>
                       <select
                         value={payment.method}
@@ -1778,7 +1779,7 @@ export default function Folios() {
                 )}
 
                 {actionTab === 'deposit' && (
-                  <form onSubmit={postDeposit}>
+                  <form onSubmit={postDeposit} data-tour="g-folio-depositform">
                     <label>Method</label>
                     <select
                       value={deposit.method}

@@ -86,11 +86,11 @@ export default function Reports() {
           <SectionSwitcher options={REPORTS_SECTIONS} />
         </div>
       </div>
-      <div className="panel">
+      <div className="panel" data-tour="g-reports-picker">
         <div className="row">
           <div>
             <label>Report</label>
-            <select value={type} onChange={(e) => setType(e.target.value)}>
+            <select data-tour="g-reports-type" value={type} onChange={(e) => setType(e.target.value)}>
               {TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
@@ -117,7 +117,7 @@ export default function Reports() {
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <button onClick={run} disabled={loading}>
+            <button data-tour="g-reports-run" onClick={run} disabled={loading}>
               {loading ? <span className="spinner" /> : 'Run'}
             </button>
           </div>
@@ -128,7 +128,9 @@ export default function Reports() {
           the picker is reset) the dashboard is what fills the lower half of
           the page. Either way, this region is never the blank space it used
           to be before the operator picked a report and hit Run. */}
-      {result ? <RenderReport type={result.type} data={result.data} /> : <DefaultDashboard />}
+      <div data-tour="g-reports-results">
+        {result ? <RenderReport type={result.type} data={result.data} /> : <DefaultDashboard />}
+      </div>
     </div>
   );
 }
@@ -172,7 +174,7 @@ function DefaultDashboard() {
 
   if (state.loading) {
     return (
-      <div className="panel">
+      <div className="panel" data-tour="g-reports-glance">
         <div className="metrics">
           <Metric label="Total rooms" value="…" />
           <Metric label="In-house guests" value="…" />
@@ -203,7 +205,7 @@ function DefaultDashboard() {
 
   return (
     <>
-      <div className="panel">
+      <div className="panel" data-tour="g-reports-glance">
         <h3 style={{ margin: '0 0 12px' }}>At a glance</h3>
         <div className="metrics">
           <Metric label="Total rooms" value={rooms.total} />
@@ -217,7 +219,7 @@ function DefaultDashboard() {
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel" data-tour="g-reports-recent">
         <h3 style={{ margin: '0 0 12px' }}>Recent report activity</h3>
         {runs.length === 0 ? (
           <EmptyState
@@ -467,7 +469,10 @@ function ResultTable({ rows, cols, filename }) {
           {rows.length} row{rows.length !== 1 ? 's' : ''}
         </h3>
         {rows.length > 0 && (
-          <button className="small secondary" onClick={() => download(filename, toCSV(rows, cols))}>
+          <button
+            data-tour="g-reports-export"
+            className="small secondary"
+            onClick={() => download(filename, toCSV(rows, cols))}>
             Export CSV
           </button>
         )}

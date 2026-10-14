@@ -74,7 +74,7 @@ export default function Audit() {
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel" data-tour="g-audit-current-day">
         <h3>Current business day</h3>
         {current ? (
           <>
@@ -82,7 +82,7 @@ export default function Audit() {
               Date: <strong>{new Date(current.businessDate).toDateString()}</strong> · Status:{' '}
               <span className={`badge ${current.status.toLowerCase()}`}>{labelize(current.status)}</span>
             </p>
-            <div className="metrics" style={{ marginBottom: 12 }}>
+            <div className="metrics" style={{ marginBottom: 12 }} data-tour="g-audit-metrics">
               <div className="metric">
                 <div className="label">In-house stays</div>
                 <div className="value">{inHouseCount}</div>
@@ -111,11 +111,11 @@ export default function Audit() {
               </div>
             </div>
             <div data-tour="tour-process-audit">
-              <button onClick={run} disabled={running}>
+              <button data-tour="g-audit-run" onClick={run} disabled={running}>
                 {running ? <span className="spinner" /> : 'Run audit'}
               </button>
             </div>
-            <p className="muted">
+            <p className="muted" data-tour="g-audit-explain">
               The audit posts a room charge to each in-house folio, combines all of the day's sales — rooms
               plus amenities, laundry, spa and visitor sales — marks unarrived confirmed bookings as no-show,
               auto-cancels overdue unconfirmed bookings, and closes the day.
@@ -124,12 +124,12 @@ export default function Audit() {
         ) : (
           <>
             <p className="muted">No open business day.</p>
-            <button onClick={openDay}>Open today</button>
+            <button data-tour="g-audit-open-day" onClick={openDay}>Open today</button>
           </>
         )}
       </div>
 
-      <div className="panel">
+      <div className="panel" data-tour="g-audit-history">
         <h3>History</h3>
         {days.length === 0 ? (
           <div className="loading-row">No audit history yet.</div>

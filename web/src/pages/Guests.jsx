@@ -429,7 +429,7 @@ export default function Guests() {
 
       <div className="panel">
         <h3>Create guest</h3>
-        <form onSubmit={create}>
+        <form onSubmit={create} data-tour="g-guests-create">
           <div className="row">
             <div>
               <label>First name</label>
@@ -456,7 +456,7 @@ export default function Guests() {
             </div>
             <div>
               <label>VIP level</label>
-              <select value={form.vipLevel} onChange={(e) => setForm({ ...form, vipLevel: e.target.value })}>
+              <select data-tour="g-guests-vip" value={form.vipLevel} onChange={(e) => setForm({ ...form, vipLevel: e.target.value })}>
                 {['NONE', 'SILVER', 'GOLD', 'PLATINUM', 'BLACKLISTED'].map((v) => (
                   <option key={v} value={v}>
                     {labelize(v)}
@@ -494,7 +494,7 @@ export default function Guests() {
             below — typing narrows them in place, so there is nothing to float
             over the list. Choosing one dismisses the rows entirely and leaves
             just this bar, with the guest's card beneath it. */}
-        <div className="guest-search-bar">
+        <div className="guest-search-bar" data-tour="g-guests-search">
           <input
             className="guest-search-input"
             value={q}
@@ -544,7 +544,7 @@ export default function Guests() {
                 </button>
               </div>
             )}
-            <table className="table-clickable">
+            <table className="table-clickable" data-tour="g-guests-list">
               <thead>
                 <tr>
                   <th className="t-c"></th>
@@ -594,7 +594,7 @@ export default function Guests() {
           rows are gone — so what stacks here is a search box with its answer
           directly under it, not a card buried beneath a list. */}
       {selected && !editing && (
-        <div className="panel">
+        <div className="panel" data-tour="g-guests-profile">
           <div className="panel-head">
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <Avatar name={`${selected.firstName} ${selected.lastName}`} size={48} userId={selected.id} />
@@ -608,7 +608,7 @@ export default function Guests() {
               </div>
             </div>
             <div className="filter-bar">
-              <button className="small secondary" onClick={() => setEditing(true)}>
+              <button className="small secondary" data-tour="g-guests-edit" onClick={() => setEditing(true)}>
                 <Icon name="pencil" size={13} />
                 Edit
               </button>
@@ -645,7 +645,7 @@ export default function Guests() {
             </div>
           </div>
 
-          <div className="guest-facts">
+          <div className="guest-facts" data-tour="g-guests-facts">
             <div className="guest-fact">
               <span className="guest-fact-label">Guest status</span>
               <span className="guest-fact-value">
@@ -708,7 +708,7 @@ export default function Guests() {
               : 'None set — edit this profile to add some.'}
           </p>
 
-          <h4 className="guest-sub">Booked reservations</h4>
+          <h4 className="guest-sub" data-tour="g-guests-history">Booked reservations</h4>
           {history.loading ? (
             <div className="loading-row">
               <span className="spinner" /> Loading…
@@ -779,7 +779,7 @@ export default function Guests() {
       )}
 
       {selected && editing && (
-        <div className="panel">
+        <div className="panel" data-tour="g-guests-editform">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
             <Avatar name={`${selected.firstName} ${selected.lastName}`} size={48} />
             <h3 style={{ margin: 0 }}>Edit — {selected.profileNumber}</h3>

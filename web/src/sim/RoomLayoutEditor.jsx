@@ -13,6 +13,8 @@ import { useToast } from '../components/Toast';
 import { useTheme } from '../theme';
 import { stageColor } from './stageColor';
 import SaveChip from './SaveChip';
+import useInlineGuide from '../guides/useInlineGuide';
+import roomLayoutEditorGuide from '../guides/room-layout-editor';
 import { MODELS, GLBoundary } from './task3d';
 import { hydrateAssets, onAssetsChanged, uploadedAssets, uploadAsset } from './assetSync';
 import {
@@ -210,6 +212,9 @@ export default function RoomLayoutEditor({
   const [helpOpen, setHelpOpen] = useState(false);
   const glRef = useRef(null);
   const { theme, toggle: toggleTheme } = useTheme();
+  // The editor's data is read synchronously from the already-hydrated plan, so
+  // it is ready on first render.
+  const guide = useInlineGuide(roomLayoutEditorGuide, { ready: true });
 
   // Repaint the 3D backdrop when the theme flips or the accent is re-tinted.
   // Every other surface in the editor is a CSS variable and follows on its own;
@@ -760,7 +765,7 @@ export default function RoomLayoutEditor({
           gizmo tools 207px across the screen, so the tool under your cursor was
           no longer the tool you reached for. Anchored to the viewport, the
           centre is the centre whatever the panels are doing. */}
-      <div className="tool-bar tool-bar--strip">
+      <div className="tool-bar tool-bar--strip" data-tour="g-layout-editor-toolbar">
         {/* Undo and Reset lead the bar, as the reference has them. Same two
             handlers that were in the side panel — moved, not rewritten. */}
         <div className="tool-group">
@@ -771,6 +776,7 @@ export default function RoomLayoutEditor({
             disabled={histEpoch >= 0 && hist.current.length === 0}
             className="tool-btn"
             title="Undo (⌘Z)"
+            data-tour="g-layout-editor-undo"
             aria-label="Undo"
           >
             <Icon name="undo" size={18} strokeWidth={1.9} />
@@ -789,6 +795,7 @@ export default function RoomLayoutEditor({
             onClick={birdsEye}
             className="tool-btn"
             title="Bird's-eye view — look straight down on the plan"
+            data-tour="g-layout-editor-camera"
             aria-label="Bird's-eye view"
           >
             <Icon name="bird-eye" size={18} strokeWidth={1.9} />
@@ -805,6 +812,7 @@ export default function RoomLayoutEditor({
             onClick={resetToFile}
             className="tool-btn"
             title="Discard edits and reload the checked-in layout"
+            data-tour="g-layout-editor-reset"
             aria-label="Reset to file"
           >
             <Icon name="refresh-cw" size={18} strokeWidth={1.9} />
@@ -813,7 +821,7 @@ export default function RoomLayoutEditor({
 
         {/* The gizmo modes, centred — the three that decide what dragging in
             the viewport does, which is what the bar is mostly for. */}
-        <div className="tool-group tool-group--mid">
+        <div className="tool-group tool-group--mid" data-tour="g-layout-editor-gizmo">
           {/* Same three handlers, same three mode values — only the label is
               now a glyph. `title` carries the word that used to be the button
               face, so nothing is lost for anyone hovering or using a reader. */}
@@ -852,6 +860,7 @@ export default function RoomLayoutEditor({
             onClick={() => setSnap(!snap)}
             className={`tool-btn${snap ? ' is-on' : ''}`}
             title="Snap to grid"
+            data-tour="g-layout-editor-snap"
             aria-label="Snap to grid"
             aria-pressed={snap}
           >
@@ -880,6 +889,7 @@ export default function RoomLayoutEditor({
             onClick={saveAs}
             disabled={saveState === 'saving'}
             title="Save this room as a new layout under its own name (⇧⌘S / Ctrl+Shift+S)"
+            data-tour="g-layout-editor-save-as"
           >
             <Icon name="copy" size={16} strokeWidth={1.9} />
             Save as
@@ -916,13 +926,24 @@ export default function RoomLayoutEditor({
             onClick={() => setHelpOpen(true)}
             className={`tool-btn${helpOpen ? ' is-on' : ''}`}
             title="Shortcuts and a short guide"
+            data-tour="g-layout-editor-help"
             aria-label="Help"
           >
             <Icon name="help-circle" size={18} strokeWidth={1.9} />
           </button>
+          <button
+            onClick={guide.start}
+            className="tool-btn"
+            title="Guide for this editor"
+            data-tour="g-layout-editor-guide"
+            aria-label="Guide for this editor"
+          >
+            <Icon name="help-circle" size={16} strokeWidth={1.9} />
+          </button>
         </div>
       </div>
       {helpOpen && <EditorHelp onClose={() => setHelpOpen(false)} />}
+      {guide.element}
 
       {/* ── The three columns, below the bar ── */}
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
@@ -953,6 +974,7 @@ export default function RoomLayoutEditor({
           }}
         >
           <div
+            data-tour="g-layout-editor-title"
             style={{
               padding: '10px 12px',
               fontWeight: 700,
@@ -975,7 +997,13 @@ export default function RoomLayoutEditor({
               >
                 <Icon name="chevron-left" size={16} strokeWidth={2} />
               </button>
-              <button onClick={onClose} className="tool-btn" aria-label="Close" title="Close the editor">
+              <button
+                onClick={onClose}
+                className="tool-btn"
+                aria-label="Close"
+                title="Close the editor"
+                data-tour="g-layout-editor-close"
+              >
                 <Icon name="x" size={16} strokeWidth={2} />
               </button>
             </span>
@@ -993,7 +1021,7 @@ export default function RoomLayoutEditor({
               // passed down rather than raised, and shown inside the palette.
               onNotify={(kind, msg) => (kind === 'error' ? toast.error(msg) : toast.success(msg))}
             />
-            <div className="tool-bar" style={{ marginTop: 8 }}>
+            <div className="tool-bar" style={{ marginTop: 8 }} data-tour="g-layout-editor-wall-station">
               <button onClick={addWall} className="tool-btn has-label" title="Add a wall segment">
                 <Icon name="wall" size={15} strokeWidth={1.9} />
                 Wall
@@ -1062,7 +1090,10 @@ export default function RoomLayoutEditor({
           {/* The extra bottom padding is a footer gutter: without it the last
             field sits flush against the panel's bottom edge, which reads as
             content that has been cut off rather than content that has ended. */}
-          <div style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)' }}>
+          <div
+            style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)' }}
+            data-tour="g-layout-editor-room"
+          >
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>ROOM</div>
             <Row>
               <Lbl>floor</Lbl>
@@ -1102,6 +1133,7 @@ export default function RoomLayoutEditor({
           of the screen. With the floor at 0 the column yields instead. */}
         <div
           className="ed-viewport"
+          data-tour="g-layout-editor-viewport"
           style={{
             flex: '1 1 auto',
             minWidth: 0,
@@ -1290,6 +1322,7 @@ export default function RoomLayoutEditor({
 
         {/* ── RIGHT: inspector + scene lists ── */}
         <div
+          data-tour="g-layout-editor-inspector"
           style={{
             width: 232,
             flex: 'none',
@@ -1382,6 +1415,7 @@ export default function RoomLayoutEditor({
             flexible space, this takes a fixed share of the panel and scrolls
             within it. Both being flexible is what made the column fight itself. */}
           <div
+            data-tour="g-layout-editor-lists"
             style={{
               flex: 'none',
               borderTop: '1px solid var(--border)',
@@ -1906,8 +1940,8 @@ function AssetPalette({ addKey, setAddKey, onAdd, onNotify }) {
   }, [tab, q, assetEpoch]);
 
   return (
-    <div className="pal">
-      <div className="pal-tabs" role="tablist">
+    <div className="pal" data-tour="g-layout-editor-palette">
+      <div className="pal-tabs" role="tablist" data-tour="g-layout-editor-palette-tabs">
         {PAL_TABS.map((t) => (
           <button
             key={t.id}
@@ -1964,6 +1998,7 @@ function AssetPalette({ addKey, setAddKey, onAdd, onNotify }) {
           className="tool-btn tool-btn--text is-on"
           onClick={onAdd}
           title="Add the selected asset to the room"
+          data-tour="g-layout-editor-add"
           aria-label="Add selected asset"
         >
           <Icon name="plus" size={17} strokeWidth={2.2} />

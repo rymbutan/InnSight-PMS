@@ -39,10 +39,10 @@ function SettingCard({ icon, title, subtitle, children, onSubmit, busy, action, 
 // One collapsible bar per settings category — closed by default, so a page
 // that used to be a long scroll of every card at once now opens on four
 // clean rows and lets staff expand only the section they came for.
-function AccordionSection({ icon, title, defaultOpen = false, children }) {
+function AccordionSection({ icon, title, defaultOpen = false, tour, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className={`set-accordion${open ? ' is-open' : ''}`}>
+    <div className={`set-accordion${open ? ' is-open' : ''}`} data-tour={tour}>
       <button
         type="button"
         className="set-accordion-header"
@@ -394,7 +394,7 @@ export default function Settings() {
   return (
     <div className="set-page">
       {/* ── Identity header ── */}
-      <div className="set-profile">
+      <div className="set-profile" data-tour="g-settings-profile">
         <div className="set-profile-id">
           <Avatar
             name={user?.displayName}
@@ -416,7 +416,7 @@ export default function Settings() {
         </div>
 
         <div className="set-profile-actions">
-          <div className="set-photo-btns">
+          <div className="set-photo-btns" data-tour="g-settings-photo">
             <button
               type="button"
               className="set-btn"
@@ -449,7 +449,7 @@ export default function Settings() {
       </div>
 
       {/* ── Account information ── */}
-      <AccordionSection icon="user" title="Account Information">
+      <AccordionSection icon="user" title="Account Information" tour="g-settings-account">
         <div className="set-grid">
           <SettingCard
             icon="user"
@@ -586,7 +586,7 @@ export default function Settings() {
           headers included — are gated on `canBilling`, the same predicate the
           System Color Changer below uses for `canTheme`. */}
       {canBilling ? (
-        <AccordionSection icon="credit-card" title="Billing">
+        <AccordionSection icon="credit-card" title="Billing" tour="g-settings-billing">
           <form className="set-card is-wide" onSubmit={saveTaxRates}>
             <div className="set-card-head">
               <span className="set-card-icon">
@@ -691,7 +691,7 @@ export default function Settings() {
 
       {/* ── Hotel Details ── */}
       {canBilling ? (
-        <AccordionSection icon="building-2" title="Hotel Details">
+        <AccordionSection icon="building-2" title="Hotel Details" tour="g-settings-hotel">
           <form className="set-card is-wide" onSubmit={saveHotel}>
             <div className="set-card-head">
               <span className="set-card-icon">
@@ -775,7 +775,7 @@ export default function Settings() {
       ) : null}
 
       {/* ── Appearance ── */}
-      <AccordionSection icon="palette" title="System Appearance">
+      <AccordionSection icon="palette" title="System Appearance" tour="g-settings-appearance">
         <div className="set-card is-wide">
           <div className="set-card-head">
             <span className="set-card-icon">
@@ -863,7 +863,7 @@ export default function Settings() {
           server-side, and applies to every user on every device. They share a
           section because that is where people will look for both, but the
           copy on each card has to keep the difference obvious. */}
-      <AccordionSection icon="message-circle" title="Messaging">
+      <AccordionSection icon="message-circle" title="Messaging" tour="g-settings-messaging">
         <div className="set-card is-wide">
           <div className="set-card-head">
             <span className="set-card-icon">
@@ -945,7 +945,7 @@ export default function Settings() {
           configures, so a manager who could edit it could hand themselves back
           anything an admin had taken away. */}
       {canLayout ? (
-        <AccordionSection icon="layout-dashboard" title="Edit System Layout">
+        <AccordionSection icon="layout-dashboard" title="Edit System Layout" tour="g-settings-layout">
           <SidebarVisibility />
         </AccordionSection>
       ) : null}

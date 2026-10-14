@@ -21,6 +21,8 @@ import { hydrateCategories } from './categorySync';
 import InspectionShift from './InspectionShift';
 import { useSavedScenarios, STATUS } from './useSavedScenarios';
 import SavedScenarioList from './SavedScenarioList';
+import useInlineGuide from '../../guides/useInlineGuide';
+import scenarioEditorGuide from '../../guides/scenario-editor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Authoring what is WRONG with a room.
@@ -262,6 +264,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   const [helpOpen, setHelpOpen] = useState(false);
   const [panelTab, setPanelTab] = useState('build');
   const { theme, toggle: toggleTheme } = useTheme();
+  const guide = useInlineGuide(scenarioEditorGuide, { ready: listLoaded });
 
   const orbit = useRef();
   const [selObj, setSelObj] = useState(null);
@@ -829,6 +832,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   return (
     <div
       className="se-wrap"
+      data-tour="g-scenario-editor-root"
       // Claims the keyboard from the app's global shortcuts. Without it, bare
       // `d`, `r`, `g`, `n` and `c` navigate away from a scenario you have not
       // saved yet — and `t` toggled the theme mid-edit. The room layout editor
@@ -842,8 +846,9 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
           Move means the same tile in both. Full width rather than inside the
           stage column, so the centre group does not shift when the panel
           collapses. */}
+      {guide.element}
       <div className="tool-bar tool-bar--strip">
-        <div className="tool-group">
+        <div className="tool-group" data-tour="g-scenario-editor-camera">
           <button
             onClick={undo}
             disabled={!history.length}
@@ -878,7 +883,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
 
         {/* Two modes, not three: this editor persists position and yaw only, so
             a scale gizmo would move things on screen and discard it on save. */}
-        <div className="tool-group tool-group--mid">
+        <div className="tool-group tool-group--mid" data-tour="g-scenario-editor-gizmo">
           <button
             className={`tool-btn${mode === 'translate' ? ' is-on' : ''}`}
             onClick={() => setMode('translate')}
@@ -905,7 +910,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
               created once, and showing "Autosave on" over a draft that is not
               being saved would be the one message that actively misleads. */}
           <SaveChip state={editingId ? saveState : 'pending'} error={saveError} />
-          <span className="tool-note">
+          <span className="tool-note" data-tour="g-scenario-editor-counts">
             {faultCount} fault{faultCount === 1 ? '' : 's'} · {decoyCount} decoy
             {decoyCount === 1 ? '' : 's'}
           </span>
@@ -917,6 +922,15 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             aria-pressed={theme === 'dark'}
           >
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} strokeWidth={1.9} />
+          </button>
+          <button
+            onClick={guide.start}
+            className="tool-btn"
+            title="Guide for this editor"
+            aria-label="Guide for this editor"
+            data-tour="g-scenario-editor-guide-btn"
+          >
+            <Icon name="graduation-cap" size={18} strokeWidth={1.9} />
           </button>
           <button
             onClick={() => setHelpOpen(true)}
@@ -946,7 +960,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
         {/* Hidden by a class, not an inline `display`, so the stylesheet keeps
             control of the panel's layout — an inline display:block outranks the
             flex column .se-side needs to stretch the saved-scenarios list. */}
-        <div className={`se-side${sideOpen ? '' : ' se-side--hidden'}`}>
+        <div className={`se-side${sideOpen ? '' : ' se-side--hidden'}`} data-tour="g-scenario-editor-panel">
           <div className="se-head">
             <strong>Inspection Scenarios</strong>
             <span style={{ display: 'flex', gap: 2, marginLeft: 'auto' }}>
@@ -975,10 +989,11 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             almost all the time, Scenario is opening/naming/saving, Faults is
             the category library you touch rarely. Nothing is removed and no
             handler changes — this only decides what is on screen at once. */}
-          <div className="pal-tabs" role="tablist">
+          <div className="pal-tabs" role="tablist" data-tour="g-scenario-editor-tabs">
             {SE_TABS.map((t) => (
               <button
                 key={t.id}
+                data-tour={`g-scenario-editor-tab-${t.id}`}
                 type="button"
                 role="tab"
                 aria-selected={panelTab === t.id}
@@ -995,7 +1010,12 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
           {panelTab === 'scenario' && (
             <>
               <label>Room tier</label>
-              <select value={tier} onChange={(e) => setTier(e.target.value)} disabled={!!editingId}>
+              <select
+                value={tier}
+                onChange={(e) => setTier(e.target.value)}
+                disabled={!!editingId}
+                data-tour="g-scenario-editor-tier"
+              >
                 {TIERS.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
@@ -1004,6 +1024,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
 
               <label>Scenario name</label>
               <input
+                data-tour="g-scenario-editor-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Couple in a twin room"
@@ -1022,7 +1043,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 The six built-in categories cover most faults. Anything you add here is saved to the shared
                 library and offered on <strong>every scenario and every room</strong>.
               </p>
-              <ul className="se-cat-list">
+              <ul className="se-cat-list" data-tour="g-scenario-editor-cat-list">
                 {cats.map((c) => (
                   <li key={c.id} className={c.custom ? 'se-cat is-custom' : 'se-cat'}>
                     <span className="se-cat-label">{c.label}</span>
@@ -1036,7 +1057,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                   </li>
                 ))}
               </ul>
-              <form onSubmit={saveCategory} className="se-cat-form">
+              <form onSubmit={saveCategory} className="se-cat-form" data-tour="g-scenario-editor-cat-form">
                 <input
                   value={catForm.label}
                   onChange={(e) => setCatForm({ ...catForm, label: e.target.value })}
@@ -1062,7 +1083,11 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
           {panelTab === 'build' && (
             <>
               <div className="se-section">Add an object</div>
-              <select value={addKey} onChange={(e) => setAddKey(e.target.value)}>
+              <select
+                value={addKey}
+                onChange={(e) => setAddKey(e.target.value)}
+                data-tour="g-scenario-editor-add-select"
+              >
                 <optgroup label="Props (no 3D model)">
                   {PRIMS.map((p) => (
                     <option key={p.prim} value={p.prim}>
@@ -1088,7 +1113,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 Add to room
               </button>
 
-              <div className="se-section">
+              <div className="se-section" data-tour="g-scenario-editor-selected">
                 Selected object {sel ? '' : <span className="muted">— click one in the room</span>}
               </div>
               {sel && (
@@ -1125,7 +1150,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                   </div>
 
                   {/* ── PLACEMENT ──────────────────────────────────────────── */}
-                  <div className="se-group">
+                  <div className="se-group" data-tour="g-scenario-editor-placement">
                     <div className="se-group-h">Placement</div>
                     {/* Same handlers and the same two mode values as before — the
                   buttons are the shared `.tool-btn` tiles the room layout
@@ -1298,7 +1323,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                   </div>
 
                   {/* ── FAULT ──────────────────────────────────────────────── */}
-                  <div className="se-group">
+                  <div className="se-group" data-tour="g-scenario-editor-fault">
                     <div className="se-group-h">What the student should find</div>
                     <select
                       value={
@@ -1368,7 +1393,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             fault/decoy count moved to the toolbar; Undo moved there beside
             Redo. */}
           <div className="se-section">Scenario</div>
-          <div className="row" style={{ gap: 4 }}>
+          <div className="row" style={{ gap: 4 }} data-tour="g-scenario-editor-save">
             {/* The shortcut is in the tooltip rather than on the button face: the
               label already switches between two words depending on whether this
               creates or updates, and a chord appended to both makes the button
@@ -1384,7 +1409,9 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 a few pixels apart. */}
           </div>
 
-          <div className="se-section">Saved scenarios</div>
+          <div className="se-section" data-tour="g-scenario-editor-saved">
+            Saved scenarios
+          </div>
           <SavedScenarioList
             scenarios={savedScenarios}
             loaded={listLoaded}
@@ -1397,7 +1424,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
           />
         </div>
 
-        <div className="se-stage">
+        <div className="se-stage" data-tour="g-scenario-editor-stage">
           <Canvas
             shadows
             dpr={[1, 2]}

@@ -79,9 +79,9 @@ export default function CalendarPage() {
     <div>
       <div className="page-head">
         <h1>Calendar</h1>
-        <div className="cal-head-actions">
+        <div className="cal-head-actions" data-tour="g-calendar-controls">
           {tabs.length > 1 && (
-            <div className="seg" role="tablist" aria-label="Calendar view">
+            <div className="seg" role="tablist" aria-label="Calendar view" data-tour="g-calendar-views">
               {tabs.map(([key, v]) => (
                 <button
                   key={key}
@@ -98,7 +98,7 @@ export default function CalendarPage() {
             </div>
           )}
           <CalendarNav startDate={startDate} setStartDate={setStartDate} />
-          <button className="btn-cta" onClick={() => navigate(active.cta.to)}>
+          <button className="btn-cta" data-tour="g-calendar-cta" onClick={() => navigate(active.cta.to)}>
             <Icon name={active.cta.icon} size={14} style={{ marginRight: 6 }} />
             {active.cta.label}
           </button>

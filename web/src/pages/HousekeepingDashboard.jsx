@@ -209,7 +209,7 @@ export default function HousekeepingDashboard() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-tour="g-dashboard-hk-head">
         <div>
           <h1>
             {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
@@ -232,7 +232,7 @@ export default function HousekeepingDashboard() {
       </div>
 
       {/* ── Board: where every room stands right now ── */}
-      <div className="panel">
+      <div className="panel" data-tour="g-dashboard-hk-status">
         <h3>Room status</h3>
         <div className="hkd-status-board">
           {STATUS_ORDER.map((s) => {
@@ -263,7 +263,7 @@ export default function HousekeepingDashboard() {
           they stack, same as the status board's own tiles. */}
       <div className="hkd-cols">
         {/* ── Job orders ── */}
-        <div className="panel">
+        <div className="panel" data-tour="g-dashboard-hk-jobs">
           <h3>
             Job orders{' '}
             <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
@@ -342,9 +342,9 @@ export default function HousekeepingDashboard() {
             Same table this panel always had; only the tabs and the title
             changed (it used to default to "Waiting", which is also the one
             KPI tile above and the live ringing modal already cover). */}
-        <div className="panel">
+        <div className="panel" data-tour="g-dashboard-hk-history">
           <h3>History</h3>
-          <div className="tabs-pill" style={{ marginBottom: 10 }}>
+          <div className="tabs-pill" data-tour="g-dashboard-hk-histtabs" style={{ marginBottom: 10 }}>
             {['Accepted', 'Declined', 'All'].map((t) => (
               <button key={t} className={callTab === t ? 'active' : ''} onClick={() => setCallTab(t)}>
                 {t}
@@ -442,7 +442,7 @@ export default function HousekeepingDashboard() {
       {/* 14 Day Outlook — identical to the front-office dashboard's panel
           (same lib/outlookHeat helpers, same heat-* CSS), so demand reads the
           same way for whoever is looking at it. */}
-      <div className="panel">
+      <div className="panel" data-tour="g-dashboard-hk-outlook">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>14 Day Outlook</h3>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -534,7 +534,7 @@ export default function HousekeepingDashboard() {
           </table>
         </div>
 
-        <div className="heat-legend">
+        <div className="heat-legend" data-tour="g-dashboard-hk-legend">
           <span className="muted">Share of the room type already sold</span>
           {HEAT_LEGEND.map((l) => (
             <span key={l.label} className="heat-legend-item">

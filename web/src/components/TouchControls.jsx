@@ -15,10 +15,11 @@ import { stickKnob, stickVector } from '../lib/touchInput';
 //  • A full-surface drag layer BEHIND everything: one finger anywhere on the
 //    room looks around, which is what people already expect from every
 //    first-person app on a phone.
-//  • The stick sits ON TOP of that layer, bottom-left, so its touches are its
-//    own — the topmost element gets the pointerdown, and each control captures
-//    its own pointerId, so a thumb on the stick and a finger looking around
-//    work at the same time rather than fighting.
+//  • The stick is FLOATING: it does not exist until a finger lands on the LEFT
+//    half of the room, and then it appears centred under that finger. Each
+//    pointer is tracked by its own pointerId, so a thumb walking on the left
+//    and a finger looking around on the right work at the same time. A fixed
+//    corner stick made people reach for it; this puts it wherever the thumb is.
 //  • An action button bottom-right, because "tap the thing you are looking at"
 //    is ambiguous when tapping is also how you look: a drag that happens to end
 //    where it started would fire an interaction nobody asked for. A tap on the
@@ -30,10 +31,9 @@ import { stickKnob, stickVector } from '../lib/touchInput';
 // what lets the same component serve a stylus on a Surface without a branch.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Travel of the stick in CSS pixels — the dial is twice this across. Sized for
-// a thumb reaching from the corner of a held tablet, and kept in sync with
-// `.touch-stick`'s width in styles.css: the maths clamps to this, the ring is
-// drawn from that, and if they disagree the knob leaves the dial.
+// Travel of the stick in CSS pixels — the dial is twice this across, and kept in
+// sync with `.touch-stick`'s width in styles.css: the maths clamps to this, the
+// ring is drawn from that, and if they disagree the knob leaves the dial.
 const STICK_RADIUS = 52;
 
 // A pointer that travels further than this between down and up was a look
@@ -64,8 +64,11 @@ export default function TouchControls({
   // deliberately the ONLY thing: `inputRef` carries the numbers the renderer
   // consumes, this carries the pixels the eye consumes.
   const [knob, setKnob] = useState(null);
+  // Where the floating stick is drawn, in the controls layer's own CSS pixels;
+  // null while no finger is driving it, which is also what hides it.
+  const [stickPos, setStickPos] = useState(null);
 
-  const stickRef = useRef(null);
+  const layerRef = useRef(null);
   const stickPointer = useRef(null);
   const stickOrigin = useRef({ x: 0, y: 0 });
 
@@ -77,6 +80,7 @@ export default function TouchControls({
   const zero = useCallback(() => {
     if (inputRef.current) inputRef.current.move = { x: 0, y: 0 };
     setKnob(null);
+    setStickPos(null);
     stickPointer.current = null;
   }, [inputRef]);
 
@@ -87,46 +91,66 @@ export default function TouchControls({
     if (disabled) zero();
   }, [disabled, zero]);
 
+  // Client pixels -> the layer's own CSS pixels. The app runs under `zoom` on
+  // <html>, so a `left`/`top` set on a child is scaled a second time; the ratio
+  // of the layer's drawn width to its layout width is exactly that factor,
+  // whatever it is and however the browser reports it.
+  function layerSpace(e) {
+    const r = layerRef.current.getBoundingClientRect();
+    const scale = layerRef.current.offsetWidth ? r.width / layerRef.current.offsetWidth : 1;
+    return {
+      x: (e.clientX - r.left) / scale,
+      y: (e.clientY - r.top) / scale,
+      w: r.width / scale,
+      h: r.height / scale,
+    };
+  }
+
   // ── The stick ─────────────────────────────────────────────────────────────
-  function stickDown(e) {
-    if (disabled) return;
-    const el = stickRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    // The dial's centre, not the touch point: pushing the stick means "away
-    // from the middle", so a thumb landing off-centre should already register
-    // as a push in that direction rather than re-centring the control under it.
-    stickOrigin.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  function stickDown(e, p) {
+    // Centred where the thumb landed, nudged inboard if that would put the dial
+    // off the edge of the room. The origin is the dial's centre, not the touch
+    // point, so a clamped landing still registers as a push away from it.
+    const cx = Math.min(Math.max(p.x, STICK_RADIUS), p.w - STICK_RADIUS);
+    const cy = Math.min(Math.max(p.y, STICK_RADIUS), p.h - STICK_RADIUS);
+    stickOrigin.current = { x: cx, y: cy };
     stickPointer.current = e.pointerId;
-    el.setPointerCapture?.(e.pointerId);
+    setStickPos({ x: cx, y: cy });
     stickMove(e);
   }
 
   function stickMove(e) {
     if (stickPointer.current !== e.pointerId || disabled) return;
-    const dx = e.clientX - stickOrigin.current.x;
-    const dy = e.clientY - stickOrigin.current.y;
+    const p = layerSpace(e);
+    const dx = p.x - stickOrigin.current.x;
+    const dy = p.y - stickOrigin.current.y;
     if (inputRef.current) inputRef.current.move = stickVector(dx, dy, STICK_RADIUS);
     setKnob(stickKnob(dx, dy, STICK_RADIUS));
-  }
-
-  function stickUp(e) {
-    if (stickPointer.current !== e.pointerId) return;
-    stickRef.current?.releasePointerCapture?.(e.pointerId);
-    zero();
   }
 
   // ── The look surface ──────────────────────────────────────────────────────
   function lookDown(e) {
     if (disabled) return;
+    // Left half drives the floating stick, right half looks — unless the stick
+    // is already held, in which case a second finger is a look wherever it is.
+    const p = layerSpace(e);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    if (p.x < p.w / 2 && stickPointer.current === null) {
+      stickDown(e, p);
+      return;
+    }
+    if (lookPointer.current !== null) return;
     lookPointer.current = e.pointerId;
     lookLast.current = { x: e.clientX, y: e.clientY };
     lookStart.current = { x: e.clientX, y: e.clientY };
     lookMoved.current = 0;
-    e.currentTarget.setPointerCapture?.(e.pointerId);
   }
 
   function lookMove(e) {
+    if (stickPointer.current === e.pointerId) {
+      stickMove(e);
+      return;
+    }
     if (lookPointer.current !== e.pointerId || disabled) return;
     const dx = e.clientX - lookLast.current.x;
     const dy = e.clientY - lookLast.current.y;
@@ -146,6 +170,11 @@ export default function TouchControls({
   }
 
   function lookUp(e) {
+    if (stickPointer.current === e.pointerId) {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+      zero();
+      return;
+    }
     if (lookPointer.current !== e.pointerId) return;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
     lookPointer.current = null;
@@ -161,6 +190,7 @@ export default function TouchControls({
           mid-drag — the camera turns a little and then sticks. */}
       <div
         className="touch-look"
+        ref={layerRef}
         onPointerDown={lookDown}
         onPointerMove={lookMove}
         onPointerUp={lookUp}
@@ -168,25 +198,22 @@ export default function TouchControls({
         aria-hidden="true"
       />
 
-      <div
-        className="touch-stick"
-        ref={stickRef}
-        onPointerDown={stickDown}
-        onPointerMove={stickMove}
-        onPointerUp={stickUp}
-        onPointerCancel={stickUp}
-        role="application"
-        aria-label="Movement joystick — drag to walk"
-      >
-        <span className="touch-stick-ring" aria-hidden="true">
-          <Icon name="move" size={18} strokeWidth={1.9} />
-        </span>
-        <span
-          className={`touch-stick-knob${knob ? ' is-active' : ''}`}
-          style={knob ? { transform: `translate(${knob.x}px, ${knob.y}px)` } : undefined}
+      {/* Purely visual: the look layer owns the pointer for the stick too. */}
+      {stickPos && (
+        <div
+          className="touch-stick"
+          style={{ left: stickPos.x - STICK_RADIUS, top: stickPos.y - STICK_RADIUS }}
           aria-hidden="true"
-        />
-      </div>
+        >
+          <span className="touch-stick-ring">
+            <Icon name="move" size={18} strokeWidth={1.9} />
+          </span>
+          <span
+            className={`touch-stick-knob${knob ? ' is-active' : ''}`}
+            style={knob ? { transform: `translate(${knob.x}px, ${knob.y}px)` } : undefined}
+          />
+        </div>
+      )}
 
       <button
         type="button"

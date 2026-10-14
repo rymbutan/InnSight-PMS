@@ -125,7 +125,7 @@ export default function AuditorDashboard() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-tour="g-dashboard-aud-head">
         <div>
           <h1>Auditor Dashboard</h1>
           <div className="subtle">
@@ -154,7 +154,7 @@ export default function AuditorDashboard() {
       <div className="row" style={{ alignItems: 'stretch' }}>
         {/* Left column: channel mix, add-on revenue */}
         <div style={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
-          <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div className="panel" data-tour="g-dashboard-aud-channels" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div
               style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}
             >
@@ -186,7 +186,7 @@ export default function AuditorDashboard() {
             )}
           </div>
 
-          <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div className="panel" data-tour="g-dashboard-aud-addons" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div
               style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}
             >
@@ -227,7 +227,7 @@ export default function AuditorDashboard() {
 
         {/* Right column: the day's figures up top, folios needing review below */}
         <div style={{ flex: 1, minWidth: 360, display: 'flex', flexDirection: 'column' }}>
-          <div className="panel">
+          <div className="panel" data-tour="g-dashboard-aud-summary">
             <h3 style={{ margin: '0 0 8px' }}>Day Summary</h3>
             {!lastDay ? (
               <div className="muted" style={{ fontSize: 12 }}>
@@ -249,7 +249,7 @@ export default function AuditorDashboard() {
             )}
           </div>
 
-          <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div className="panel" data-tour="g-dashboard-aud-folios" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}
             >
@@ -258,7 +258,7 @@ export default function AuditorDashboard() {
                 <Icon name="refresh-cw" size={14} />
               </button>
             </div>
-            <div className="tabs-pill" style={{ marginBottom: 12 }}>
+            <div className="tabs-pill" data-tour="g-dashboard-aud-tabs" style={{ marginBottom: 12 }}>
               {FOLIO_TABS.map((t) => (
                 <button key={t} className={folioTab === t ? 'active' : ''} onClick={() => setFolioTab(t)}>
                   {t}

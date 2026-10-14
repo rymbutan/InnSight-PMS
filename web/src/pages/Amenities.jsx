@@ -584,7 +584,7 @@ export default function Amenities() {
         <div className="panel-head">
           <h3>Overview</h3>
         </div>
-        <div className="filter-board" role="group" aria-label="Filter the catalogue by category">
+        <div className="filter-board" data-tour="g-amenities-overview" role="group" aria-label="Filter the catalogue by category">
           {categoryChips.map((c) => {
             const on = catFilter === c.key;
             return (
@@ -614,10 +614,11 @@ export default function Amenities() {
       <div className="am-row am-row-stretch">
         <div className="am-col-main">
           {canSell && (
-            <div className="panel">
+            <div className="panel" data-tour="g-amenities-bookings">
               <div className="panel-head">
                 <h3>Facility bookings</h3>
                 <input
+                  data-tour="g-amenities-date"
                   type="date"
                   value={schedDate}
                   onChange={(e) => setSchedDate(e.target.value)}
@@ -696,7 +697,7 @@ export default function Amenities() {
               stranger and pay twice at the desk. The booking is the same either
               way; only where the money lands differs. */}
           {canSell && (
-            <div className="panel bf-panel">
+            <div className="panel bf-panel" data-tour="g-amenities-book">
               <div className="bf-head">
                 <h3>Book a facility</h3>
                 <span className="muted bf-sub">
@@ -714,7 +715,7 @@ export default function Amenities() {
                   {/* Who it is for. The two branches take different fields and
                       settle differently, so the choice comes first rather than
                       being inferred from whichever box got filled in. */}
-                  <div className="seg" role="tablist" aria-label="Guest type">
+                  <div className="seg" role="tablist" aria-label="Guest type" data-tour="g-amenities-guesttype">
                     <button
                       type="button"
                       role="tab"
@@ -867,7 +868,7 @@ export default function Amenities() {
       {/* The catalogue, full width UNDER both — it is reference you open when
           setting a price, not something the desk needs beside it. */}
       {!catalogOpen ? (
-        <button type="button" className="am-catalog-toggle" onClick={() => setCatalogOpen(true)}>
+        <button type="button" className="am-catalog-toggle" data-tour="g-amenities-catalog-toggle" onClick={() => setCatalogOpen(true)}>
           <Icon name="box" size={15} strokeWidth={2} />
           View Amenities Catalog, Add-ons &amp; Promo Codes
           <span className="muted">{facilities.length} amenities</span>
@@ -888,7 +889,7 @@ export default function Amenities() {
             >
               <Icon name="chevron-up" size={15} strokeWidth={2.6} />
             </button>
-            <div className="seg" role="tablist" aria-label="Catalogue view">
+            <div className="seg" role="tablist" aria-label="Catalogue view" data-tour="g-amenities-tabs">
               <button
                 type="button"
                 role="tab"
@@ -945,7 +946,7 @@ export default function Amenities() {
               )}
             </div>
             {!addOpen && amTab === 'catalog' && (
-              <div className="filter-bar">
+              <div className="filter-bar" data-tour="g-amenities-filters">
                 <label className="filter-inline">
                   <span>Category</span>
                   <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>

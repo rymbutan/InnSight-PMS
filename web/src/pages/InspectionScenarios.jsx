@@ -81,14 +81,19 @@ export default function InspectionScenarios({ showTitle = true }) {
         </div>
       )}
 
-      <div className="panel">
+      <div className="panel" data-tour="g-inspection-scenarios-list">
         <div className="panel-head">
-          <h3>Your scenarios</h3>
+          <h3 data-tour="g-inspection-scenarios-title">Your scenarios</h3>
           {/* This was "Open scenario editor". Opening the editor with nothing
               loaded IS starting a new scenario, so the button now says what it
               does — and the separate "+ New Scenario" inside the list is gone
               rather than sitting a few pixels below saying the same thing. */}
-          <button className="btn-primary" style={{ marginLeft: 'auto' }} onClick={() => setOpen(true)}>
+          <button
+            className="btn-primary"
+            data-tour="g-inspection-scenarios-new"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => setOpen(true)}
+          >
             <Icon name="plus" size={14} strokeWidth={2.4} />
             New Scenario
           </button>

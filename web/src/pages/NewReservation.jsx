@@ -516,7 +516,7 @@ export default function NewReservation() {
     <div>
       <div className="page-head">
         <h1>New Reservation</h1>
-        <div className="wizard-steps">
+        <div className="wizard-steps" data-tour="g-reservation-new-steps">
           {STEPS.map((s, i) => (
             <div key={s} className={`wizard-step ${step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}`}>
               <span className="num">{step > i + 1 ? <Icon name="check" size={12} /> : i + 1}</span> {s}
@@ -528,7 +528,7 @@ export default function NewReservation() {
       {/* Step 1 — Availability */}
       {step === 1 && (
         <>
-          <div className="panel-tinted">
+          <div className="panel-tinted" data-tour="g-reservation-new-search">
             <div className="row">
               <div>
                 <label>Source *</label>
@@ -559,7 +559,7 @@ export default function NewReservation() {
                   opts this cell out of .row's flex:1 stretch so it sits at its
                   natural width rather than matching the date/promo fields. */}
               <div className="row-action" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 10 }}>
-                <label className="ed-check">
+                <label className="ed-check" data-tour="g-reservation-new-nonrefund">
                   <input
                     type="checkbox"
                     checked={isNonRefundable}
@@ -577,7 +577,7 @@ export default function NewReservation() {
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel" data-tour="g-reservation-new-rooms">
             <h3>Accommodations</h3>
             {!searched ? (
               <div className="muted" style={{ textAlign: 'center', padding: 36 }}>
@@ -1333,8 +1333,8 @@ export default function NewReservation() {
       )}
 
       {/* Sticky bottom bar */}
-      <div className="wizard-bottom">
-        <div className="wizard-totals">
+      <div className="wizard-bottom" data-tour="g-reservation-new-bar">
+        <div className="wizard-totals" data-tour="g-reservation-new-totals">
           <div className="wizard-total">
             <div className="label">Subtotal</div>
             <div className="value">{formatPeso(totals.subtotalCents)}</div>

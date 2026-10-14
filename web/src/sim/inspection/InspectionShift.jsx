@@ -16,6 +16,9 @@ import { fromScenario, pickScenario } from './scenario';
 import { scoreInspection } from './inspectionScore';
 import Clipboard from './Clipboard';
 import FlagMenu from './FlagMenu';
+import Icon from '../../components/Icon';
+import useInlineGuide from '../../guides/useInlineGuide';
+import inspectionGuide from '../../guides/inspection-shift';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The inspection case study (Changes-to-be-made doc, item 3).
@@ -265,7 +268,15 @@ export default function InspectionShift({
   // single subtree to test instead of the whole room.
   const anchorsGroup = useRef(null);
 
-  const paused = phase !== 'inspect' || !!openAnchor || clipboard;
+  // The walkthrough guide: pauses the clock and input while its card is up.
+  const guide = useInlineGuide(inspectionGuide, { ready: !loading });
+  const paused = phase !== 'inspect' || !!openAnchor || clipboard || guide.open;
+
+  // The tour card needs a normal mouse pointer, so release any pointer lock when
+  // the guide opens (Player only re-requests it on a click while unpaused).
+  useEffect(() => {
+    if (guide.open && document.pointerLockElement) document.exitPointerLock?.();
+  }, [guide.open]);
 
   // Act on whatever the crosshair is on. Click and E do the same thing, which is
   // the first-person convention — and E still works while the pointer is not
@@ -400,11 +411,23 @@ export default function InspectionShift({
           <span className="muted">
             {tier} · {caseFile.confirmationNumber}
           </span>
-          <span className="cg-task-label">
+          <span className="cg-task-label" data-tour="g-inspection-progress">
             {reviewed}/{anchors.length} items reviewed
           </span>
-          <button className="secondary" onClick={() => setClipboard((v) => !v)}>
+          <button
+            className="secondary"
+            data-tour="g-inspection-booking"
+            onClick={() => setClipboard((v) => !v)}
+          >
             Booking (C)
+          </button>
+          <button
+            className="secondary"
+            onClick={guide.start}
+            title="How this inspection works"
+            aria-label="How this inspection works"
+          >
+            <Icon name="help-circle" size={16} />
           </button>
           <button className="secondary" onClick={onExit}>
             Leave
@@ -414,7 +437,7 @@ export default function InspectionShift({
               credit), so finishing with anchors still unreviewed was a
               guaranteed fail on a real defect the student never even saw,
               sending a genuinely well-worked room back to Vacant Dirty. */}
-          <button onClick={() => setPhase('done')} disabled={reviewed < anchors.length}>
+          <button data-tour="g-inspection-finish" onClick={() => setPhase('done')} disabled={reviewed < anchors.length}>
             {reviewed < anchors.length
               ? `Finish inspection (${anchors.length - reviewed} left)`
               : 'Finish inspection'}
@@ -445,7 +468,7 @@ export default function InspectionShift({
               touchRef={touchInput}
             />
           </Canvas>
-          <div className="fr-crosshair" />
+          <div className="fr-crosshair" data-tour="g-inspection-crosshair" />
 
           {nearby && !resolved[nearby.id] && !openAnchor && (
             <div className="fr-prompt">
@@ -472,9 +495,9 @@ export default function InspectionShift({
             />
           )}
 
-          <div className="fr-hint">
+          <div className="fr-hint" data-tour="g-inspection-hint">
             {touch ? (
-              <>joystick to walk · drag to look · aim the crosshair, then Inspect</>
+              <>touch the left side to walk · drag the right to look · aim the crosshair, then Inspect</>
             ) : (
               <>
                 WASD / arrows to move · mouse to look · aim the crosshair and click or press E ·{' '}
@@ -489,6 +512,7 @@ export default function InspectionShift({
             `top: 52px` means "under the titlebar", not "under the app header". */}
         <Clipboard caseFile={caseFile} open={clipboard} onClose={() => setClipboard(false)} />
         <FlagMenu anchor={active} onChoose={choose} onCancel={() => setOpenAnchor(null)} />
+        {guide.element}
       </div>
     </div>
   );

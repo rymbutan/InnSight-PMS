@@ -356,7 +356,7 @@ export default function Users() {
       )}
 
       {requests.length > 0 && (
-        <div className="panel">
+        <div className="panel" data-tour="g-users-requests">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h3>
               Access requests{' '}
@@ -415,7 +415,7 @@ export default function Users() {
       )}
 
       {canManage && (
-        <div className="panel">
+        <div className="panel" data-tour="g-users-create">
           <h3>Create user</h3>
           <form onSubmit={create}>
             <div className="row">
@@ -460,7 +460,7 @@ export default function Users() {
                 <button>Create</button>
               </div>
             </div>
-            <div>
+            <div data-tour="g-users-create-roles">
               <label>Roles</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {/* A MANAGER cannot grant ADMIN (services/auth's
@@ -484,13 +484,13 @@ export default function Users() {
         </div>
       )}
 
-      <div className="panel">
+      <div className="panel" data-tour="g-users-directory">
         <h3>Users</h3>
         {/* A plain filter, not a submitted search: the rows below ARE the
             results, so they narrow as you type and there is nothing to submit
             and nothing to float over the table. Escape clears, which is the one
             keystroke people try before reaching for the button. */}
-        <div className="user-search-bar">
+        <div className="user-search-bar" data-tour="g-users-search">
           <input
             className="user-search-input"
             type="search"
@@ -517,7 +517,7 @@ export default function Users() {
             </span>
           )}
         </div>
-        <table>
+        <table data-tour="g-users-table">
           <thead>
             <tr>
               <th>Username</th>
