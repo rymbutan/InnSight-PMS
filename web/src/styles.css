@@ -2853,16 +2853,27 @@ td.t-actions > * {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-/* Narrower than a desk the four buttons wrap into two tidy rows instead of one
-   long nowrap line that forces the whole table wider than the screen. */
+/* The row's buttons: one line on a desk, a tidy 2x2 grid of equal buttons below
+   it, instead of a ragged wrap with one button stranded on top. */
+.user-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+}
 @media (max-width: 1500px) {
   .users-table td.t-actions {
     white-space: normal;
-    min-width: 230px;
-    text-align: right;
   }
-  .users-table td.t-actions > button {
-    margin: 2px 0 2px 4px;
+  .user-actions {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    justify-content: center;
+  }
+  .user-actions > button {
+    width: 100%;
+    margin: 0;
+    justify-content: center;
   }
 }
 tr:hover td {
@@ -6550,10 +6561,13 @@ html[data-theme='dark'] .skel {
      pinned to the left edge with dead space on the right. Has no visible
      effect once the map is wider than the panel — a flex item that overflows
      its container still scrolls, it just doesn't have room left to centre. */
-  justify-content: center;
+  /* `safe` so a map wider than the panel is not cut off on its left edge. */
+  justify-content: safe center;
   overflow-x: auto;
   overflow-y: hidden;
   max-width: 100%;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .hk-room:hover rect:first-of-type {
   filter: brightness(0.96);

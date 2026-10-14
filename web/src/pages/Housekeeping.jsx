@@ -3,7 +3,6 @@ import api from '../api';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import Icon from '../components/Icon';
-import PanZoom from '../components/PanZoom';
 import { useCoarsePointer } from '../lib/touchInput';
 import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso } from '../lib/money';
@@ -477,7 +476,7 @@ export default function Housekeeping() {
   const occupancy = rooms.length ? Math.round(((counts.OCCUPIED || 0) / rooms.length) * 100) : 0;
   // The floor tabs below call through this to jump the map to a floor,
   // without resetting whatever zoom the person already pinched to.
-  const panZoomRef = useRef(null);
+  const mapScrollRef = useRef(null);
 
   return (
     <div>
@@ -494,21 +493,12 @@ export default function Housekeeping() {
 
       <div className="hk-layout">
         <div className="panel hk-map-panel" data-tour="tour-process-housekeeping">
-          {/* On a mouse: the drawing keeps its rooms at a legible width and
-              grows past the panel when the property is large, so this scrolls
-              rather than squeezing forty-five rooms into one screen-width.
-
-              On touch: that scroll is close to unusable — a one-finger drag
-              over an SVG gets claimed by the page, and there is no way to zoom
-              the part that matters. <PanZoom> takes over on a coarse pointer
-              only, and leaves the desktop container exactly as it was. */}
-          {/* Floor tabs — touch only, same reasoning as PanZoom itself: a
-              mouse already has the native scrollbar to find a floor with, but
-              a phone or an iPad has to pan a many-floor property blind to
-              reach one, which is exactly what "fit the screen" asked for.
-              Jumps by panning (see PanZoom's focusRect), not by resetting
-              zoom, so whatever legibility level was already pinched to
-              carries over to the floor landed on. */}
+          {/* The drawing keeps its rooms at a legible width and the panel is as
+              tall as the screen, so the map scrolls inside it — with the wheel
+              on a mouse, with a finger on a tablet (it is NOT drag-to-pan). The
+              floor tabs below are touch-only: a mouse has the scrollbar, a
+              tablet has to scroll a many-floor property blind to reach one, so
+              they jump the scroll position to the chosen floor. */}
           {touch && floors.length > 1 && (
             <div className="hk-floor-tabs" role="tablist" aria-label="Jump to floor">
               {floors.map((f) => (
@@ -518,12 +508,7 @@ export default function Housekeeping() {
                   role="tab"
                   className="hk-floor-tab"
                   onClick={() =>
-                    panZoomRef.current?.focusRect({
-                      x: 0,
-                      y: f.topY,
-                      w: mapW,
-                      h: f.bottomY - f.topY,
-                    })
+                    mapScrollRef.current?.scrollTo({ top: Math.max(0, f.topY - 8), behavior: 'smooth' })
                   }
                 >
                   Floor {f.floor}
@@ -531,14 +516,10 @@ export default function Housekeeping() {
               ))}
             </div>
           )}
-          <PanZoom
-            ref={panZoomRef}
-            enabled={touch}
-            className="hk-map-scroll"
-            contentW={mapW}
-            contentH={mapH || 420}
-            label="Hotel floor map — drag to pan, pinch to zoom"
-          >
+          {/* A plain scroll region, on touch too: the map scrolls with the
+              finger (vertically through the floors, sideways if it is wider than
+              the panel) instead of being dragged around. */}
+          <div className="hk-map-scroll" ref={mapScrollRef} aria-label="Hotel floor map">
             <svg
               viewBox={`0 0 ${mapW} ${mapH || 420}`}
               width={mapW}
@@ -589,7 +570,7 @@ export default function Housekeeping() {
                 />
               ))}
             </svg>
-          </PanZoom>
+          </div>
 
           {hover && !touch && (
             <div className="hk-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
@@ -677,7 +658,9 @@ export default function Housekeeping() {
                       type="button"
                       className="btn-primary hk-call-btn"
                       disabled={calling || !selected.assignedTo}
-                      title={!selected.assignedTo ? 'Assign the room to a housekeeper before calling' : undefined}
+                      title={
+                        !selected.assignedTo ? 'Assign the room to a housekeeper before calling' : undefined
+                      }
                       onClick={() => callHousekeeping(selected)}
                     >
                       <Icon name="phone" size={14} />
@@ -704,9 +687,7 @@ export default function Housekeeping() {
                         Rings <strong>{selected.assignedToName}</strong> only.
                       </>
                     ) : (
-                      <>
-                        Unassigned — assign the room above before you can call.
-                      </>
+                      <>Unassigned — assign the room above before you can call.</>
                     )}
                   </p>
                 </div>
@@ -716,7 +697,10 @@ export default function Housekeeping() {
                   call. Naming who works the room is not the same power as
                   changing the room's status, which remains hk.update. */}
               {(isSupervisor || canCall) && (
-                <div data-tour="g-housekeeping-assign" style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div
+                  data-tour="g-housekeeping-assign"
+                  style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}
+                >
                   <label style={{ margin: 0 }}>Assign to</label>
                   <select
                     value={selected.assignedTo || ''}
