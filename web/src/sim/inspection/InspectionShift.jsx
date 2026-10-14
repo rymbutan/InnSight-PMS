@@ -37,7 +37,10 @@ const VERDICT_RED = '#ef4444';
 // The outline round a judged item. A component so the geometry is built once per
 // size, not on every render of the whole shift.
 function VerdictEdges({ size, color }) {
-  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(...size)), [size[0], size[1], size[2]]); // eslint-disable-line react-hooks/exhaustive-deps
+  const geo = useMemo(
+    () => new THREE.EdgesGeometry(new THREE.BoxGeometry(...size)),
+    [size[0], size[1], size[2]]
+  ); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <lineSegments geometry={geo}>
       <lineBasicMaterial color={color} />
@@ -423,7 +426,11 @@ export default function InspectionShift({
               credit), so finishing with anchors still unreviewed was a
               guaranteed fail on a real defect the student never even saw,
               sending a genuinely well-worked room back to Vacant Dirty. */}
-          <button data-tour="g-inspection-finish" onClick={() => setPhase('done')} disabled={reviewed < anchors.length}>
+          <button
+            data-tour="g-inspection-finish"
+            onClick={() => setPhase('done')}
+            disabled={reviewed < anchors.length}
+          >
             {reviewed < anchors.length
               ? `Finish inspection (${anchors.length - reviewed} left)`
               : 'Finish inspection'}
@@ -431,26 +438,28 @@ export default function InspectionShift({
         </div>
 
         <div className="fr-stage">
-          <Canvas
-            shadows
-            dpr={[1, 2]}
-            camera={{ fov: 58, near: 0.1, far: 120 }}
-            gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-            onCreated={({ gl }) => gl.setClearColor(stageColor())}
-          >
-            <RoomShell layout={shellLayout} />
-            <Anchors anchors={anchors} resolved={resolved} hover={hover} groupRef={anchorsGroup} />
-            <CrosshairAim groupRef={anchorsGroup} onAim={setHover} paused={paused} />
-            <Player
-              paused={paused}
-              interactRef={interactRef}
-              viewRef={viewRef}
-              layout={playerLayout}
-              onLockedChange={setLocked}
-              touch={touch}
-              touchRef={touchInput}
-            />
-          </Canvas>
+          <div className="cv-unzoom">
+            <Canvas
+              shadows
+              dpr={[1, 2]}
+              camera={{ fov: 58, near: 0.1, far: 120 }}
+              gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
+              onCreated={({ gl }) => gl.setClearColor(stageColor())}
+            >
+              <RoomShell layout={shellLayout} />
+              <Anchors anchors={anchors} resolved={resolved} hover={hover} groupRef={anchorsGroup} />
+              <CrosshairAim groupRef={anchorsGroup} onAim={setHover} paused={paused} />
+              <Player
+                paused={paused}
+                interactRef={interactRef}
+                viewRef={viewRef}
+                layout={playerLayout}
+                onLockedChange={setLocked}
+                touch={touch}
+                touchRef={touchInput}
+              />
+            </Canvas>
+          </div>
           <div className="fr-crosshair" data-tour="g-inspection-crosshair" />
 
           {nearby && !resolved[nearby.id] && !openAnchor && (

@@ -225,6 +225,7 @@ body,
    avoid a phantom document scrollbar. */
 html {
   zoom: 0.7;
+  --app-zoom-inv: 1.428571; /* 1 / 0.7, see .cv-unzoom */
 }
 /* Phones keep the milder 0.9: at 0.7 the 14px body text lands at ~10px,
    too small to read on a handheld. --vh-full is re-compensated to match. */
@@ -234,7 +235,22 @@ html {
   }
   html {
     zoom: 0.9;
+    --app-zoom-inv: 1.111111; /* 1 / 0.9 */
   }
+}
+/* WebGL <Canvas> under the page zoom. react-three-fiber measures its
+   container with getBoundingClientRect() (post-zoom px) and applies the number
+   as CSS px to the canvas, which the zoom then shrinks a second time: the
+   scene drew at 0.7 x 0.7 of its stage, top-left anchored. Headless Chrome
+   showed that, and that real pointer events report offsetX in post-zoom px
+   while offsetWidth is in layout px, so measuring offsetWidth instead would
+   fix drawing but break picking. Counter-zooming the canvas wrapper makes the
+   effective zoom 1 inside it, so rect, offset and pointer coordinates all
+   agree in every engine. The wrapper fills its (position: relative) parent. */
+.cv-unzoom {
+  position: absolute;
+  inset: 0;
+  zoom: var(--app-zoom-inv);
 }
 /* The same zoom quirk --vh-full exists for, on the other axis: `body`'s
    width, with no explicit size of its own, is "auto" — 100% of `html` —
@@ -6647,6 +6663,37 @@ html[data-theme='dark'] .skel {
   }
 }
 
+/* ── The map fills the screen; the map itself scrolls ─────────────────────
+   The map panel used to be only as tall as its drawing (and, on touch, a
+   `.pz-host` capped at clamp(320px, 52vh, 560px)), so a property with a few
+   rooms left a short card floating over an empty page. Same idea as the Hotel
+   Rooms page (`.rooms-fixed`): pin the panel to what is left of the viewport —
+   var(--vh-full) minus the sticky topbar, the 88px of page chrome around
+   .cb-main that .rooms-fixed also subtracts, and the ~50px title row above the
+   map — and hand the overflow to the map's own scroll/pan region. Two-column
+   widths only; stacked (<=900px) the panel keeps its natural height so the
+   room detail below it is not pushed off a short screen. */
+@media (min-width: 901px) {
+  .hk-map-panel {
+    display: flex;
+    flex-direction: column;
+    height: calc(var(--vh-full) - var(--topbar-h) - 140px);
+    min-height: 360px;
+  }
+  /* Mouse: native scrollbars, both directions. */
+  .hk-map-panel .hk-map-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  /* Touch: the pan/zoom host takes the rest of the panel instead of its own cap. */
+  .hk-map-panel .pz-host {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+  }
+}
+
 @media (max-width: 900px) {
   .hk-layout {
     flex-direction: column;
@@ -7953,7 +8000,9 @@ html[data-theme='dark'] .hk-tooltip {
 .se-side {
   width: 320px;
   flex: 0 0 320px;
+  min-width: 0;
   min-height: 0;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -7971,11 +8020,18 @@ html[data-theme='dark'] .hk-tooltip {
   margin-bottom: 12px;
 }
 .se-head strong {
+  min-width: 0;
   font-size: 15px;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.se-head button {
-  margin-left: auto;
+/* The title yields (ellipsis) before the collapse / close buttons do. The
+   buttons are pushed right by their wrapper span (margin-left: auto, inline) —
+   this used to give EACH button margin-left: auto, which split the pair apart. */
+.se-head > span {
+  flex: none;
 }
 .se-side label {
   display: block;
@@ -8083,6 +8139,10 @@ html[data-theme='dark'] .hk-tooltip {
 }
 .tool-group--end {
   justify-self: end;
+  /* The end group is the one that holds text chips; keep their order and let a
+     too-long run scroll inside the group rather than ride over the centre. */
+  justify-content: flex-start;
+  max-width: 100%;
 }
 .tool-group--mid + .tool-group--end {
   margin-left: 0;
@@ -8204,6 +8264,25 @@ html[data-theme='dark'] .hk-tooltip {
 .tool-note input[type='checkbox'] {
   width: auto;
   margin: 0;
+}
+/* Narrow viewports (portrait tablet and below): three grid columns no longer
+   fit the left, centre and end groups side by side, so the strip becomes a
+   wrapping flex row and the groups take their natural widths on as many lines
+   as needed instead of scrolling or overlapping. */
+@media (max-width: 900px) {
+  .tool-bar--strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    height: auto;
+    min-height: 44px;
+    overflow-x: visible;
+  }
+  .tool-group {
+    overflow: visible;
+    flex-wrap: wrap;
+  }
 }
 @media (max-width: 520px) {
   .tool-bar--strip {
@@ -8648,11 +8727,17 @@ html[data-theme='dark'] .hk-tooltip {
   margin-bottom: 4px;
 }
 .se-side .pal-tab {
+  min-width: 0;
+  overflow: hidden;
   gap: 6px;
   font-size: 11.5px;
   font-weight: 600;
 }
 .se-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   letter-spacing: 0.01em;
 }
 /* Below ~1100px the panel is the same 320px but the viewport is not, so the
