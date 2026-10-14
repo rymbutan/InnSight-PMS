@@ -14,7 +14,7 @@ export default {
     {
       target: '[data-tour="g-housekeeping-map"]',
       title: 'The room map',
-      body: 'Each tile is one room, grouped by floor along a corridor. It shows the room number, its type and a coloured status badge. Hover a room (on a mouse) for a tooltip with rate and status, or click or tap it to open its panel. Click it again to deselect. On a phone, drag to pan, pinch to zoom, and use the Floor buttons above the map to jump.',
+      body: 'Each tile is one room, grouped by floor along a corridor. It shows the room number, its type and a coloured status badge. Hover a room (on a mouse) for a tooltip with rate and status, or click or tap it to open its panel. Click it again to deselect. On a tablet or phone, scroll the map with your finger and use the Floor buttons above it to jump to a floor.',
     },
     {
       target: '[data-tour="g-housekeeping-legend"]',

@@ -587,7 +587,7 @@ export default function Users() {
                   <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
                   <td className="t-actions">
                     {canManage && (isAdmin || !isAdminRow(u)) ? (
-                      <>
+                      <div className="user-actions">
                         {/* Moved here from beside the role capsules: it is an
                           action on the row like the rest, and a MANAGER still
                           cannot edit an admin account's roles — this whole group
@@ -599,10 +599,10 @@ export default function Users() {
                           title={`Edit roles for ${u.username}`}
                         >
                           <Icon name="pencil" size={11} /> Edit roles
-                        </button>{' '}
+                        </button>
                         <button className="small secondary" onClick={() => openReset(u)}>
                           Reset Password
-                        </button>{' '}
+                        </button>
                         {/* Your own row carries the SAME buttons as every other,
                           disabled rather than hidden. The server refuses both
                           actions on the signed-in account (the self-lockout
@@ -631,7 +631,7 @@ export default function Users() {
                           onClick={() => u.id !== me?.id && u.username !== 'admin' && toggle(u)}
                         >
                           {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                        </button>{' '}
+                        </button>
                         {/* ADMIN only: deleting is the one action here a manager
                           cannot do and nothing can undo — Disable is the
                           reversible tool and stays available to both. Rendered
@@ -654,7 +654,7 @@ export default function Users() {
                             Delete
                           </button>
                         )}
-                      </>
+                      </div>
                     ) : (
                       <span className="muted">—</span>
                     )}
