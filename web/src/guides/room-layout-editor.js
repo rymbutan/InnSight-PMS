@@ -50,7 +50,7 @@ export default {
     {
       target: t('room'),
       title: 'Room size and spawn point',
-      body: 'Floor colour, width, length and height are set here, along with the spawn spot where a player enters the room. Changing these resizes the room for this layout.',
+      body: 'Floor colour, width, length and height are set here, along with the spawn spot where a player enters the room. Changing these resizes the room for this layout. Sizes must stay above zero, and the spawn spot is pulled back inside the room if you shrink it. Items are not moved, so check nothing is left outside.',
     },
     {
       target: t('snap'),
@@ -60,22 +60,22 @@ export default {
     {
       target: t('undo'),
       title: 'Undo and redo',
-      body: 'Ctrl/⌘+Z undoes the last placement, move, nudge, duplicate or delete (up to 60 steps), and Ctrl+Y or Shift+⌘+Z redoes. Values typed into Inspector fields are not recorded, so change those back by hand.',
+      body: 'Ctrl/⌘+Z undoes the last placement, move, nudge, duplicate, delete or Inspector edit (up to 60 steps), and Ctrl+Y or Shift+⌘+Z redoes. Everything you type into one Inspector or Room field counts as a single step. Undo while a field is still focused acts on the text box, so click away from it first.',
     },
     {
       target: t('save-as'),
       title: 'Saving: it autosaves',
-      body: 'There is no Save button for an existing layout. About a second after you stop editing it saves to the server for everyone, and the status chip beside this button shows Saving or Saved. A brand-new layout shows a Save layout button instead and is not stored until you press it (or Ctrl/⌘+S). Save as copies the room under a new name and leaves the original untouched.',
+      body: 'There is no Save button for an existing layout. About a second after you stop editing it saves to the server for everyone, and the status chip beside this button shows Saving or Saved. A brand-new layout shows “Not saved yet” and a Save layout button instead, and is not stored until you press it (or Ctrl/⌘+S). Save as copies the room under a new name and leaves the original untouched, and asks first if that name is already taken.',
     },
     {
       target: t('reset'),
       title: 'Careful: Reset to file',
-      body: 'This discards the saved layout for this room type, for every browser, and goes back to the one built into the code. Undo cannot bring it back, so only use it when you really want a fresh start.',
+      body: 'Available for the four built-in room types only. It discards the saved layout for that type, for every browser, and goes back to the one built into the code. Undo cannot bring it back, so only use it when you really want a fresh start. Layouts you created yourself have nothing built in to go back to, so the button is hidden for them.',
     },
     {
       target: t('close'),
       title: 'Leaving safely',
-      body: 'Wait until the chip says Saved, then press the X to close. Because everything is saved live, there is nothing to “publish”. Tips: use bird’s-eye to line things up, keep the guide button handy, and the question-mark button in the toolbar lists every shortcut. Press the guide button any time to replay this tour.',
+      body: 'Press the X to close: any edit still waiting is sent first, and you are asked before closing a layout that was never saved or whose last save failed. Because everything is saved live, there is nothing to “publish”. Tips: use bird’s-eye to line things up, keep the guide button handy, and the question-mark button in the toolbar lists every shortcut. Press the guide button any time to replay this tour.',
     },
   ],
 };

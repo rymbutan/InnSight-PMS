@@ -54,6 +54,11 @@ export default function RoomLayouts() {
   // than in the URL because it has no server row to come back to after a
   // reload — refreshing mid-authoring genuinely has nothing to restore.
   const [newLayout, setNewLayout] = useState(null);
+  // The key "Save as" just wrote. It is a valid editing target the moment the
+  // save lands, before the layout index has been re-fetched — without it the
+  // editor would unmount and remount (losing undo and camera) while the index
+  // loads, and stay closed if that fetch failed.
+  const [justSaved, setJustSaved] = useState(null);
   const [serverLayouts, setServerLayouts] = useState([]);
   const [roomTypes, setRoomTypes] = useState([]);
   const [adding, setAdding] = useState(false);
@@ -94,7 +99,10 @@ export default function RoomLayouts() {
   // silently on Standard's.
   const editing =
     requested &&
-    (BUILT_IN.includes(requested) || customTiers.includes(requested) || newLayout?.key === requested)
+    (BUILT_IN.includes(requested) ||
+      customTiers.includes(requested) ||
+      newLayout?.key === requested ||
+      justSaved === requested)
       ? requested
       : null;
 
@@ -197,7 +205,9 @@ export default function RoomLayouts() {
 
       <div className="mobile-wide-notice">
         <Icon name="alert-circle" size={14} />
-        <span>The 3D editor needs a mouse and a larger screen — it opens here, but is not built for a phone.</span>
+        <span>
+          The 3D editor needs a mouse and a larger screen — it opens here, but is not built for a phone.
+        </span>
       </div>
 
       {view === 'scenarios' ? (
@@ -424,12 +434,14 @@ export default function RoomLayouts() {
             // is pointed at the layout the author is now actually changing.
             onSavedAs={(key) => {
               setNewLayout(null);
+              setJustSaved(key);
               loadLayoutIndex();
               setEditing(key);
             }}
             onClose={() => {
               setEditing(null);
               setNewLayout(null);
+              setJustSaved(null);
               // The layout may have been created while the editor was open, so
               // re-read the index rather than assuming it was not.
               loadLayoutIndex();

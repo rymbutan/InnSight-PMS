@@ -11,12 +11,20 @@ import Icon from '../../components/Icon';
 import { useTheme } from '../../theme';
 import { RoomShell, FixtureBody, itemY } from '../RoomFreeRoam';
 import { refOf, scenarioCounts } from './scenario';
+import {
+  yawFromQuaternion,
+  isLockedBase,
+  duplicateAdded,
+  buildScenarioPayload,
+  savableProblem,
+  objectsFromScenario,
+} from './scenarioEdit';
 import { variantsFor, labelFor } from './assetFamilies';
 import { getRoomPlan } from '../roomLayouts';
 import { stageColor } from '../stageColor';
 import SaveChip from '../SaveChip';
 import { MODELS } from '../task3d';
-import { offerableCategories } from './categories';
+import { offerableCategories, allCategories, BUILTIN_CATEGORIES } from './categories';
 import { hydrateCategories } from './categorySync';
 import InspectionShift from './InspectionShift';
 import { useSavedScenarios, STATUS } from './useSavedScenarios';
@@ -50,15 +58,9 @@ import scenarioEditorGuide from '../../guides/scenario-editor';
 
 const TIERS = ['Standard', 'Deluxe', 'Suite', 'Presidential'];
 
-// The primitive props the inspection can draw. Anything without a .glb lives
-// here — the model library has no vacuum, mop bucket or chemical bottle.
-const PRIMS = [
-  { prim: 'vacuum', label: 'Vacuum cleaner', size: [0.35, 0.95, 0.45] },
-  { prim: 'bucket', label: 'Mop bucket', size: [0.42, 0.5, 0.42] },
-  { prim: 'chemicals', label: 'Cleaning chemicals', size: [0.22, 0.34, 0.16] },
-  { prim: 'rumpled', label: 'Unmade bedding', size: [1.5, 0.22, 1.1] },
-  { prim: 'luggagerack', label: 'Luggage rack', size: [1.1, 0.6, 0.6] },
-];
+// Primitive props (vacuum, mop bucket ...) can no longer be authored: the server
+// rejects an added object without a model. PRIM_COLOR stays only so an object
+// that somehow still carries a `prim` renders rather than crashing.
 const PRIM_COLOR = {
   vacuum: '#334155',
   bucket: '#eab308',
@@ -215,7 +217,12 @@ function ScenarioHelp({ onClose }) {
           </p>
           <h4>Careful with</h4>
           <p className="ed-help-note">
-            Nothing here autosaves — unlike the room layout editor, this one saves only when you press Save.
+            A new scenario is created <strong>inactive</strong> and does not autosave until you press Create
+            scenario; once it exists, edits autosave. It only reaches students after you press{' '}
+            <strong>Activate</strong> in the saved list, and edits to an active scenario are live for them
+            immediately. Objects that come from the room&apos;s built-in layout can be turned, resized, swapped
+            and tagged, but not moved, deleted or duplicated; objects you add can do all three. You are asked
+            before unsaved work is discarded.
           </p>
         </div>
       </div>
@@ -257,6 +264,16 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   // chip shows 'pending' until then.
   const [saveState, setSaveState] = useState('idle');
   const [saveError, setSaveError] = useState('');
+  // The payload JSON the editor last loaded or saved — "dirty" means the current
+  // payload differs from it. null until a scenario exists; drafts compare against
+  // the untouched tier layout instead (see draftBaseline).
+  const [baseline, setBaseline] = useState(null);
+  // A row in the pre-overlay format (full furniture snapshot). It renders as
+  // authored but has no stable refs, so this editor cannot save it back.
+  const [legacy, setLegacy] = useState(false);
+  // Size box text while it is being typed; committed on blur/Enter. Clamping on
+  // every keystroke made "150" impossible to type (the 1 became 10).
+  const [sizeDraft, setSizeDraft] = useState(null);
   const [history, setHistory] = useState([]);
   // The redo branch, plus the chrome state the toolbar drives.
   const [future, setFuture] = useState([]);
@@ -286,8 +303,15 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   // furniture has none, so they are stamped on load.
   // Refresh the library from the server and mirror it into local state.
   async function reloadCategories() {
-    await hydrateCategories({ force: true });
+    const rows = await hydrateCategories({ force: true });
     setCats(offerableCategories());
+    // hydrateCategories swallows a failure (the built-ins still work), which left
+    // the author looking at a stale list with no hint that it was stale.
+    if (rows === null) {
+      toast.warning('Could not refresh the fault-category list — it may be out of date. Reload the page to retry.');
+      return false;
+    }
+    return true;
   }
 
   useEffect(() => {
@@ -328,6 +352,9 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   // one of these is a bare letter and the panel is full of text inputs.
   useEffect(() => {
     const onKey = (e) => {
+      // The preview is the student's inspection; none of the editor's shortcuts
+      // (least of all ⌘S) may act on the scenario behind it.
+      if (preview) return;
       // ⌘S / Ctrl+S is checked BEFORE the focus guard below, deliberately.
       // Naming a scenario and pressing save without leaving the field is the
       // normal way to use it, so a shortcut that stops working the moment the
@@ -370,6 +397,15 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     const why = catForm.why.trim();
     if (!label) return toast.error('Give the category a name.');
     if (!why) return toast.error('Say why it is a fault — the student sees this after grading.');
+    // The server derives the id from the label, so a label that matches a
+    // built-in or an existing category would collide with it. Say so up front.
+    const key = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (BUILTIN_CATEGORIES.some((c) => key(c.label) === key(label) || key(c.title) === key(label))) {
+      return toast.error(`"${label}" is already a built-in category — pick a different name.`);
+    }
+    if (allCategories().some((c) => c.custom && c.active !== false && key(c.label) === key(label))) {
+      return toast.error(`A category named "${label}" already exists.`);
+    }
     setCatBusy(true);
     try {
       await api.post('/api/training/categories', {
@@ -450,7 +486,10 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   useEffect(() => {
     if (editingId) return;
     setObjects(seedFromTier(tier));
-    setSelId(null); // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSelId(null);
+    // The stacks hold objects seeded from the PREVIOUS tier; one Undo would paste
+    // another room's furniture into this one.
+    resetHistory(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tier, editingId]);
 
   const sel = objects.find((o) => o.id === selId) || null;
@@ -529,25 +568,29 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
 
   function addObject() {
     snapshot();
-    const p = PRIMS.find((x) => x.prim === addKey);
-    const item = p
-      ? { id: nextId(), added: true, prim: p.prim, size: p.size, pos: [0, 0], ry: 0, y: 0 }
-      : { id: nextId(), added: true, model: addKey, pos: [0, 0], ry: 0 };
+    const item = { id: nextId(), added: true, model: addKey, pos: [0, 0], ry: 0 };
     setObjects((list) => [...list, item]);
     setSelId(item.id);
   }
 
+  // Fixtures from the room's built-in layout are LOCKED for delete / duplicate /
+  // move: a scenario stores only an overlay on that layout (asset, facing, size,
+  // height, tags), so a moved, deleted or copied fixture could be shown here and
+  // then silently not saved. Only objects the author ADDED can do these.
+  const LOCKED_WHY =
+    'Built-in room fixtures cannot be moved, deleted or duplicated in a scenario — only objects you add can. You can still turn, resize, swap and tag it.';
+
   function removeSel() {
-    if (!sel) return;
+    if (!sel || isLockedBase(sel)) return;
     snapshot();
     setObjects((list) => list.filter((o) => o.id !== selId));
     setSelId(null);
   }
 
   function duplicateSel() {
-    if (!sel) return;
+    if (!sel || isLockedBase(sel)) return;
     snapshot();
-    const copy = { ...sel, id: nextId(), pos: [sel.pos[0] + 0.5, sel.pos[1] + 0.5] };
+    const copy = duplicateAdded(sel, nextId());
     setObjects((list) => [...list, copy]);
     setSelId(copy.id);
   }
@@ -556,6 +599,9 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   function commitGizmo() {
     const o = selObj;
     if (!o || !sel) return;
+    // A built-in fixture's position is not persisted, so only its facing is read
+    // back; the translate gizmo is hidden for it anyway.
+    const locked = isLockedBase(sel);
     const isPrim = !!sel.prim;
     const h = (sel.size || [0, 0, 0])[1];
     // A prim's box is centred on its group origin and the group rides half a
@@ -563,9 +609,17 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     // otherwise resizing a prop makes it jump the moment you drag it.
     const sy = sel.scale?.[1] ?? 1;
     const y = isPrim ? o.position.y - (h * sy) / 2 : o.position.y;
+    // Yaw from the quaternion, NOT o.rotation.y: three re-derives the Euler
+    // angles after the gizmo turns the object, confining y to [-90, 90] degrees,
+    // so any facing past 90 came back mirrored.
+    const ry = round(yawFromQuaternion(o.quaternion), 3);
+    if (locked) {
+      patchSel({ ry });
+      return;
+    }
     patchSel({
       pos: [round(o.position.x), round(o.position.z)],
-      ry: round(o.rotation.y, 3),
+      ry,
       y: round(Math.max(-0.5, y)),
     });
   }
@@ -602,87 +656,122 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     patchSel({ scale: [s, s, s] });
   }
 
-  // ── Persistence ──
-  function currentPayload() {
-    // A scenario stores what is WRONG with the live tier layout, never a copy of
-    // it. `furniture` and `anchors` go out empty: a NON-EMPTY furniture array is
-    // how fromScenario() recognises a legacy snapshot, so sending [] keeps new
-    // rows on the tracking path while old rows keep rendering as authored.
-    const swaps = {};
-    const added = [];
-    const tags = [];
-    for (const o of objects) {
-      const ref = o.added ? o.id : o._ref;
-      if (o.added) {
-        added.push({
-          id: o.id,
-          ...(o.model ? { model: o.model } : { prim: o.prim, size: o.size }),
-          pos: o.pos,
-          ry: o.ry ?? 0,
-          ...(o.y !== undefined ? { y: o.y } : {}),
-          ...(o.scale ? { scale: o.scale } : {}),
-        });
-      } else {
-        // Only record a difference. Swapping back to the shipped asset removes
-        // the override rather than pinning the fixture.
-        const modelChanged = o.model && o._baseModel && o.model !== o._baseModel;
-        const ryChanged = Math.abs((o.ry ?? 0) - (o._baseRy ?? 0)) > 1e-6;
-        const base = o._baseScale || [1, 1, 1];
-        const cur = o.scale || [1, 1, 1];
-        const scaleChanged = cur.some((n, i) => Math.abs(n - base[i]) > 1e-6);
-        const yChanged = Math.abs((o.y ?? 0) - (o._baseY ?? 0)) > 1e-6;
-        if (modelChanged || ryChanged || scaleChanged || yChanged) {
-          swaps[ref] = {
-            ...(modelChanged ? { model: o.model } : {}),
-            ...(ryChanged ? { ry: o.ry ?? 0 } : {}),
-            ...(scaleChanged ? { scale: cur } : {}),
-            ...(yChanged ? { y: o.y ?? 0 } : {}),
-          };
-        }
-      }
-      if (o.defectId !== undefined) {
-        tags.push({ ref, defectId: o.defectId || null, label: o.label || defaultLabel(o) });
-      }
+  // Slider / number edits arrive as a stream of onChange events; one undo entry per
+  // gesture (pointer-down or focus to the next one) rather than one per tick.
+  const editSnap = useRef(false);
+  const beginEdit = () => {
+    editSnap.current = false;
+  };
+  const edit = (fn) => {
+    if (!editSnap.current) {
+      snapshot();
+      editSnap.current = true;
     }
-    return {
-      name: name.trim(),
-      roomTier: tier,
-      // Explicitly null, not omitted: a row authored before the clipboard came
-      // from the reservation still carries one, and saving must clear it rather
-      // than leave a stale guest behind on an otherwise-updated scenario.
-      booking: null,
-      furniture: [],
-      anchors: [],
-      swaps,
-      added,
-      tags,
-    };
+    fn();
+  };
+  const editProps = { onPointerDown: beginEdit, onFocus: beginEdit, onBlur: beginEdit };
+
+  function commitSize() {
+    if (sizeDraft === null) return;
+    const raw = sizeDraft;
+    const n = Number(raw);
+    setSizeDraft(null);
+    if (raw.trim() === '' || !Number.isFinite(n)) return;
+    if (Math.min(1000, Math.max(10, Math.round(n))) === sizePct) return;
+    snapshot();
+    setSize(n);
   }
+  useEffect(() => {
+    setSizeDraft(null);
+  }, [selId]);
+
+  // ── Persistence ──
+  // What a scenario stores is built by a pure function (see scenarioEdit.js).
+  const payloadObj = useMemo(() => buildScenarioPayload({ objects, name, tier }), [objects, name, tier]);
+  const payloadJson = useMemo(() => JSON.stringify(payloadObj), [payloadObj]);
+  const currentPayload = () => payloadObj;
+  // An untouched draft is the bare tier layout with no name; anything else is work.
+  const draftBaseline = useMemo(
+    () => JSON.stringify(buildScenarioPayload({ objects: seedFromTier(tier), name: '', tier })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tier]
+  );
+  const dirty = payloadJson !== (editingId ? (baseline ?? payloadJson) : draftBaseline);
 
   function defaultLabel(o) {
-    if (o.prim) return PRIMS.find((p) => p.prim === o.prim)?.label || 'Item';
     return (o.model || 'Item').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
   }
 
+  const timerRef = useRef(null);
+  // The newest state, for code that outlives a render (the autosave callbacks,
+  // the unmount flush).
+  const liveRef = useRef({ editingId: null, legacy: false, dirty: false, payload: null, problem: '' });
+  useEffect(() => {
+    liveRef.current = {
+      editingId,
+      legacy,
+      dirty,
+      payload: payloadObj,
+      problem: savableProblem(payloadObj, scenarioCounts(payloadObj).faults),
+    };
+  });
+
+  // Last-chance flush: leaving the editor (route change, tab switch on the host
+  // page) used to cancel the 900ms debounce and lose the final edit.
+  useEffect(
+    () => () => {
+      const L = liveRef.current;
+      if (L.editingId && L.dirty && !L.legacy && !L.problem) {
+        api.patch(`/api/training/scenarios/${L.editingId}`, L.payload).catch(() => {});
+      }
+    },
+    []
+  );
+
+  // Closing the tab with unsaved work.
+  useEffect(() => {
+    if (!dirty) return;
+    const onUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]);
+
   async function save() {
+    if (legacy) {
+      return toast.error(
+        'This scenario uses an older format that this editor cannot save. You can preview it; to change it, recreate it as a new scenario.'
+      );
+    }
     const payload = currentPayload();
-    if (!payload.name) return toast.error('Give the scenario a name first.');
-
     const { faults, decoys } = scenarioCounts(payload);
-    if (!faults) return toast.error('Tag at least one object as a fault, or there is nothing to find.');
-    // A warning, not a block: a room whose only clickable things are faults
-    // teaches students to flag whatever highlights.
-    if (!decoys) toast.error('Saved — but with no clean decoys, every clickable item is a fault.');
+    const problem = savableProblem(payload, faults);
+    if (problem) return toast.error(problem);
 
+    clearTimeout(timerRef.current);
     setBusy(true);
     try {
       if (editingId) {
         await api.patch(`/api/training/scenarios/${editingId}`, payload);
         toast.success(`“${payload.name}” updated.`);
       } else {
-        const { data } = await api.post('/api/training/scenarios', payload);
+        // Created INACTIVE: the schema default is active, which put a half-built
+        // scenario in front of students the moment it was created (and autosave
+        // then streamed every later edit to them). Activate is the author's call.
+        const { data } = await api.post('/api/training/scenarios', { ...payload, active: false });
+        setBaseline(JSON.stringify(payload));
         setEditingId(data.id);
-        toast.success(`“${payload.name}” created.`);
+        toast.success(`“${payload.name}” created — inactive until you press Activate in the saved list.`);
+      }
+      setBaseline(JSON.stringify(payload));
+      setSaveState('saved');
+      setSaveError('');
+      // After the save, as a warning: it is advice, not a failure, and it used to
+      // be an error toast fired before anything had been sent.
+      if (!decoys) {
+        toast.warning('Saved — but with no clean decoys, every clickable item is a fault.');
       }
       reloadScenarios();
     } catch (e) {
@@ -693,95 +782,142 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   }
 
   // ── Autosave, once the scenario exists ────────────────────────────────────
-  // Deliberately NOT from the first keystroke. A scenario needs a name and at
-  // least one tagged fault before it is savable at all (see save()), so an
-  // autosave on an unsaved draft would spend every debounce firing a request
-  // the server is right to reject. It engages the moment `editingId` exists —
-  // i.e. after the first explicit Create — and from then on the editor behaves
-  // like the room-layout one: 900ms of stillness ends an edit.
+  // Deliberately NOT from the first keystroke: a scenario needs a name and at
+  // least one tagged fault before it is savable (see save()), and creating is an
+  // explicit act — autosave never invents a row. Once it exists, 900ms of
+  // stillness ends an edit.
   //
-  // PATCH only. Creating is an explicit act; autosave never invents a row.
-  const autoFirst = useRef(true);
+  // Only when something CHANGED. Merely opening a scenario used to fire a PATCH
+  // with zero edits, which could silently drop tags whose fixture had moved.
+  async function autosave(payload, id) {
+    try {
+      await api.patch(`/api/training/scenarios/${id}`, payload);
+      if (liveRef.current.editingId === id) {
+        setBaseline(JSON.stringify(payload));
+        setSaveState('saved');
+        setSaveError('');
+      }
+      reloadScenarios();
+      return true;
+    } catch (e) {
+      // Quiet on success — a toast every 900ms while dragging is noise. A failure
+      // still speaks, because silently not saving is the bad case.
+      if (liveRef.current.editingId === id) {
+        setSaveState('error');
+        setSaveError(e.response?.data?.error || e.message);
+      }
+      toast.error(errMsg(e));
+      return false;
+    }
+  }
+
   useEffect(() => {
-    if (autoFirst.current) {
-      autoFirst.current = false;
+    if (!editingId || legacy) return;
+    if (!dirty) {
+      setSaveState((st) => (st === 'saving' ? 'saved' : st));
       return;
     }
-    if (!editingId) return; // not saved yet — Create is still the author's call
     const payload = currentPayload();
-    if (!payload.name || !scenarioCounts(payload).faults) return; // would 400
+    const problem = savableProblem(payload, scenarioCounts(payload).faults);
+    if (problem) {
+      // Not 'saved': the server does NOT have these edits, and saying so is the
+      // whole point of the chip.
+      setSaveState('error');
+      setSaveError(`Not autosaving — ${problem}`);
+      return;
+    }
     setSaveState('saving');
-    const t = setTimeout(() => {
-      api
-        .patch(`/api/training/scenarios/${editingId}`, payload)
-        .then(() => {
-          setSaveState('saved');
-          setSaveError('');
-          reloadScenarios();
-        })
-        // Quiet on success — a toast every 900ms while dragging is noise, which
-        // is exactly what the chip is for. A failure still speaks, because
-        // silently not saving is the bad case.
-        .catch((e) => {
-          setSaveState('error');
-          setSaveError(e.response?.data?.error || e.message);
-          toast.error(errMsg(e));
-        });
-    }, 900);
-    return () => clearTimeout(t);
+    timerRef.current = setTimeout(() => autosave(payload, editingId), 900);
+    return () => clearTimeout(timerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objects, name, tier, editingId]);
+  }, [payloadJson, baseline, editingId, legacy]);
+
+  // Send any pending autosave now. True when the server has the latest state.
+  async function flushSave() {
+    clearTimeout(timerRef.current);
+    setSaveState('saving');
+    return autosave(currentPayload(), editingId);
+  }
+
+  // Resolves true when it is safe to replace what is on screen: nothing unsaved,
+  // the pending edits were flushed to the server, or the author agreed to discard.
+  async function guardLeave() {
+    if (!dirty) return true;
+    if (editingId && !legacy && !savableProblem(payloadObj, scenarioCounts(payloadObj).faults)) {
+      if (await flushSave()) return true;
+    }
+    return confirm({
+      title: 'Unsaved changes',
+      message: editingId ? 'Discard the changes that could not be saved?' : 'Discard this unsaved scenario?',
+      detail: editingId
+        ? 'They are not on the server yet.'
+        : 'It has not been created yet, so nothing of it has been saved.',
+      confirmLabel: 'Discard',
+    });
+  }
+
+  async function requestClose() {
+    if (await guardLeave()) onClose();
+  }
+  async function requestOpen(s) {
+    if (await guardLeave()) openScenario(s);
+  }
+  async function requestNew() {
+    if (await guardLeave()) newScenario();
+  }
+
+  // Changing tier on a draft reseeds the room from that tier and throws away
+  // everything placed, edited or tagged — so ask first when there is any.
+  async function changeTier(next) {
+    if (next === tier) return;
+    const p = payloadObj;
+    const hasWork = p.added.length || p.tags.length || Object.keys(p.swaps).length;
+    if (hasWork) {
+      const ok = await confirm({
+        title: 'Change room tier',
+        message: `Switch to ${next}?`,
+        detail: 'The room is rebuilt from that tier’s layout; objects you added, edited or tagged will be discarded.',
+        confirmLabel: 'Change tier',
+      });
+      if (!ok) return;
+    }
+    setTier(next);
+  }
 
   function openScenario(s) {
+    const {
+      objects: objs,
+      legacy: isLegacy,
+      droppedTags,
+      droppedPrims,
+    } = objectsFromScenario(s, seedFromTier(s.roomTier), nextId);
     setEditingId(s.id);
     setTier(s.roomTier);
     setName(s.name);
-    // Legacy rows carry a full furniture snapshot; render those as authored.
-    if (Array.isArray(s.furniture) && s.furniture.length) {
-      const tagged = new Map((s.anchors || []).map((a) => [a.id, a]));
-      setObjects(
-        s.furniture.map((f) => {
-          const a = tagged.get(f.id);
-          return {
-            ...f,
-            id: f.id || nextId(),
-            defectId: a ? a.defectId || null : undefined,
-            label: a?.label,
-          };
-        })
-      );
-      setSelId(null);
-      resetHistory();
-      return;
-    }
-    // Otherwise rebuild from the CURRENT tier layout and lay the overlay on top,
-    // so a room edited since this scenario was saved shows its new state.
-    const swaps = s.swaps || {};
-    const tagByRef = new Map((s.tags || []).map((t) => [t.ref, t]));
-    const objs = seedFromTier(s.roomTier).map((o) => {
-      const sw = swaps[o._ref];
-      const model = typeof sw === 'string' ? sw : sw?.model;
-      const ry = sw && typeof sw === 'object' && sw.ry !== undefined ? sw.ry : o.ry;
-      const scale = sw && typeof sw === 'object' && sw.scale ? sw.scale : o.scale;
-      const y = sw && typeof sw === 'object' && sw.y !== undefined ? sw.y : o.y;
-      const t = tagByRef.get(o._ref);
-      return {
-        ...o,
-        ...(model ? { model } : {}),
-        ...(scale ? { scale } : {}),
-        ...(y !== undefined ? { y } : {}),
-        ry,
-        defectId: t ? (t.defectId ?? null) : undefined,
-        label: t?.label,
-      };
-    });
-    for (const a of s.added || []) {
-      const t = tagByRef.get(a.id);
-      objs.push({ ...a, added: true, defectId: t ? (t.defectId ?? null) : undefined, label: t?.label });
-    }
     setObjects(objs);
     setSelId(null);
     resetHistory();
+    setLegacy(isLegacy);
+    // Baseline = what was LOADED, so the dropped tags/props below do not count as
+    // an edit and nothing autosaves until the author actually changes something.
+    setBaseline(JSON.stringify(buildScenarioPayload({ objects: objs, name: s.name, tier: s.roomTier })));
+    setSaveState('idle');
+    setSaveError('');
+    if (isLegacy) {
+      toast.warning('This scenario uses an older format. You can preview it, but it cannot be edited or saved here.');
+    }
+    if (droppedTags) {
+      const one = droppedTags === 1;
+      toast.warning(
+        `${droppedTags} tag${one ? '' : 's'} on this scenario pointed at room fixtures that have moved or been removed since it was saved, so ${one ? 'it was' : 'they were'} dropped. Your next change will save without ${one ? 'it' : 'them'}.`
+      );
+    }
+    if (droppedPrims) {
+      const one = droppedPrims === 1;
+      toast.warning(
+        `${droppedPrims} primitive prop${one ? '' : 's'} (no 3D model) ${one ? 'was' : 'were'} removed — they are no longer supported.`
+      );
+    }
   }
 
   // Reset the form to defaults. Also clears the URL's ?scenario= — leaving it
@@ -793,6 +929,10 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     setObjects(seedFromTier(tier));
     setSelId(null);
     resetHistory();
+    setLegacy(false);
+    setBaseline(null);
+    setSaveState('idle');
+    setSaveError('');
     onScenarioChange?.(null);
   }
 
@@ -826,6 +966,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     );
   }
 
+  const isLive = savedScenarios.find((x) => x.id === editingId)?.status === STATUS.ACTIVE;
   const faultCount = objects.filter((o) => o.defectId).length;
   const decoyCount = objects.filter((o) => o.defectId === null).length;
 
@@ -910,6 +1051,18 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
               created once, and showing "Autosave on" over a draft that is not
               being saved would be the one message that actively misleads. */}
           <SaveChip state={editingId ? saveState : 'pending'} error={saveError} />
+          {editingId && (
+            <span
+              className="tool-note"
+              title={
+                isLive
+                  ? 'This scenario is active: students inspecting this tier may get it, and your edits autosave straight to them.'
+                  : 'Not live: students do not get this scenario until you press Activate in the saved list.'
+              }
+            >
+              {isLive ? 'Live — edits reach students' : 'Not live'}
+            </span>
+          )}
           <span className="tool-note" data-tour="g-scenario-editor-counts">
             {faultCount} fault{faultCount === 1 ? '' : 's'} · {decoyCount} decoy
             {decoyCount === 1 ? '' : 's'}
@@ -972,7 +1125,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
               >
                 <Icon name="chevron-left" size={16} strokeWidth={2} />
               </button>
-              <button className="tool-btn" onClick={onClose} title="Close the editor" aria-label="Close">
+              <button className="tool-btn" onClick={requestClose} title="Close the editor" aria-label="Close">
                 <Icon name="x" size={16} strokeWidth={2} />
               </button>
             </span>
@@ -1012,7 +1165,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
               <label>Room tier</label>
               <select
                 value={tier}
-                onChange={(e) => setTier(e.target.value)}
+                onChange={(e) => changeTier(e.target.value)}
                 disabled={!!editingId}
                 data-tour="g-scenario-editor-tier"
               >
@@ -1088,13 +1241,6 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 onChange={(e) => setAddKey(e.target.value)}
                 data-tour="g-scenario-editor-add-select"
               >
-                <optgroup label="Props (no 3D model)">
-                  {PRIMS.map((p) => (
-                    <option key={p.prim} value={p.prim}>
-                      {p.label}
-                    </option>
-                  ))}
-                </optgroup>
                 <optgroup label="Room assets">
                   {MODEL_KEYS.map((k) => (
                     <option key={k} value={k}>
@@ -1122,6 +1268,12 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                   <div className="se-group">
                     <div className="se-group-h">Object</div>
                     <div className="se-objname">{defaultLabel(sel)}</div>
+                    {isLockedBase(sel) && (
+                      <p className="muted se-note" title={LOCKED_WHY}>
+                        Built-in fixture — position is locked, and it cannot be deleted or duplicated. You can
+                        still turn, resize, swap and tag it.
+                      </p>
+                    )}
                     {sel.model && variantsFor(sel.model).length > 0 && (
                       <>
                         <label>Swap this asset</label>
@@ -1184,13 +1336,15 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                         max="359"
                         step="1"
                         value={yawDeg}
-                        onChange={(e) => setYaw(Number(e.target.value))}
+                        {...editProps}
+                        onChange={(e) => edit(() => setYaw(Number(e.target.value)))}
                       />
                       <input
                         type="number"
                         className="se-yaw-num"
                         value={yawDeg}
-                        onChange={(e) => setYaw(Number(e.target.value) || 0)}
+                        {...editProps}
+                        onChange={(e) => edit(() => setYaw(Number(e.target.value) || 0))}
                       />
                       <span className="muted">deg</span>
                     </div>
@@ -1232,14 +1386,16 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                         max="3"
                         step="0.05"
                         value={Math.min(3, Math.max(0, heightM))}
-                        onChange={(e) => setHeight(Number(e.target.value))}
+                        {...editProps}
+                        onChange={(e) => edit(() => setHeight(Number(e.target.value)))}
                       />
                       <input
                         type="number"
                         className="se-yaw-num"
                         step="0.05"
                         value={heightM}
-                        onChange={(e) => setHeight(Number(e.target.value))}
+                        {...editProps}
+                        onChange={(e) => edit(() => setHeight(Number(e.target.value)))}
                       />
                       <span className="muted">m</span>
                     </div>
@@ -1281,13 +1437,21 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                         max="300"
                         step="5"
                         value={Math.min(300, Math.max(25, sizePct))}
-                        onChange={(e) => setSize(Number(e.target.value))}
+                        {...editProps}
+                        onChange={(e) => edit(() => setSize(Number(e.target.value)))}
                       />
                       <input
                         type="number"
                         className="se-yaw-num"
-                        value={sizePct}
-                        onChange={(e) => setSize(Number(e.target.value))}
+                        value={sizeDraft ?? sizePct}
+                        onChange={(e) => setSizeDraft(e.target.value)}
+                        onBlur={commitSize}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitSize();
+                          }
+                        }}
                       />
                       <span className="muted">%</span>
                     </div>
@@ -1335,6 +1499,7 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                       }
                       onChange={(e) => {
                         const v = e.target.value;
+                        snapshot();
                         patchSel({ defectId: v === 'untagged' ? undefined : v === 'clean' ? null : v });
                       }}
                     >
@@ -1345,6 +1510,14 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                           {o.label}
                         </option>
                       ))}
+                      {/* A category retired AFTER this fault was tagged is no longer
+                          offered, but the tag still holds it — without an option for
+                          it the select fell back to showing "Not inspectable". */}
+                      {sel.defectId && !offerableCategories().some((o) => o.id === sel.defectId) && (
+                        <option value={sel.defectId}>
+                          {allCategories().find((c) => c.id === sel.defectId)?.label || sel.defectId} (retired)
+                        </option>
+                      )}
                     </select>
                     {sel.defectId !== undefined && (
                       <>
@@ -1363,7 +1536,8 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                     <button
                       className="tool-btn has-label"
                       onClick={duplicateSel}
-                      title="Duplicate this object"
+                      disabled={isLockedBase(sel)}
+                      title={isLockedBase(sel) ? LOCKED_WHY : 'Duplicate this object'}
                     >
                       <Icon name="copy" size={15} strokeWidth={1.9} />
                       Duplicate
@@ -1371,7 +1545,8 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                     <button
                       className="tool-btn has-label is-danger"
                       onClick={removeSel}
-                      title="Delete this object"
+                      disabled={isLockedBase(sel)}
+                      title={isLockedBase(sel) ? LOCKED_WHY : 'Delete this object'}
                       style={{
                         background: 'var(--danger-soft)',
                         borderColor: 'var(--danger)',
@@ -1398,7 +1573,11 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
               label already switches between two words depending on whether this
               creates or updates, and a chord appended to both makes the button
               the widest thing in a 320px panel. */}
-            <button onClick={save} disabled={busy} title="Save the scenario (⌘S / Ctrl+S)">
+            <button
+              onClick={save}
+              disabled={busy || legacy}
+              title={legacy ? 'Older-format scenario — preview only' : 'Save the scenario (⌘S / Ctrl+S)'}
+            >
               {editingId ? 'Save changes' : 'Create scenario'}
             </button>
             <button className="secondary" onClick={previewAsStudent}>
@@ -1416,8 +1595,8 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
             scenarios={savedScenarios}
             loaded={listLoaded}
             editingId={editingId}
-            onNew={newScenario}
-            onEdit={openScenario}
+            onNew={requestNew}
+            onEdit={requestOpen}
             onActivate={(s) => setScenarioStatus(s, STATUS.ACTIVE)}
             onDisable={(s) => setScenarioStatus(s, STATUS.DISABLED)}
             onDelete={removeAndClear}
@@ -1474,14 +1653,17 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                 // discarded on mouse-up. Showing only the Y ring makes the gizmo
                 // match what can actually be saved. (RoomLayoutEditor already did
                 // this correctly; this editor was the outlier.)
-                showX={mode !== 'rotate'}
-                showZ={mode !== 'rotate'}
+                showX={mode !== 'rotate' && !isLockedBase(sel)}
+                showZ={mode !== 'rotate' && !isLockedBase(sel)}
                 // Y is available to EVERYTHING in translate mode. It used to be
                 // gated on `!!sel.prim`, so a model fixture had no vertical arrow at
                 // all — and even if you found one, commitGizmo() only persisted `y`
                 // for prims, so the height was discarded on mouse-up. itemY() has
                 // always honoured `y` for models; only the authoring was missing.
-                showY={mode === 'rotate' || mode === 'translate'}
+                // A built-in fixture cannot be moved (its position is not persisted), so
+                // the translate gizmo is hidden for it; rotate still works.
+                showY={mode === 'rotate' || (mode === 'translate' && !isLockedBase(sel))}
+                enabled={mode === 'rotate' || !isLockedBase(sel)}
                 onMouseDown={() => {
                   draggingRef.current = true;
                   snapshot();

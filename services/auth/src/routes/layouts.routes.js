@@ -24,36 +24,8 @@ const EDIT_ROLES = ['ADMIN', 'MANAGER'];
 // four-tier whitelist back, and nothing failed until a user tried to save.
 const { badTier } = require('../lib/tierKey');
 
-// A layout is ~60 fixtures of short numeric records. Well past anything real,
-// but bounded so a malformed client cannot post megabytes into the column.
-const MAX_FIXTURES = 400;
+const { validate } = require('../lib/layoutValidation');
 const KEEP_VERSIONS = 50;
-
-
-// Reject anything that is not plan-shaped BEFORE it reaches the database — a
-// layout that fails to parse client-side would otherwise brick every room.
-function validate(body) {
-  const { room, furniture, walls, stations } = body || {};
-  if (!room || typeof room !== 'object') return 'room is required.';
-  if (!Number.isFinite(room.w) || !Number.isFinite(room.l)) return 'room.w and room.l must be numbers.';
-  if (!Array.isArray(room.spawn) || room.spawn.length !== 2) return 'room.spawn must be [x, z].';
-  for (const [name, val] of [
-    ['furniture', furniture],
-    ['walls', walls],
-    ['stations', stations],
-  ]) {
-    if (!Array.isArray(val)) return `${name} must be an array.`;
-    if (val.length > MAX_FIXTURES) return `${name} has more than ${MAX_FIXTURES} entries.`;
-  }
-  for (const f of furniture) {
-    if (!f || typeof f !== 'object') return 'every fixture must be an object.';
-    if (!f.model && !f.type) return 'every fixture needs a model or a type.';
-    if (!Array.isArray(f.pos) || f.pos.length !== 2 || !f.pos.every(Number.isFinite)) {
-      return 'every fixture needs pos: [x, z].';
-    }
-  }
-  return null;
-}
 
 const shape = (row) => ({
   roomTier: row.roomTier,

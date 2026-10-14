@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, ContactShadows, RoundedBox, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
 import { TOUCH } from 'three';
-import { getRoomPlan, FOOTPRINTS, storedLayoutFor } from './roomLayouts';
+import { getRoomPlan, FOOTPRINTS, LAYOUTS, storedLayoutFor, customLayoutKeys } from './roomLayouts';
 import { hydrateRoomLayouts } from './layoutSync';
 import api from '../api';
 import { FixtureBody, itemY, MODEL_CFG } from './RoomFreeRoam';
@@ -12,6 +12,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { useTheme } from '../theme';
 import { stageColor } from './stageColor';
+import { MIN_SIZE, uniqueStationKey, parseDraft, atLeast, nonZeroScale, clampSpawn } from './editorMath';
 import SaveChip from './SaveChip';
 import useInlineGuide from '../guides/useInlineGuide';
 import roomLayoutEditorGuide from '../guides/room-layout-editor';
@@ -175,11 +176,11 @@ export default function RoomLayoutEditor({
     }
     return getRoomPlan(typeName);
   }, [typeName, isNew, seed]);
-  const fromPlan = () => ({
-    furniture: plan.furniture.map((it) => ({ ...it, _hadRy: 'ry' in it })),
-    walls: (plan.walls || []).map((w) => ({ ...w })),
-    stations: plan.stations.map((s) => ({ ...s })),
-    room: { w: plan.w, l: plan.l, h: plan.h ?? 3, floor: plan.floor || '#5a3d28', spawn: [...plan.spawn] },
+  const fromPlan = (p = plan) => ({
+    furniture: p.furniture.map((it) => ({ ...it, _hadRy: 'ry' in it })),
+    walls: (p.walls || []).map((w) => ({ ...w })),
+    stations: p.stations.map((s) => ({ ...s })),
+    room: { w: p.w, l: p.l, h: p.h ?? 3, floor: p.floor || '#5a3d28', spawn: [...p.spawn] },
   });
   // getRoomPlan already reflects the shared layout, so this is simply "what
   // everyone is currently looking at" — there is no browser-local draft any more.
@@ -191,7 +192,14 @@ export default function RoomLayoutEditor({
   // idle | saving | saved | error — what the autosave is doing right now.
   const confirm = useConfirm();
   const toast = useToast();
-  const [saveState, setSaveState] = useState(storedLayoutFor(typeName) ? 'saved' : 'idle');
+  // A layout that has never been saved is 'pending' ("Not saved yet"), not 'idle'
+  // ("Autosave on") — nothing is being autosaved until the first save lands.
+  const [saveState, setSaveState] = useState(
+    isNew ? 'pending' : storedLayoutFor(typeName) ? 'saved' : 'idle'
+  );
+  // A built-in tier has a layout committed in roomLayouts.js to fall back to; a
+  // custom one does not, so "reset to file" has nothing to reset to.
+  const isBuiltIn = Object.prototype.hasOwnProperty.call(LAYOUTS, typeName);
   // Flipped false by the first successful save; after that this editor behaves
   // exactly as it always has.
   const [needsFirstSave, setNeedsFirstSave] = useState(isNew);
@@ -215,6 +223,13 @@ export default function RoomLayoutEditor({
   // The editor's data is read synchronously from the already-hydrated plan, so
   // it is ready on first render.
   const guide = useInlineGuide(roomLayoutEditorGuide, { ready: true });
+  // three.js cannot parse `var(--warn)`; resolve the token once per theme, the
+  // way stageColor() does for the backdrop.
+  const warnColor = useMemo(
+    () => getComputedStyle(document.documentElement).getPropertyValue('--warn').trim() || '#f59e0b',
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `theme` is the trigger
+    [theme]
+  );
 
   // Repaint the 3D backdrop when the theme flips or the accent is re-tinted.
   // Every other surface in the editor is a CSS variable and follows on its own;
@@ -259,18 +274,27 @@ export default function RoomLayoutEditor({
   //
   // Debounced: dragging a fixture fires a state change per frame, and each save
   // appends a version. 800ms of stillness is what ends an edit.
+  // `pendingSave` holds the not-yet-sent save while the debounce is waiting, so
+  // closing the editor (or leaving the page) can send it NOW instead of losing
+  // the last 800ms of edits. Resolves true when saved, false when it failed.
+  const pendingSave = useRef(null);
+  const saveTimer = useRef(null);
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
+      pendingSave.current = null;
       return;
     }
     // A layout that does not exist yet is not autosaved. Until the author
     // presses Save the first time there is nothing on the server to keep in
     // step — and writing one would publish a half-placed room to every browser
     // reading this tier.
-    if (needsFirstSave) return;
+    if (needsFirstSave) {
+      pendingSave.current = null;
+      return;
+    }
     setSaveState('saving');
-    const t = setTimeout(() => {
+    const run = () =>
       api
         .put(`/api/room-layouts/${encodeURIComponent(typeName)}`, {
           room,
@@ -278,19 +302,73 @@ export default function RoomLayoutEditor({
           walls,
           stations,
         })
-        .then(() => {
+        .then(async () => {
           setSaveState('saved');
           setSaveError('');
           // Keep this tab's own reads in step with what it just wrote.
-          return hydrateRoomLayouts({ force: true });
+          await hydrateRoomLayouts({ force: true });
+          return true;
         })
         .catch((e) => {
           setSaveState('error');
           setSaveError(e.response?.data?.error || e.message);
+          return false;
         });
+    pendingSave.current = run;
+    saveTimer.current = setTimeout(() => {
+      pendingSave.current = null;
+      run();
     }, 800);
-    return () => clearTimeout(t);
+    return () => clearTimeout(saveTimer.current);
   }, [furniture, walls, stations, room, typeName, needsFirstSave]);
+
+  // Send a waiting save immediately. Returns true when there was nothing to
+  // send or the send succeeded.
+  async function flushSave() {
+    const run = pendingSave.current;
+    if (!run) return true;
+    clearTimeout(saveTimer.current);
+    pendingSave.current = null;
+    return run();
+  }
+  // Leaving the page by any route other than the X (nav link, Back) unmounts the
+  // editor — send the waiting save rather than dropping it with the timer.
+  useEffect(
+    () => () => {
+      const run = pendingSave.current;
+      if (!run) return;
+      clearTimeout(saveTimer.current);
+      pendingSave.current = null;
+      run();
+    },
+    []
+  );
+
+  // The X. Never silently drops work: a layout that was never saved, or whose
+  // last save failed, asks first; a waiting autosave is sent and awaited.
+  async function requestClose() {
+    if (needsFirstSave) {
+      const ok = await confirm({
+        title: 'Close without saving',
+        message: `“${typeName}” has not been saved yet. Close and lose it?`,
+        detail: 'Press Save layout first to keep it.',
+        confirmLabel: 'Close without saving',
+      });
+      if (!ok) return;
+    } else {
+      const saved = await flushSave();
+      if (!saved || saveState === 'error') {
+        const ok = await confirm({
+          title: 'Last save failed',
+          message: 'The most recent changes were not saved. Close anyway and lose them?',
+          detail: saveError || undefined,
+          confirmLabel: 'Close anyway',
+        });
+        if (!ok) return;
+      }
+    }
+    onClose?.();
+  }
 
   // The explicit first save. Same payload as the autosave, so version 1 of a new
   // layout is shaped exactly like every version after it — and once it lands,
@@ -335,6 +413,20 @@ export default function RoomLayoutEditor({
       return toast.error('Use letters, numbers, spaces, hyphens or underscores (max 40).');
     }
     if (key === typeName) return toast.error('That is the layout you are already editing.');
+    // Writing to an existing key adds a version on top of it — for a built-in
+    // tier or another custom layout that replaces what every browser sees.
+    if (Object.prototype.hasOwnProperty.call(LAYOUTS, key) || customLayoutKeys().includes(key)) {
+      const ok = await confirm({
+        title: 'Overwrite layout',
+        message: `A layout named “${key}” already exists. Replace it with this room?`,
+        detail: 'This affects every browser. The previous version stays in the saved history.',
+        confirmLabel: 'Overwrite',
+      });
+      if (!ok) return;
+    }
+    // A waiting autosave for the current layout goes out first, so it is not
+    // lost when the editor re-points at the new key.
+    await flushSave();
     setSaveState('saving');
     try {
       await api.put(`/api/room-layouts/${encodeURIComponent(key)}`, {
@@ -370,8 +462,12 @@ export default function RoomLayoutEditor({
     if (!ok) return;
     try {
       await api.delete(`/api/room-layouts/${encodeURIComponent(typeName)}`);
-      await hydrateRoomLayouts({ force: true });
-      revertToFile();
+      // hydrateRoomLayouts swallows its own failure and returns null; carrying on
+      // would paint the layout we just deleted.
+      if (!(await hydrateRoomLayouts({ force: true }))) throw new Error('Could not reload the layouts.');
+      // Re-read the plan now: `plan` was memoised when the editor opened and
+      // still holds the layout as it was BEFORE the delete.
+      revertToFile(getRoomPlan(typeName));
       setSaveState('idle');
     } catch (e) {
       setSaveState('error');
@@ -380,9 +476,11 @@ export default function RoomLayoutEditor({
   }
   // Reset the editor's canvas to the committed layout. Does NOT touch the server
   // on its own — resetToFile() above does that first.
-  function revertToFile() {
-    const p = fromPlan();
+  function revertToFile(freshPlan) {
+    const p = fromPlan(freshPlan);
     firstRun.current = true;
+    clearTimeout(saveTimer.current);
+    pendingSave.current = null;
     setFurniture(p.furniture);
     setWalls(p.walls);
     setStations(p.stations);
@@ -408,6 +506,18 @@ export default function RoomLayoutEditor({
     setRoom(d.room);
     setSel([]);
   };
+  // One inspector field is ONE history entry, however many keystrokes it takes:
+  // the first change since the field gained focus snapshots, the rest ride along.
+  // Blur (or any undo/redo) ends the session so the next field starts a new one.
+  const editSession = useRef(false);
+  const endEdit = () => {
+    editSession.current = false;
+  };
+  const beginEdit = () => {
+    if (editSession.current) return;
+    editSession.current = true;
+    snapshot();
+  };
   const snapshot = () => {
     hist.current.push(sceneJSON());
     if (hist.current.length > 60) hist.current.shift();
@@ -420,6 +530,7 @@ export default function RoomLayoutEditor({
     }
   };
   const undo = () => {
+    endEdit();
     const s = hist.current.pop();
     if (!s) return;
     // Push where we ARE before stepping back, so Redo has somewhere to return
@@ -430,6 +541,7 @@ export default function RoomLayoutEditor({
     setHistEpoch((n) => n + 1);
   };
   const redoAction = () => {
+    endEdit();
     const s = redo.current.pop();
     if (!s) return;
     hist.current.push(sceneJSON());
@@ -587,15 +699,20 @@ export default function RoomLayoutEditor({
         )
       );
     else if (sel.kind === 'wall') {
-      if (mode === 'scale')
+      if (mode === 'scale') {
+        // Read the factors NOW: the updater below runs later, after the live
+        // object has been put back to scale 1.
+        const sx = o.scale.x;
+        const sz = o.scale.z;
         setWalls((w) =>
           w.map((it, j) =>
-            j === sel.i
-              ? { ...it, w: Math.max(0.1, r2(it.w * o.scale.x)), d: Math.max(0.1, r2(it.d * o.scale.z)) }
-              : it
+            j === sel.i ? { ...it, w: Math.max(0.1, r2(it.w * sx)), d: Math.max(0.1, r2(it.d * sz)) } : it
           )
         );
-      else
+        // w/d now carry the size; the group's scale prop never changes, so r3f
+        // would never reset the object and the next resize would compound.
+        o.scale.set(1, 1, 1);
+      } else
         setWalls((w) =>
           w.map((it, j) =>
             j === sel.i ? { ...it, p: [r2(o.position.x), r2(o.position.z)], ry: o.rotation.y } : it
@@ -620,7 +737,14 @@ export default function RoomLayoutEditor({
   // ── mutations ──
   function patch(patchObj) {
     if (!single) return;
+    beginEdit();
     setKind[single.kind]((arr) => arr.map((it, j) => (j === single.i ? { ...it, ...patchObj } : it)));
+  }
+  // Room-panel edits: undoable like the inspector, and the spawn is pulled back
+  // inside the room whenever the room (or the spawn itself) changes.
+  function editRoom(patchObj) {
+    beginEdit();
+    setRoom((r) => clampSpawn({ ...r, ...patchObj }));
   }
   function addAsset() {
     snapshot();
@@ -653,7 +777,7 @@ export default function RoomLayoutEditor({
     const n = stations.length;
     setStations((s) => [
       ...s,
-      { key: `custom${n}`, taskType: 'inspect', title: 'New Station', emoji: '⭐', pos: [0, 0] },
+      { key: uniqueStationKey(s), taskType: 'inspect', title: 'New Station', emoji: '⭐', pos: [0, 0] },
     ]);
     setSel([{ kind: 'station', i: n }]);
   }
@@ -808,15 +932,17 @@ export default function RoomLayoutEditor({
           >
             <Icon name="home" size={18} strokeWidth={1.9} />
           </button>
-          <button
-            onClick={resetToFile}
-            className="tool-btn"
-            title="Discard edits and reload the checked-in layout"
-            data-tour="g-layout-editor-reset"
-            aria-label="Reset to file"
-          >
-            <Icon name="refresh-cw" size={18} strokeWidth={1.9} />
-          </button>
+          {isBuiltIn && (
+            <button
+              onClick={resetToFile}
+              className="tool-btn"
+              title="Discard edits and reload the checked-in layout"
+              data-tour="g-layout-editor-reset"
+              aria-label="Reset to file"
+            >
+              <Icon name="refresh-cw" size={18} strokeWidth={1.9} />
+            </button>
+          )}
         </div>
 
         {/* The gizmo modes, centred — the three that decide what dragging in
@@ -998,7 +1124,7 @@ export default function RoomLayoutEditor({
                 <Icon name="chevron-left" size={16} strokeWidth={2} />
               </button>
               <button
-                onClick={onClose}
+                onClick={requestClose}
                 className="tool-btn"
                 aria-label="Close"
                 title="Close the editor"
@@ -1093,6 +1219,7 @@ export default function RoomLayoutEditor({
           <div
             style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)' }}
             data-tour="g-layout-editor-room"
+            onBlur={endEdit}
           >
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>ROOM</div>
             <Row>
@@ -1100,25 +1227,25 @@ export default function RoomLayoutEditor({
               <input
                 type="color"
                 value={room.floor}
-                onChange={(e) => setRoom({ ...room, floor: e.target.value })}
+                onChange={(e) => editRoom({ floor: e.target.value })}
                 style={{ width: 38, height: 22, background: 'none', border: 'none' }}
               />
               <span style={{ fontSize: 11 }}>{room.floor}</span>
             </Row>
             <Row>
               <Lbl>width</Lbl>
-              <Num v={room.w} on={(n) => setRoom({ ...room, w: n })} />
+              <Num v={room.w} min={MIN_SIZE} on={(n) => editRoom({ w: n })} />
               <Lbl>length</Lbl>
-              <Num v={room.l} on={(n) => setRoom({ ...room, l: n })} />
+              <Num v={room.l} min={MIN_SIZE} on={(n) => editRoom({ l: n })} />
             </Row>
             <Row>
               <Lbl>height</Lbl>
-              <Num v={room.h ?? 3} step={0.25} on={(n) => setRoom({ ...room, h: n })} />
+              <Num v={room.h ?? 3} step={0.25} min={MIN_SIZE} on={(n) => editRoom({ h: n })} />
             </Row>
             <Row>
               <Lbl>spawn</Lbl>
-              <Num v={room.spawn[0]} on={(n) => setRoom({ ...room, spawn: [n, room.spawn[1]] })} />
-              <Num v={room.spawn[1]} on={(n) => setRoom({ ...room, spawn: [room.spawn[0], n] })} />
+              <Num v={room.spawn[0]} on={(n) => editRoom({ spawn: [n, room.spawn[1]] })} />
+              <Num v={room.spawn[1]} on={(n) => editRoom({ spawn: [room.spawn[0], n] })} />
             </Row>
             {/* "Copy block → clipboard" and the autosave line above it are gone.
               The live save state lives on the toolbar, and Undo/Reset moved
@@ -1217,7 +1344,7 @@ export default function RoomLayoutEditor({
                 <mesh rotation-x={-Math.PI / 2} position-y={0.04}>
                   <ringGeometry args={[0.42, 0.6, 32]} />
                   <meshBasicMaterial
-                    color={has(sel, 'station', i) ? 'var(--warn)' : '#38bdf8'}
+                    color={has(sel, 'station', i) ? warnColor : '#38bdf8'}
                     transparent
                     opacity={0.7}
                     side={THREE.DoubleSide}
@@ -1240,7 +1367,7 @@ export default function RoomLayoutEditor({
                   <mesh key={`mk${r.kind}${r.i}`} rotation-x={-Math.PI / 2} position={[mx, 0.03, mz]}>
                     <ringGeometry args={[0.3, 0.44, 24]} />
                     <meshBasicMaterial
-                      color="var(--warn)"
+                      color={warnColor}
                       transparent
                       opacity={0.9}
                       side={THREE.DoubleSide}
@@ -1356,7 +1483,10 @@ export default function RoomLayoutEditor({
           {/* The inspector body owns the flexible space and scrolls inside it.
             It used to have none of its own, so a tall inspector simply ran off
             the bottom of the panel with no way to reach the last field. */}
-          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>
+          <div
+            style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}
+            onBlur={endEdit}
+          >
             {!sel.length && (
               <div style={{ padding: 12, color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
                 Select an item (list or 3D) to edit its properties.
@@ -1515,19 +1645,19 @@ function FurnitureInspector({ it, patch }) {
         />
       </Field>
       <Field label="scale x/y/z">
-        <Num v={sc[0]} step={0.1} on={(n) => patch({ scale: [n, sc[1], sc[2]] })} />
-        <Num v={sc[1]} step={0.1} on={(n) => patch({ scale: [sc[0], n, sc[2]] })} />
-        <Num v={sc[2]} step={0.1} on={(n) => patch({ scale: [sc[0], sc[1], n] })} />
+        <Num v={sc[0]} step={0.1} on={(n) => patch({ scale: [nonZeroScale(n), sc[1], sc[2]] })} />
+        <Num v={sc[1]} step={0.1} on={(n) => patch({ scale: [sc[0], nonZeroScale(n), sc[2]] })} />
+        <Num v={sc[2]} step={0.1} on={(n) => patch({ scale: [sc[0], sc[1], nonZeroScale(n)] })} />
       </Field>
       {it.model && (
         <Field label="fit width (w)">
-          <Num v={it.w ?? 1} step={0.1} on={(n) => patch({ w: n })} />
+          <Num v={it.w ?? 1} step={0.1} min={MIN_SIZE} on={(n) => patch({ w: n })} />
         </Field>
       )}
       {it.s && (
         <Field label="size s (w/h)">
-          <Num v={it.s[0]} step={0.1} on={(n) => patch({ s: [n, it.s[1]] })} />
-          <Num v={it.s[1]} step={0.1} on={(n) => patch({ s: [it.s[0], n] })} />
+          <Num v={it.s[0]} step={0.1} min={MIN_SIZE} on={(n) => patch({ s: [n, it.s[1]] })} />
+          <Num v={it.s[1]} step={0.1} min={MIN_SIZE} on={(n) => patch({ s: [it.s[0], n] })} />
         </Field>
       )}
       <Field label="height (y)">
@@ -1552,8 +1682,8 @@ function FurnitureInspector({ it, patch }) {
       </div>
       {box && (
         <Field label="box w/d">
-          <Num v={box[0]} step={0.1} on={(n) => patch({ box: [n, box[1]] })} />
-          <Num v={box[1]} step={0.1} on={(n) => patch({ box: [box[0], n] })} />
+          <Num v={box[0]} step={0.1} min={MIN_SIZE} on={(n) => patch({ box: [n, box[1]] })} />
+          <Num v={box[1]} step={0.1} min={MIN_SIZE} on={(n) => patch({ box: [box[0], n] })} />
         </Field>
       )}
       <Field label="colour (c)">
@@ -1588,10 +1718,10 @@ function WallInspector({ it, patch }) {
         />
       </Field>
       <Field label="width (x)">
-        <Num v={it.w} step={0.1} on={(n) => patch({ w: n })} />
+        <Num v={it.w} step={0.1} min={MIN_SIZE} on={(n) => patch({ w: n })} />
       </Field>
       <Field label="depth (z)">
-        <Num v={it.d} step={0.1} on={(n) => patch({ d: n })} />
+        <Num v={it.d} step={0.1} min={MIN_SIZE} on={(n) => patch({ d: n })} />
       </Field>
       <Field label="colour">
         <input
@@ -1712,7 +1842,7 @@ function EditorHelp({ onClose }) {
             </li>
             <li>
               <strong>It saves itself.</strong> Every change autosaves to the server for every browser — the
-              line above the Copy button tells you where that stands.
+              the status chip on the toolbar tells you where that stands.
             </li>
           </ol>
 
@@ -1742,8 +1872,8 @@ function EditorHelp({ onClose }) {
 
           <h4>Careful with</h4>
           <p className="ed-help-note">
-            <strong>Reset to file</strong> discards every edit for this tier and reloads the checked-in layout
-            — it is not an undo, and Undo will not bring the edits back.
+            <strong>Reset to file</strong> (built-in tiers only) discards every saved edit for this tier and
+            reloads the checked-in layout — it is not an undo, and Undo will not bring the edits back.
           </p>
         </div>
       </div>
@@ -2172,13 +2302,29 @@ function Check({ label, checked, onChange }) {
     </label>
   );
 }
-function Num({ v, on, step = 0.1 }) {
+// A number box that keeps what is being TYPED separate from what is stored.
+// `on` is called only when the text is a finite number (and, with `min`, not
+// below it) — so '-' or an empty box never becomes 0 in the layout, and a
+// negative can actually be typed. On blur the draft is dropped, and a value
+// under `min` is raised to it.
+function Num({ v, on, step = 0.1, min = null }) {
+  const [draft, setDraft] = useState(null);
   return (
     <input
       type="number"
       step={step}
-      value={v}
-      onChange={(e) => on(parseFloat(e.target.value) || 0)}
+      min={min ?? undefined}
+      value={draft ?? v}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const n = parseDraft(e.target.value);
+        if (n !== null && (min == null || n >= min)) on(n);
+      }}
+      onBlur={() => {
+        const n = parseDraft(draft);
+        setDraft(null);
+        if (n !== null && min != null && n < min) on(atLeast(n, min));
+      }}
       style={{
         width: 56,
         background: 'var(--field)',
