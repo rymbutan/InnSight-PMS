@@ -517,92 +517,93 @@ export default function Users() {
             </span>
           )}
         </div>
-        <table data-tour="g-users-table">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Name</th>
-              {/* The search box already matches on email, so it had to be
+        <div className="table-scroll">
+          <table className="users-table" data-tour="g-users-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Name</th>
+                {/* The search box already matches on email, so it had to be
                   visible: filtering a column nobody can read makes a row appear
                   for a reason the table does not show. It is also how you tell
                   two similar accounts apart, and what the Forgot password link
                   is sent to. */}
-              <th>Email</th>
-              <th className="t-c">Status</th>
-              <th>Roles</th>
-              <th>Last login</th>
-              <th className="t-c">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* An explicit empty row rather than a bare table: a filter that
+                <th>Email</th>
+                <th className="t-c">Status</th>
+                <th>Roles</th>
+                <th>Last login</th>
+                <th className="t-c">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* An explicit empty row rather than a bare table: a filter that
                 matches nothing otherwise renders a header with nothing under
                 it, which reads as the list failing to load. */}
-            {visibleUsers.length === 0 && (
-              <tr>
-                <td colSpan={7} className="t-c muted" style={{ padding: '18px 0' }}>
-                  No users match “{userQuery.trim()}”.
-                </td>
-              </tr>
-            )}
-            {visibleUsers.map((u) => (
-              <tr
-                key={u.id}
-                ref={(el) => {
-                  if (el) rowRefs.current[u.id] = el;
-                  else delete rowRefs.current[u.id];
-                }}
-                className={highlightId === u.id ? 'row-flash' : undefined}
-              >
-                <td>{u.username}</td>
-                <td>{u.displayName}</td>
-                {/* An em dash, not an empty cell: email is optional on a user
+              {visibleUsers.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="t-c muted" style={{ padding: '18px 0' }}>
+                    No users match “{userQuery.trim()}”.
+                  </td>
+                </tr>
+              )}
+              {visibleUsers.map((u) => (
+                <tr
+                  key={u.id}
+                  ref={(el) => {
+                    if (el) rowRefs.current[u.id] = el;
+                    else delete rowRefs.current[u.id];
+                  }}
+                  className={highlightId === u.id ? 'row-flash' : undefined}
+                >
+                  <td>{u.username}</td>
+                  <td>{u.displayName}</td>
+                  {/* An em dash, not an empty cell: email is optional on a user
                     record, and a blank reads as "failed to load" rather than
                     "none set" — which matters now that it is what a password
                     reset link would be sent to. */}
-                <td>{u.email || <span className="muted">—</span>}</td>
-                <td className="t-c">
-                  <span className={`badge ${u.status === 'ACTIVE' ? 'confirmed' : 'cancelled'}`}>
-                    {u.status}
-                  </span>
-                </td>
-                <td>
-                  {/* Capsules only. The cell used to carry a live multi-select
+                  <td>{u.email || <span className="muted">—</span>}</td>
+                  <td className="t-c">
+                    <span className={`badge ${u.status === 'ACTIVE' ? 'confirmed' : 'cancelled'}`}>
+                      {u.status}
+                    </span>
+                  </td>
+                  <td>
+                    {/* Capsules only. The cell used to carry a live multi-select
                       under the badges, which meant every row on the page held a
                       six-option listbox — the tallest thing in the table, and a
                       control where one stray click reassigned somebody's access
                       with no confirmation step. Reading is the common case, so
                       reading is what the cell does; editing is a button. */}
-                  <div className="role-badges">
-                    {(u.roles || []).length ? (
-                      u.roles.map((r) => <RoleBadge key={r.roleCode} code={r.roleCode} />)
-                    ) : (
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        No roles
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
-                <td className="t-actions">
-                  {canManage && (isAdmin || !isAdminRow(u)) ? (
-                    <>
-                      {/* Moved here from beside the role capsules: it is an
+                    <div className="role-badges">
+                      {(u.roles || []).length ? (
+                        u.roles.map((r) => <RoleBadge key={r.roleCode} code={r.roleCode} />)
+                      ) : (
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          No roles
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
+                  <td className="t-actions">
+                    {canManage && (isAdmin || !isAdminRow(u)) ? (
+                      <>
+                        {/* Moved here from beside the role capsules: it is an
                           action on the row like the rest, and a MANAGER still
                           cannot edit an admin account's roles — this whole group
                           is already gated on that (see blockIfAdminTarget). */}
-                      <button
-                        type="button"
-                        className="small secondary"
-                        onClick={() => openRoleEditor(u)}
-                        title={`Edit roles for ${u.username}`}
-                      >
-                        <Icon name="pencil" size={11} /> Edit roles
-                      </button>{' '}
-                      <button className="small secondary" onClick={() => openReset(u)}>
-                        Reset Password
-                      </button>{' '}
-                      {/* Your own row carries the SAME buttons as every other,
+                        <button
+                          type="button"
+                          className="small secondary"
+                          onClick={() => openRoleEditor(u)}
+                          title={`Edit roles for ${u.username}`}
+                        >
+                          <Icon name="pencil" size={11} /> Edit roles
+                        </button>{' '}
+                        <button className="small secondary" onClick={() => openReset(u)}>
+                          Reset Password
+                        </button>{' '}
+                        {/* Your own row carries the SAME buttons as every other,
                           disabled rather than hidden. The server refuses both
                           actions on the signed-in account (the self-lockout
                           guard on disable, and the self-delete guard on DELETE),
@@ -617,51 +618,52 @@ export default function Users() {
                           users.routes.js) — a break-glass account has to survive
                           no matter how many other admins exist, not just while
                           it's the last one. */}
-                      <button
-                        className="small danger"
-                        disabled={u.id === me?.id || u.username === 'admin'}
-                        title={
-                          u.id === me?.id
-                            ? 'You cannot disable your own account — ask another admin.'
-                            : u.username === 'admin'
-                              ? "The 'admin' account cannot be disabled."
-                              : undefined
-                        }
-                        onClick={() => u.id !== me?.id && u.username !== 'admin' && toggle(u)}
-                      >
-                        {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                      </button>{' '}
-                      {/* ADMIN only: deleting is the one action here a manager
-                          cannot do and nothing can undo — Disable is the
-                          reversible tool and stays available to both. Rendered
-                          on every row an admin can see, including their own, so
-                          the column does not change shape row to row. Mirrors
-                          DELETE /api/users/:id. */}
-                      {isAdmin && (
                         <button
                           className="small danger"
                           disabled={u.id === me?.id || u.username === 'admin'}
                           title={
                             u.id === me?.id
-                              ? 'You cannot delete your own account — ask another admin.'
+                              ? 'You cannot disable your own account — ask another admin.'
                               : u.username === 'admin'
-                                ? "The 'admin' account cannot be deleted."
+                                ? "The 'admin' account cannot be disabled."
                                 : undefined
                           }
-                          onClick={() => u.id !== me?.id && u.username !== 'admin' && removeUser(u)}
+                          onClick={() => u.id !== me?.id && u.username !== 'admin' && toggle(u)}
                         >
-                          Delete
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                          {u.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                        </button>{' '}
+                        {/* ADMIN only: deleting is the one action here a manager
+                          cannot do and nothing can undo — Disable is the
+                          reversible tool and stays available to both. Rendered
+                          on every row an admin can see, including their own, so
+                          the column does not change shape row to row. Mirrors
+                          DELETE /api/users/:id. */}
+                        {isAdmin && (
+                          <button
+                            className="small danger"
+                            disabled={u.id === me?.id || u.username === 'admin'}
+                            title={
+                              u.id === me?.id
+                                ? 'You cannot delete your own account — ask another admin.'
+                                : u.username === 'admin'
+                                  ? "The 'admin' account cannot be deleted."
+                                  : undefined
+                            }
+                            onClick={() => u.id !== me?.id && u.username !== 'admin' && removeUser(u)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Approve — username and roles in ONE dialog, replacing two chained
@@ -760,10 +762,9 @@ export default function Users() {
         }
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          Creates an account for every pending request below, using the username and password
-          each person chose when they signed up. Every one of them gets the same roles you tick
-          here — for anyone who needs something different, cancel this and approve them
-          individually instead.
+          Creates an account for every pending request below, using the username and password each person
+          chose when they signed up. Every one of them gets the same roles you tick here — for anyone who
+          needs something different, cancel this and approve them individually instead.
         </p>
         <label>Roles for all {requests.length} accounts</label>
         <div className="role-picker">

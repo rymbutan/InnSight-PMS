@@ -2844,6 +2844,27 @@ td.t-actions {
 td.t-actions > * {
   vertical-align: middle;
 }
+/* A table that can be wider than its card (the Users directory has four action
+   buttons per row) scrolls inside the card instead of spilling out of it — on a
+   tablet the header band and the Disable/Delete buttons used to hang off the
+   panel's right edge. */
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+/* Narrower than a desk the four buttons wrap into two tidy rows instead of one
+   long nowrap line that forces the whole table wider than the screen. */
+@media (max-width: 1500px) {
+  .users-table td.t-actions {
+    white-space: normal;
+    min-width: 230px;
+    text-align: right;
+  }
+  .users-table td.t-actions > button {
+    margin: 2px 0 2px 4px;
+  }
+}
 tr:hover td {
   background: var(--row-hover);
 }
