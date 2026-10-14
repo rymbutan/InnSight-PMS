@@ -410,7 +410,7 @@ export default function WalkIn() {
     <div>
       <div className="page-head">
         <h1>Walk-in check-in</h1>
-        <div className="wizard-steps">
+        <div className="wizard-steps" data-tour="g-walk-in-steps">
           {STEPS.map((s, i) => (
             <div key={s} className={`wizard-step ${step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}`}>
               <span className="num">{step > i + 1 ? <Icon name="check" size={12} /> : i + 1}</span> {s}
@@ -421,7 +421,7 @@ export default function WalkIn() {
 
       {/* Step 1 — Rooms */}
       {step === 1 && (
-        <div className="panel">
+        <div className="panel" data-tour="g-walk-in-intro">
           <p className="muted">
             Unreserved guest walking up to the front desk. Checks them straight in as an in-house stay — the room
             has to be free right now, not just on some future date.
@@ -461,7 +461,7 @@ export default function WalkIn() {
           )}
 
           <h3 style={{ marginTop: 18 }}>Assign room</h3>
-          <div className="row">
+          <div className="row" data-tour="g-walk-in-room">
             <div>
               <label>Room</label>
               <select value={assignedRoomId} onChange={(e) => pickRoom(e.target.value)}>
@@ -1032,8 +1032,8 @@ export default function WalkIn() {
       )}
 
       {/* Sticky bottom bar */}
-      <div className="wizard-bottom">
-        <div className="wizard-totals">
+      <div className="wizard-bottom" data-tour="g-walk-in-bar">
+        <div className="wizard-totals" data-tour="g-walk-in-totals">
           <div className="wizard-total">
             <div className="label">Subtotal</div>
             <div className="value">{formatPeso(totals.subtotalCents)}</div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useTheme } from '../theme';
@@ -10,6 +10,7 @@ import NotificationBell from './NotificationBell';
 import NotificationPopups from './NotificationPopups';
 import IncomingCall from './IncomingCall';
 import TutorialTour from './TutorialTour';
+import { guideForPath, hasSeenGuide, markGuideSeen } from '../guides';
 import ChatDock, { openChat } from './ChatDock';
 import { applyAccent } from '../lib/accent';
 import { playMessageChime } from '../lib/sound';
@@ -445,6 +446,25 @@ export default function Layout() {
       return () => clearTimeout(t);
     }
   }, [user]);
+
+  // Per-page guide: the walkthrough for the screen you are on. It opens by
+  // itself the first time you reach a page (once the app-wide tour is out of the
+  // way), and the topbar help button replays it.
+  const guide = useMemo(() => guideForPath(location.pathname, hasRole), [location.pathname, user]);
+  const [guideOpen, setGuideOpen] = useState(false);
+  useEffect(() => {
+    setGuideOpen(false);
+    if (!guide || !user || tourOpen || user.hasSeenTutorial === false) return undefined;
+    if (hasSeenGuide(user.id, guide.key)) return undefined;
+    // After the page has painted and its data has had a moment to arrive.
+    const t = setTimeout(() => setGuideOpen(true), 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guide?.key, user?.id]);
+  function finishGuide() {
+    setGuideOpen(false);
+    if (guide && user) markGuideSeen(user.id, guide.key);
+  }
 
   // Shared by both "finished the tour" and "skipped it" — either way counts
   // as this account having seen it, so it stops greeting them at every
@@ -1000,6 +1020,17 @@ export default function Layout() {
               >
                 <Icon name="graduation-cap" size={18} />
               </button>
+              {guide && (
+                <button
+                  type="button"
+                  className="cb-icon-btn"
+                  title="Guide for this page"
+                  aria-label="Guide for this page"
+                  onClick={() => setGuideOpen(true)}
+                >
+                  <Icon name="help-circle" size={18} />
+                </button>
+              )}
               {/* Gated to the roles that can actually open /calendar. This button
                 is the only route to that page, so leaving it unguarded handed
                 Housekeeping a shortcut straight into a "not authorised" screen —
@@ -1231,6 +1262,7 @@ export default function Layout() {
           for something already on screen. */}
       <ChatDock suppressed={location.pathname === '/messages'} />
       <TutorialTour open={tourOpen} onFinish={finishTour} />
+      <TutorialTour open={guideOpen} onFinish={finishGuide} guideSteps={guide?.steps} />
     </div>
   );
 }

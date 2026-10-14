@@ -209,17 +209,17 @@ export default function Rooms() {
           was the last thing on it. It leads now, and the aside carries what you
           consult rather than operate. Single column below 1100px. */}
       <div className="rooms-grid">
-        <div className="rooms-main">
+        <div className="rooms-main" data-tour="g-rooms-list">
           <div className="panel">
             {/* Filters sit on the panel head, aligned right against the title —
             a full property runs to hundreds of rooms and the unfiltered list is
             unusable at that size. */}
             <div className="panel-head">
               <h3>Rooms</h3>
-              <div className="filter-bar">
+              <div className="filter-bar" data-tour="g-rooms-filters">
                 <label className="filter-inline">
                   <span>Type</span>
-                  <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                  <select data-tour="g-rooms-type-filter" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
                     <option value="">All types</option>
                     {types.map((t) => (
                       <option key={t.code} value={t.code}>
@@ -239,7 +239,7 @@ export default function Rooms() {
                     ))}
                   </select>
                 </label>
-                <span className="filter-count">
+                <span className="filter-count" data-tour="g-rooms-count">
                   {visibleRooms.length} of {rooms.length}
                 </span>
               </div>
@@ -331,7 +331,7 @@ export default function Rooms() {
           </div>
         </div>
 
-        <aside className="rooms-aside">
+        <aside className="rooms-aside" data-tour="g-rooms-aside">
           {/* Setup REPLACES the types list rather than appearing beside it. The
               aside is one column: adding a room and reading the rates are two
               different jobs, and showing both at once is what made this column a
@@ -472,6 +472,7 @@ export default function Rooms() {
                   <button
                     type="button"
                     className="rt-add"
+                    data-tour="g-rooms-add"
                     onClick={() => setSetupOpen(true)}
                     aria-label="Add a room or create a room type"
                     title="Add room / create room type"
@@ -483,7 +484,7 @@ export default function Rooms() {
               {types.length === 0 ? (
                 <EmptyState kind="inbox" title="No room types yet" />
               ) : (
-                <div className="rt-list">
+                <div className="rt-list" data-tour="g-rooms-types">
                   {types.map((t) =>
                     typeEdit?.code === t.code ? (
                       // Full edit, in place of the card. Everything the server

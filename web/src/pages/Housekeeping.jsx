@@ -487,7 +487,7 @@ export default function Housekeeping() {
         <div className="page-head-title">
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>Map &amp; Housekeeping</h1>
         </div>
-        <span className="hk-occupancy">
+        <span className="hk-occupancy" data-tour="g-housekeeping-occupancy">
           Occupancy: <strong>{occupancy}%</strong>
         </span>
       </div>
@@ -544,6 +544,7 @@ export default function Housekeeping() {
               width={mapW}
               height={mapH || 420}
               className="hk-map"
+              data-tour="g-housekeeping-map"
               role="img"
               aria-label="Interactive hotel floor map"
             >
@@ -608,7 +609,7 @@ export default function Housekeeping() {
         </div>
 
         <div className="hk-side">
-          <div className="panel hk-legend-panel">
+          <div className="panel hk-legend-panel" data-tour="g-housekeeping-legend">
             <h3>Legend</h3>
             <div className="hk-legend">
               {STATUS_ORDER.map((s) => {
@@ -627,7 +628,7 @@ export default function Housekeeping() {
           </div>
 
           {selected && (
-            <div className="panel hk-detail">
+            <div className="panel hk-detail" data-tour="g-housekeeping-detail">
               <div className="hk-detail-head">
                 <h3 style={{ margin: 0 }}>Room {selected.number}</h3>
                 <button className="icon" aria-label="Close" onClick={() => setSelectedId(null)}>
@@ -661,7 +662,7 @@ export default function Housekeeping() {
                   which is exactly why the control is a call and not a status
                   change. The desk asks; housekeeping decides and updates. */}
               {canCall && (
-                <div className="hk-call">
+                <div className="hk-call" data-tour="g-housekeeping-call">
                   <label style={{ margin: '0 0 4px' }}>Call housekeeping</label>
                   <div className="hk-call-row">
                     <select value={callReason} onChange={(e) => setCallReason(e.target.value)}>
@@ -715,7 +716,7 @@ export default function Housekeeping() {
                   call. Naming who works the room is not the same power as
                   changing the room's status, which remains hk.update. */}
               {(isSupervisor || canCall) && (
-                <div style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div data-tour="g-housekeeping-assign" style={{ margin: '6px 0 12px', display: 'flex', gap: 6, alignItems: 'center' }}>
                   <label style={{ margin: 0 }}>Assign to</label>
                   <select
                     value={selected.assignedTo || ''}
@@ -738,7 +739,7 @@ export default function Housekeeping() {
                 Standard room would tag fixtures that room does not have, and
                 every one of those tags would silently fail to resolve. */}
               {isSupervisor && (
-                <div style={{ margin: '6px 0 12px' }}>
+                <div data-tour="g-housekeeping-scenario" style={{ margin: '6px 0 12px' }}>
                   <label style={{ margin: '0 0 4px' }}>Inspection scenario</label>
                   <select
                     style={{ width: '100%' }}
@@ -772,7 +773,7 @@ export default function Housekeeping() {
                   {lastResult.message}
                 </p>
               )}
-              <div className="hk-actions">
+              <div className="hk-actions" data-tour="g-housekeeping-actions">
                 {panelActions(
                   selected,
                   (status, msg) => act(selected.id, status, msg),

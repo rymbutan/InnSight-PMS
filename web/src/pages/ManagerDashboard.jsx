@@ -489,7 +489,7 @@ export default function ManagerDashboard() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-tour="g-dashboard-mgr-head">
         <div>
           <h1>
             {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
@@ -512,7 +512,7 @@ export default function ManagerDashboard() {
               end in "not authorised" reads as the app being broken. Matches the
               guard on /reservations/new and on POST /api/reservations. */}
           {canBook && (
-            <button className="btn-cta" onClick={() => navigate('/reservations/new')}>
+            <button className="btn-cta" data-tour="g-dashboard-mgr-create" onClick={() => navigate('/reservations/new')}>
               <Icon name="plus" size={14} style={{ marginRight: 6 }} />
               Create new reservation
             </button>
@@ -520,7 +520,7 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      <div className="kpi-row">
+      <div className="kpi-row" data-tour="g-dashboard-mgr-kpis">
         <div className="kpi-tile kpi-arrivals">
           <div>
             <div className="kpi-num">{data.arrivals.length}</div>
@@ -550,7 +550,7 @@ export default function ManagerDashboard() {
         </div>
         {lastDay && (
           <>
-            <div className="kpi-tile">
+            <div className="kpi-tile" data-tour="g-dashboard-mgr-audit">
               <div>
                 <div className="kpi-num">{(lastDay.occupancyPct ?? 0).toFixed(1)}%</div>
                 <div className="kpi-label" title="Occupancy (last audit)">
@@ -596,7 +596,7 @@ export default function ManagerDashboard() {
         <div style={{ flex: 3, minWidth: 480, display: 'flex', flexDirection: 'column' }}>
           <div className="row" style={{ alignItems: 'stretch', flex: 1 }}>
             {/* Occupancy trend */}
-            <div className="panel" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel" data-tour="g-dashboard-mgr-occtrend" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}>
               <h3 style={{ margin: '0 0 8px' }}>Occupancy Trend</h3>
               {occupancySeries.length < 2 ? (
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -615,7 +615,7 @@ export default function ManagerDashboard() {
             </div>
 
             {/* Revenue trend */}
-            <div className="panel" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel" data-tour="g-dashboard-mgr-revtrend" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}>
               <h3 style={{ margin: '0 0 8px' }}>Revenue Trend</h3>
               {revenueSeries.length < 2 ? (
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -636,7 +636,7 @@ export default function ManagerDashboard() {
 
           <div className="row" style={{ alignItems: 'stretch', flex: 1 }}>
             {/* Bookings made per day */}
-            <div className="panel" style={{ flex: 1.4, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel" data-tour="g-dashboard-mgr-bookings" style={{ flex: 1.4, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
                 <h3 style={{ margin: 0 }}>Bookings</h3>
                 <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
@@ -656,7 +656,7 @@ export default function ManagerDashboard() {
             </div>
 
             {/* Bookings by source */}
-            <div className="panel" style={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel" data-tour="g-dashboard-mgr-source" style={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column' }}>
               <h3 style={{ margin: '0 0 8px' }}>Bookings by Source</h3>
               {bookingSourceMix.length === 0 ? (
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -687,7 +687,7 @@ export default function ManagerDashboard() {
 
         <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column' }}>
           {/* Room occupancy */}
-          <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div className="panel" data-tour="g-dashboard-mgr-rooms" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
               <h3 style={{ margin: 0 }}>Room Occupancy</h3>
               <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
@@ -718,7 +718,7 @@ export default function ManagerDashboard() {
           </div>
 
           {/* Recent activity */}
-          <div className="panel" style={{ flex: 1 }}>
+          <div className="panel" data-tour="g-dashboard-mgr-feed" style={{ flex: 1 }}>
             <h3 style={{ margin: '0 0 8px' }}>Recent Activity</h3>
             {recentActivity.length === 0 ? (
               <div className="muted" style={{ fontSize: 12 }}>
@@ -759,7 +759,7 @@ export default function ManagerDashboard() {
 
       <div className="row" style={{ alignItems: 'stretch' }}>
         {/* Reservations panel */}
-        <div className="panel" style={{ flex: 2, minWidth: 380 }}>
+        <div className="panel" data-tour="g-dashboard-mgr-reservations" style={{ flex: 2, minWidth: 380 }}>
           <div
             style={{
               display: 'flex',
@@ -773,12 +773,12 @@ export default function ManagerDashboard() {
               <button className="icon" title="Refresh" onClick={load}>
                 <Icon name="refresh-cw" size={14} />
               </button>
-              <button className="icon" title="Print">
+              <button className="icon" title="Print" aria-label="Print" onClick={() => window.print()}>
                 <Icon name="printer" size={14} />
               </button>
             </div>
           </div>
-          <div className="tabs-pill" style={{ marginBottom: 8 }}>
+          <div className="tabs-pill" data-tour="g-dashboard-mgr-restabs" style={{ marginBottom: 8 }}>
             {RES_TABS.map((t) => (
               <button key={t} className={resTab === t ? 'active' : ''} onClick={() => setResTab(t)}>
                 {t}
@@ -867,7 +867,7 @@ export default function ManagerDashboard() {
         </div>
 
         {/* Today's Activity panel */}
-        <div className="panel" style={{ flex: 1.5, minWidth: 320 }}>
+        <div className="panel" data-tour="g-dashboard-mgr-activity" style={{ flex: 1.5, minWidth: 320 }}>
           <div
             style={{
               display: 'flex',
@@ -881,7 +881,7 @@ export default function ManagerDashboard() {
               <Icon name="refresh-cw" size={14} />
             </button>
           </div>
-          <div className="tabs-pill" style={{ marginBottom: 12 }}>
+          <div className="tabs-pill" data-tour="g-dashboard-mgr-acttabs" style={{ marginBottom: 12 }}>
             {ACTIVITY_TABS.map((t) => (
               <button key={t} className={actTab === t ? 'active' : ''} onClick={() => setActTab(t)}>
                 {t}
@@ -965,7 +965,7 @@ export default function ManagerDashboard() {
       </div>
 
       {/* 14 Day Outlook */}
-      <div className="panel">
+      <div className="panel" data-tour="g-dashboard-mgr-outlook">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>14 Day Outlook</h3>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -1071,7 +1071,7 @@ export default function ManagerDashboard() {
 
         {/* Colour means nothing without a key, and the key is what turns this
             from decoration back into data. */}
-        <div className="heat-legend">
+        <div className="heat-legend" data-tour="g-dashboard-mgr-legend">
           <span className="muted">Share of the room type already sold</span>
           {HEAT_LEGEND.map((l) => (
             <span key={l.label} className="heat-legend-item">

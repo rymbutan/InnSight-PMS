@@ -220,7 +220,7 @@ export default function Arrivals() {
         <div className="panel-head">
           <h3>Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}</h3>
           {/* The range switcher sits in the panel header, top right. */}
-          <div className="seg-rect" role="group" aria-label="Arrival window">
+          <div className="seg-rect" role="group" aria-label="Arrival window" data-tour="g-arrivals-range">
             {[
               ['today', 'Today'],
               ['week', 'Week'],
@@ -259,7 +259,7 @@ export default function Arrivals() {
             }
           />
         ) : (
-          <table>
+          <table data-tour="g-arrivals-table">
             <thead>
               <tr>
                 <th className="t-c"></th>
@@ -341,7 +341,7 @@ export default function Arrivals() {
         )}
       </div>
 
-      <div className="panel">
+      <div className="panel" data-tour="g-arrivals-inhouse">
         <h3>In-House Guests</h3>
         {inHouse.length === 0 && !loading ? (
           <EmptyState
@@ -418,7 +418,7 @@ export default function Arrivals() {
         )}
       </div>
 
-      <div className="panel">
+      <div className="panel" data-tour="g-arrivals-departures">
         <h3>Today's departures</h3>
         {departures.length === 0 && !loading ? (
           <EmptyState

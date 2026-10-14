@@ -369,7 +369,7 @@ function FrontOfficeDashboard() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-tour="g-dashboard-fo-head">
         <div>
           <h1>
             {new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
@@ -392,7 +392,7 @@ function FrontOfficeDashboard() {
               end in "not authorised" reads as the app being broken. Matches the
               guard on /reservations/new and on POST /api/reservations. */}
           {canBook && (
-            <button className="btn-cta" onClick={() => navigate('/reservations/new')}>
+            <button className="btn-cta" data-tour="g-dashboard-fo-create" onClick={() => navigate('/reservations/new')}>
               <Icon name="plus" size={14} style={{ marginRight: 6 }} />
               Create new reservation
             </button>
@@ -400,8 +400,8 @@ function FrontOfficeDashboard() {
         </div>
       </div>
 
-      <div className="kpi-row">
-        <div className="kpi-tile kpi-arrivals">
+      <div className="kpi-row" data-tour="g-dashboard-fo-kpis">
+        <div className="kpi-tile kpi-arrivals" data-tour="g-dashboard-fo-arrivals">
           <div>
             <div className="kpi-num">{data.arrivals.length}</div>
             <div className="kpi-label">Arrivals</div>
@@ -410,7 +410,7 @@ function FrontOfficeDashboard() {
             <Icon name="log-in" size={26} />
           </div>
         </div>
-        <div className="kpi-tile kpi-departures">
+        <div className="kpi-tile kpi-departures" data-tour="g-dashboard-fo-departures">
           <div>
             <div className="kpi-num">{data.departures.length}</div>
             <div className="kpi-label">Departures</div>
@@ -419,7 +419,7 @@ function FrontOfficeDashboard() {
             <Icon name="log-out" size={26} />
           </div>
         </div>
-        <div className="kpi-tile kpi-booked">
+        <div className="kpi-tile kpi-booked" data-tour="g-dashboard-fo-booked">
           <div>
             <div className="kpi-num">{occRoomCount}</div>
             <div className="kpi-label" title="Accommodations booked">
@@ -430,7 +430,7 @@ function FrontOfficeDashboard() {
         </div>
         {lastDay && (
           <>
-            <div className="kpi-tile">
+            <div className="kpi-tile" data-tour="g-dashboard-fo-audit">
               <div>
                 <div className="kpi-num">{(lastDay.occupancyPct ?? 0).toFixed(1)}%</div>
                 <div className="kpi-label" title="Occupancy (last audit)">
@@ -464,7 +464,7 @@ function FrontOfficeDashboard() {
 
       <div className="row" style={{ alignItems: 'stretch' }}>
         {/* Reservations panel */}
-        <div className="panel" style={{ flex: 2, minWidth: 380 }}>
+        <div className="panel" data-tour="g-dashboard-fo-reservations" style={{ flex: 2, minWidth: 380 }}>
           <div
             style={{
               display: 'flex',
@@ -480,7 +480,7 @@ function FrontOfficeDashboard() {
               </button>
             </div>
           </div>
-          <div className="tabs-pill" style={{ marginBottom: 8 }}>
+          <div className="tabs-pill" data-tour="g-dashboard-fo-restabs" style={{ marginBottom: 8 }}>
             {RES_TABS.map((t) => (
               <button key={t} className={resTab === t ? 'active' : ''} onClick={() => setResTab(t)}>
                 {t}
@@ -488,7 +488,7 @@ function FrontOfficeDashboard() {
             ))}
           </div>
           {(resTab === 'Arrivals' || resTab === 'Departures') && (
-            <div className="tabs-pill" style={{ marginBottom: 8, gap: 12 }}>
+            <div className="tabs-pill" data-tour="g-dashboard-fo-when" style={{ marginBottom: 8, gap: 12 }}>
               {['Today', 'Tomorrow'].map((w) => (
                 <button key={w} className={resWhen === w ? 'active' : ''} onClick={() => setResWhen(w)}>
                   {w}
@@ -569,7 +569,7 @@ function FrontOfficeDashboard() {
         </div>
 
         {/* Today's Activity panel */}
-        <div className="panel" style={{ flex: 1.5, minWidth: 320 }}>
+        <div className="panel" data-tour="g-dashboard-fo-activity" style={{ flex: 1.5, minWidth: 320 }}>
           <div
             style={{
               display: 'flex',
@@ -583,7 +583,7 @@ function FrontOfficeDashboard() {
               <Icon name="refresh-cw" size={14} />
             </button>
           </div>
-          <div className="tabs-pill" style={{ marginBottom: 12 }}>
+          <div className="tabs-pill" data-tour="g-dashboard-fo-acttabs" style={{ marginBottom: 12 }}>
             {ACTIVITY_TABS.map((t) => (
               <button key={t} className={actTab === t ? 'active' : ''} onClick={() => setActTab(t)}>
                 {t}
@@ -667,7 +667,7 @@ function FrontOfficeDashboard() {
       </div>
 
       {/* 14 Day Outlook */}
-      <div className="panel">
+      <div className="panel" data-tour="g-dashboard-fo-outlook">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>14 Day Outlook</h3>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -773,7 +773,7 @@ function FrontOfficeDashboard() {
 
         {/* Colour means nothing without a key, and the key is what turns this
             from decoration back into data. */}
-        <div className="heat-legend">
+        <div className="heat-legend" data-tour="g-dashboard-fo-legend">
           <span className="muted">Share of the room type already sold</span>
           {HEAT_LEGEND.map((l) => (
             <span key={l.label} className="heat-legend-item">

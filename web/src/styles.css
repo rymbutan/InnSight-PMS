@@ -1,21 +1,21 @@
 :root {
-  /* The app is rendered at zoom: 0.9 (see the note on `html` below) so it
-     looks 10% smaller everywhere. Zoom does NOT rescale what `vh` means —
+  /* The app is rendered at zoom: 0.7 (see the note on `html` below) so it
+     looks 30% smaller everywhere. Zoom does NOT rescale what `vh` means —
      Chromium resolves `100vh` against the real, already-zoomed-out
-     viewport and THEN shrinks that already-correct box by the same 0.9
-     again, so anything sized in plain `vh` ends up covering only ~90% of
+     viewport and THEN shrinks that already-correct box by the same 0.7
+     again, so anything sized in plain `vh` ends up covering only ~70% of
      the visible screen instead of 100%. That was the sidebar's rounded
      card (and every other viewport-pinned container: .rooms-fixed,
      .hk-side, .folio-side, .msg-wrap, the login/booking/pay full-page
      screens…) ending with bare page background under it.
-     var(--vh-full) is 100vh pre-compensated for that (÷0.9 = ×1.11111), so
+     var(--vh-full) is 100vh pre-compensated for that (÷0.7 = ×1.42857), so
      it lands on exactly the real viewport height after zoom shrinks it
      back down. USE THIS, NOT a literal `100vh`, anywhere a size is meant
      to reach the actual edge of the screen — a plain `100vh` will quietly
      reintroduce the shortfall. A subtracted plain px amount alongside it
      (padding, a fixed topbar height) needs no such adjustment — only the
      "fill the viewport" part of the sum does. */
-  --vh-full: 111.111vh;
+  --vh-full: 142.857vh;
   --bg: #f0f3f7;
   --panel: #ffffff;
   --border: #c5ccd8; /* was #e2e6ec — 1.25:1 on white, edge barely visible */
@@ -212,7 +212,7 @@ body,
   background: var(--bg);
   font-size: 14px;
 }
-/* Whole app rendered 10% smaller than the browser's own 100% — see
+/* Whole app rendered 30% smaller than the browser's own 100% — see
    var(--vh-full) at the top of :root for the `vh` compensation this
    requires everywhere a size means "the whole viewport". A `transform:
    scale()` on #root was tried instead of `zoom` here first, on the theory
@@ -224,12 +224,22 @@ body,
    need transform's position:fixed/overflow:auto restructuring of #root to
    avoid a phantom document scrollbar. */
 html {
-  zoom: 0.9;
+  zoom: 0.7;
+}
+/* Phones keep the milder 0.9: at 0.7 the 14px body text lands at ~10px,
+   too small to read on a handheld. --vh-full is re-compensated to match. */
+@media (max-width: 640px) {
+  :root {
+    --vh-full: 111.111vh;
+  }
+  html {
+    zoom: 0.9;
+  }
 }
 /* The same zoom quirk --vh-full exists for, on the other axis: `body`'s
    width, with no explicit size of its own, is "auto" — 100% of `html` —
    but that percentage is resolved INSIDE the zoomed coordinate space, where
-   html's box is already the pre-inflated 111.111% a `zoom: 0.9` needs to
+   html's box is already the pre-inflated 142.857% a `zoom: 0.7` needs to
    land on the real size after shrinking. The result measures ~11% wider
    than the real viewport (390px measured as ~433px). Harmless on desktop —
    whitespace absorbs it — but on a phone-width page with a table close to
@@ -4844,26 +4854,114 @@ tr.active td {
   gap: 8px;
   z-index: 2000;
 }
+/* Light theme: a white card. Dark theme restates the surface tokens below as
+   a charcoal card with a hairline border. The status colour appears ONLY on the
+   icon, so a toast never reads as a coloured banner. */
 .toast {
-  padding: 12px 16px;
-  border-radius: 6px;
+  --toast-bg: #ffffff;
+  --toast-border: #e2e8f0;
+  --toast-title: #0f172a;
+  --toast-body: #475569;
+  --toast-hover: #f1f5f9;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--toast-border);
+  background: var(--toast-bg);
+  color: var(--toast-body);
   font-size: 13px;
-  color: var(--on-accent);
-  min-width: 240px;
-  max-width: 360px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   animation: toast-in 0.2s ease-out;
 }
-.toast-success {
-  background: var(--green);
-  color: var(--on-green);
+html[data-theme='dark'] .toast {
+  --toast-bg: #1f1f1f;
+  --toast-border: #2f2f2f;
+  --toast-title: #f5f5f5;
+  --toast-body: #a3a3a3;
+  --toast-hover: #2b2b2b;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
-.toast-error {
-  background: var(--danger);
+.toast-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.toast-info {
-  background: #334155;
-  color: #ffffff; /* a dark chip in BOTH themes, so its text is white in both */
+.toast-icon {
+  display: inline-flex;
+  flex: none;
+}
+.toast-success .toast-icon {
+  color: #16a34a;
+}
+.toast-info .toast-icon {
+  color: #2563eb;
+}
+.toast-warning .toast-icon {
+  color: #d97706;
+}
+.toast-error .toast-icon {
+  color: #dc2626;
+}
+html[data-theme='dark'] .toast-success .toast-icon {
+  color: #4ade80;
+}
+html[data-theme='dark'] .toast-info .toast-icon {
+  color: #60a5fa;
+}
+html[data-theme='dark'] .toast-warning .toast-icon {
+  color: #fbbf24;
+}
+html[data-theme='dark'] .toast-error .toast-icon {
+  color: #f87171;
+}
+.toast-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--toast-title);
+}
+.toast-close {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--toast-body);
+  box-shadow: none;
+}
+.toast-close:hover {
+  background: var(--toast-hover);
+  color: var(--toast-title);
+}
+.toast-body {
+  margin: 4px 0 0 26px;
+  overflow-wrap: anywhere;
+}
+.toast-actions {
+  display: flex;
+  gap: 16px;
+  margin: 10px 0 0 26px;
+}
+.toast-actions button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--toast-title);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.toast-actions button:hover {
+  text-decoration: underline;
 }
 @keyframes toast-in {
   from {
@@ -4997,6 +5095,14 @@ tr.active td {
   font-size: 13px;
   color: var(--muted);
   line-height: 1.5;
+}
+.tour-pop .tour-try {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -8px 0 14px;
+  font-weight: 600;
+  color: var(--accent);
 }
 .tour-pop-actions {
   display: flex;
@@ -11464,15 +11570,13 @@ html[data-theme='dark'] .chat-launcher-pop {
 }
 
 .touch-stick {
+  /* Floating: left/top are set inline to wherever the thumb landed. */
   position: absolute;
-  left: max(18px, env(safe-area-inset-left, 0px));
-  bottom: max(18px, env(safe-area-inset-bottom, 0px));
   width: 104px; /* 2x STICK_RADIUS in TouchControls.jsx - keep them in step */
   height: 104px;
   display: grid;
   place-items: center;
-  pointer-events: auto;
-  touch-action: none;
+  pointer-events: none; /* the look layer owns the touch */
   -webkit-user-select: none;
   user-select: none;
 }
@@ -11530,8 +11634,7 @@ html[data-theme='dark'] .chat-launcher-pop {
 }
 /* Paused (a dialog is open over the room): the controls stay in place so the
    layout does not jump, but nothing on them responds. */
-.touch-controls[data-disabled] .touch-look,
-.touch-controls[data-disabled] .touch-stick {
+.touch-controls[data-disabled] .touch-look {
   pointer-events: none;
   opacity: 0.45;
 }

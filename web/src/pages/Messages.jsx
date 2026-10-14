@@ -197,6 +197,7 @@ export default function Messages() {
             </span>
           )}
           <button
+            data-tour="g-messages-sound"
             type="button"
             className="msg-sound-toggle"
             onClick={() => setSoundOn(!soundOn)}
@@ -215,8 +216,8 @@ export default function Messages() {
 
       <div className="msg-wrap">
         {/* ── Staff list ── */}
-        <aside className="msg-contacts">
-          <div className="msg-search">
+        <aside className="msg-contacts" data-tour="g-messages-contacts">
+          <div className="msg-search" data-tour="g-messages-search">
             <Icon name="search" size={15} strokeWidth={1.9} />
             <input
               value={filter}
@@ -268,7 +269,7 @@ export default function Messages() {
         </aside>
 
         {/* ── Conversation ── */}
-        <section className="msg-thread">
+        <section className="msg-thread" data-tour="g-messages-thread">
           {!peer ? (
             <EmptyState
               kind="inbox"
@@ -303,6 +304,7 @@ export default function Messages() {
                     work. Back rather than a fixed route, so you land where you
                     came from. */}
                 <button
+                  data-tour="g-messages-dock"
                   type="button"
                   className="btn-ghost msg-dock-btn"
                   title="Keep this conversation in a floating window while you work"
@@ -347,6 +349,7 @@ export default function Messages() {
               <form className="msg-composer" onSubmit={submit}>
                 {attachTypes.length > 0 && (
                   <button
+                    data-tour="g-messages-attach"
                     type="button"
                     className={`chat-attach-btn${pending ? ' is-on' : ''}`}
                     onClick={() => setPickerOpen(true)}
@@ -356,7 +359,7 @@ export default function Messages() {
                     <Icon name="paperclip" size={17} strokeWidth={1.9} />
                   </button>
                 )}
-                <div className={`msg-composer-field${blocked ? ' is-blocked' : ''}`}>
+                <div data-tour="g-messages-composer" className={`msg-composer-field${blocked ? ' is-blocked' : ''}`}>
                   <textarea
                     ref={taRef}
                     value={draft}

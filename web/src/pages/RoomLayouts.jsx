@@ -170,7 +170,7 @@ export default function RoomLayouts() {
               a specific room as it should NOT be. The choice lives in the URL so
               a reload — and this page reloads a lot while authoring — comes back
               to the tab you were on. */}
-          <div className="seg" role="tablist" aria-label="Editor">
+          <div className="seg" role="tablist" aria-label="Editor" data-tour="g-room-layouts-tabs">
             <button
               type="button"
               role="tab"
@@ -210,6 +210,7 @@ export default function RoomLayouts() {
               <button
                 type="button"
                 className="rt-add"
+                data-tour="g-room-layouts-add"
                 style={{ marginLeft: 'auto' }}
                 onClick={() => setAdding((v) => !v)}
                 aria-expanded={adding}
@@ -221,7 +222,7 @@ export default function RoomLayouts() {
             </div>
 
             {adding && (
-              <form onSubmit={createLayout} className="new-layout">
+              <form onSubmit={createLayout} className="new-layout" data-tour="g-room-layouts-form">
                 {/* Two ways in. A room type keys the layout to something the
                     property actually rents, so the sim serves it to those rooms;
                     a free name is for authoring a room that does not exist as a
@@ -321,7 +322,7 @@ export default function RoomLayouts() {
               </form>
             )}
 
-            <div className="tr-launch-grid">
+            <div className="tr-launch-grid" data-tour="g-room-layouts-cards">
               {TIERS.map((t) => {
                 const L = LAYOUTS[t.name];
                 return (

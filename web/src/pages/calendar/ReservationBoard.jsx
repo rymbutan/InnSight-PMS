@@ -341,7 +341,7 @@ export default function ReservationBoard({ startDate, days }) {
   }
 
   return (
-    <div onClick={() => setPopover(null)}>
+    <div onClick={() => setPopover(null)} data-tour="g-calendar-board">
       <CalendarShell
         days={days}
         cornerLabel="Room"

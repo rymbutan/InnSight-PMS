@@ -276,13 +276,13 @@ const POP_W = 320;
 const MEASURE_RETRIES = 30; // ~1.5s at 50ms apart — long enough for a route change plus first paint.
 const MEASURE_INTERVAL_MS = 50;
 
-// The app renders at `zoom: 0.9` (see the note on `html` in styles.css). A
+// The app renders at `zoom: 0.7` (0.9 on phones) (see the note on `html` in styles.css). A
 // DOMRect from getBoundingClientRect() already comes back in real, post-zoom
 // screen pixels — but every element THIS component positions (the mask, the
 // ring, the popover) is itself a descendant of that zoomed `html`, so the
 // browser zooms it AGAIN when it renders our inline `top`/`left`/`width`/
 // `height`. Left uncorrected, a target at real screen x=1545 gets a ring
-// painted at 1545 * 0.9 ≈ 1391 — visibly pointing at the wrong element.
+// painted at 1545 * 0.7 ≈ 1082 — visibly pointing at the wrong element.
 // Dividing by the zoom factor before handing a number to `style` cancels that
 // second pass out, so the ring ends up back at the real, measured position.
 function getZoomFactor() {
@@ -311,7 +311,16 @@ function computePopStyle(rect, zoom) {
   return { position: 'fixed', top: top / zoom, left: left / zoom };
 }
 
-export default function TutorialTour({ open, onFinish }) {
+// `guideSteps` turns this into a single-page walkthrough: when given, those steps
+// are used as-is instead of the app-wide chrome + every-page tour. A step is
+//   { target?: CSS selector, title, body, try?: string }
+// `target` may be omitted (centred card) or match nothing on screen (the same
+// centred card — a guide never breaks because a control is absent for this
+// role or this data). `try` makes the step INTERACTIVE: the highlighted control
+// is left clickable, the card shows the instruction, and clicking the control
+// moves on by itself. Reserve it for safe, reversible actions (open a filter,
+// switch a tab) — never for anything that writes data.
+export default function TutorialTour({ open, onFinish, guideSteps }) {
   const { hasRole, hasSection } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -324,6 +333,7 @@ export default function TutorialTour({ open, onFinish }) {
   // a role that cannot change mid-tour anyway.
   const steps = useMemo(() => {
     if (!open) return [];
+    if (guideSteps) return guideSteps;
     // Matches styles.css's own phone breakpoint (.mobile-tabbar's @media
     // (max-width: 640px)) exactly — this has to agree with the CSS or the
     // sidebar-vs-tab-bar choice below picks the one that's actually hidden.
@@ -351,11 +361,11 @@ export default function TutorialTour({ open, onFinish }) {
     });
     return [INTRO_STEP, ...chrome, ...pages, OUTRO_STEP];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, guideSteps]);
 
   useEffect(() => {
     if (open) setIndex(0);
-  }, [open]);
+  }, [open, guideSteps]);
 
   const step = steps[index];
 
@@ -380,6 +390,9 @@ export default function TutorialTour({ open, onFinish }) {
       if (cancelled) return;
       const el = resolveTarget(step.target);
       if (el) {
+        // A control further down a long page would be highlighted off-screen.
+        const r0 = el.getBoundingClientRect();
+        if (r0.bottom > window.innerHeight || r0.top < 0) el.scrollIntoView({ block: 'center' });
         setRect(el.getBoundingClientRect());
         return;
       }
@@ -392,16 +405,54 @@ export default function TutorialTour({ open, onFinish }) {
     attempt();
     function remeasure() {
       const el = resolveTarget(step.target);
-      if (el) setRect(el.getBoundingClientRect());
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      // Keep the previous state object when nothing moved, so the per-frame
+      // poll below doesn't re-render the tour 60 times a second.
+      setRect((prev) =>
+        prev && prev.top === r.top && prev.left === r.left && prev.width === r.width && prev.height === r.height
+          ? prev
+          : r
+      );
     }
     window.addEventListener('resize', remeasure);
     window.addEventListener('scroll', remeasure, true);
+    // The topbar reflows AFTER the first measurement (greeting text, the live
+    // badge and the user's name all settle late), which left the ring parked
+    // where the target used to be. Following the target every frame keeps the
+    // ring on it no matter what moves it.
+    let raf = requestAnimationFrame(function tick() {
+      remeasure();
+      raf = requestAnimationFrame(tick);
+    });
     return () => {
       cancelled = true;
+      cancelAnimationFrame(raf);
       window.removeEventListener('resize', remeasure);
       window.removeEventListener('scroll', remeasure, true);
     };
   }, [open, step, location.pathname]);
+
+  // Interactive step: the user performs the action on the real control and the
+  // tour follows. Capture phase, so it still fires if the control stops the
+  // event from bubbling.
+  const stepIndex = index;
+  useEffect(() => {
+    if (!open || !step?.try || !step.target) return undefined;
+    let timer;
+    function onClick(e) {
+      const el = resolveTarget(step.target);
+      if (el && el.contains(e.target)) {
+        timer = setTimeout(() => setIndex((i) => (i === stepIndex ? i + 1 : i)), 300);
+      }
+    }
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('click', onClick, true);
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, step, stepIndex]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -461,6 +512,7 @@ export default function TutorialTour({ open, onFinish }) {
           <div
             className="tour-ring"
             style={{
+              pointerEvents: step.try ? 'none' : undefined,
               top: z(rect.top - HOLE_PAD),
               left: z(rect.left - HOLE_PAD),
               width: z(rect.width + HOLE_PAD * 2),
@@ -483,6 +535,11 @@ export default function TutorialTour({ open, onFinish }) {
         </div>
         <h3>{step.title}</h3>
         <p>{step.body}</p>
+        {step.try && (
+          <p className="tour-try">
+            <Icon name="mouse-pointer" size={13} strokeWidth={2} /> Try it: {step.try}
+          </p>
+        )}
         <div className="tour-pop-actions">
           <button type="button" className="btn-ghost" onClick={() => onFinish?.()}>
             Skip

@@ -33,7 +33,7 @@ function MailHealthCard({ mail }) {
       : 'Email is not configured';
   const { name, address } = splitFrom(mail.from);
   return (
-    <div className="panel health-mail" role={ok ? undefined : 'status'}>
+    <div className="panel health-mail" role={ok ? undefined : 'status'} data-tour="g-health-mail">
       <div className="health-mail-head">
         <Icon name={ok ? 'mail' : 'alert-circle'} size={17} strokeWidth={1.9} />
         <span className="health-mail-title">{title}</span>
@@ -91,9 +91,9 @@ export default function Health() {
           either way, by design, so nothing else on the screen can say it. */}
       {data?.mail && <MailHealthCard mail={data.mail} />}
 
-      <div className="panel">
+      <div className="panel" data-tour="g-health-services">
         <div className="row" style={{ alignItems: 'center', marginBottom: 12 }}>
-          <div>
+          <div data-tour="g-health-overall">
             <div className="muted">Overall</div>
             <div>
               <span className={`badge ${data?.overall === 'up' ? 'clean' : 'dirty'}`}>
@@ -111,13 +111,13 @@ export default function Health() {
             </div>
           )}
           <div className="row-action">
-            <button onClick={load} disabled={loading}>
+            <button data-tour="g-health-refresh" onClick={load} disabled={loading}>
               {loading ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
         </div>
         {data?.services ? (
-          <table>
+          <table data-tour="g-health-table">
             <thead>
               <tr>
                 <th>Service</th>

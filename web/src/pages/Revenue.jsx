@@ -125,7 +125,7 @@ export default function Revenue() {
         <span className="muted">Trailing 30 days · forecast next 14</span>
       </div>
 
-      <div className="kpi-row">
+      <div className="kpi-row" data-tour="g-revenue-kpis">
         <div className="kpi-tile">
           <div>
             <div className="kpi-num">{totals.avgOcc.toFixed(1)}%</div>
@@ -153,7 +153,7 @@ export default function Revenue() {
       </div>
 
       <div className="row" style={{ alignItems: 'stretch' }}>
-        <div className="panel" style={{ flex: 2 }}>
+        <div className="panel" style={{ flex: 2 }} data-tour="g-revenue-forecast">
           <h3>Occupancy trend & 14-day forecast</h3>
           {occSeries.length < 2 ? (
             <EmptyState
@@ -179,7 +179,7 @@ export default function Revenue() {
             </>
           )}
         </div>
-        <div className="panel" style={{ flex: 1 }}>
+        <div className="panel" style={{ flex: 1 }} data-tour="g-revenue-source">
           <h3>Booking source mix</h3>
           {sourceMix.length === 0 ? (
             <EmptyState kind="inbox" title="No reservations yet" />
@@ -190,7 +190,7 @@ export default function Revenue() {
       </div>
 
       <div className="row" style={{ alignItems: 'stretch' }}>
-        <div className="panel" style={{ flex: 1 }}>
+        <div className="panel" style={{ flex: 1 }} data-tour="g-revenue-adr">
           <h3>ADR per day</h3>
           {adrSeries.length < 2 ? (
             <EmptyState kind="chart" title="No data" />
@@ -209,7 +209,7 @@ export default function Revenue() {
             />
           )}
         </div>
-        <div className="panel" style={{ flex: 1 }}>
+        <div className="panel" style={{ flex: 1 }} data-tour="g-revenue-revpar">
           <h3>RevPAR per day</h3>
           {revparSeries.length < 2 ? (
             <EmptyState kind="chart" title="No data" />
@@ -230,7 +230,7 @@ export default function Revenue() {
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel" data-tour="g-revenue-los">
         <h3>Length of stay distribution</h3>
         <BarChart
           data={Object.values(losDist)}
