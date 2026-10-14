@@ -21,7 +21,9 @@
 // silently stop moving while everything around it does.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const KINDS = ['furniture', 'wall', 'station'];
+import { uniqueStationKey } from './editorMath.js';
+
+export const KINDS =['furniture', 'wall', 'station'];
 
 /** Match the editor's own 2-decimal quantisation (see commit() / duplicateSel). */
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -144,7 +146,10 @@ export function duplicateAll(arrays, sel, offset = 0.4) {
       if (!src) continue;
       const [x, z] = readPos(src, kind);
       nextSel.push({ kind, i: list.length });
-      list.push(writePos(src, kind, x + offset, z + offset));
+      const copy = writePos(src, kind, x + offset, z + offset);
+      // A station's key identifies it to the sim; a clone must not share it.
+      if (kind === 'station') copy.key = uniqueStationKey(list);
+      list.push(copy);
     }
     next[kind] = list;
   }

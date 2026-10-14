@@ -4,6 +4,7 @@ const { verifyToken, requireRole } = require('../middleware/auth');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { validateScenario } = require('../lib/scenarioValidation');
+const { planCategoryCreate } = require('../lib/categoryRules');
 
 const MGMT = ['ADMIN', 'MANAGER']; // can view all staff results
 // INSPECTION is the room case study that replaced the turnover mini-games
@@ -55,17 +56,6 @@ const toneFor = (pct) => (pct >= 85 ? 'great' : pct >= 60 ? 'ok' : 'bad');
 
 const CATEGORY_ID = /^custom_[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
-// Derive an id from the label so a teacher never has to invent one, and the same
-// label always maps to the same category.
-function slugify(label) {
-  const slug = String(label)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40);
-  return slug ? `custom_${slug}` : '';
-}
-
 function readCategory(body) {
   const label = typeof body?.label === 'string' ? body.label.trim() : '';
   const why = typeof body?.why === 'string' ? body.why.trim() : '';
@@ -105,7 +95,16 @@ router.post('/training/categories', verifyToken, requireRole(...MGMT), async (re
     const parsed = readCategory(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
 
-    const id = typeof req.body?.id === 'string' && req.body.id ? req.body.id : slugify(parsed.label);
+    // An explicit id is an intentional update of that row. Without one the id is
+    // derived from the label, and that must never overwrite a different category
+    // that happens to share its slug (see planCategoryCreate).
+    let id = typeof req.body?.id === 'string' && req.body.id ? req.body.id : '';
+    if (!id) {
+      const rows = await prisma.inspectionCategory.findMany({ select: { id: true, label: true, active: true } });
+      const plan = planCategoryCreate(parsed.label, rows);
+      if (plan.error) return res.status(plan.status).json({ error: plan.error });
+      id = plan.id;
+    }
     if (!CATEGORY_ID.test(id)) {
       return res.status(400).json({ error: `Category id "${id}" must look like custom_<slug>.` });
     }

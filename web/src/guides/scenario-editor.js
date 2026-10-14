@@ -29,7 +29,7 @@ export default {
     {
       target: '[data-tour="g-scenario-editor-gizmo"]',
       title: 'Moving and turning things',
-      body: 'With an object selected, Move (M) and Rotate (R) show a gizmo on it. Rotation is horizontal only. The camera buttons on the left of this bar jump to a bird\'s-eye or default view, and Undo/Redo (Ctrl+Z / Ctrl+Y) cover your last 20 edits.',
+      body: 'With an object selected, Move (M) and Rotate (R) show a gizmo on it. Rotation is horizontal only. Objects that come from the room\'s built-in layout are locked: they can be turned but not moved, deleted or duplicated; only objects you add can. The camera buttons on the left of this bar jump to a bird\'s-eye or default view, and Undo/Redo (Ctrl+Z / Ctrl+Y) cover your last 20 edits.',
     },
     {
       target: '[data-tour="g-scenario-editor-tab-build"]',
@@ -40,7 +40,7 @@ export default {
     {
       target: '[data-tour="g-scenario-editor-add-select"]',
       title: 'Add or reposition objects',
-      body: 'Pick a prop (vacuum, mop bucket, chemicals, unmade bedding, luggage rack) or any room asset, then press "Add to room". Or select something already in the room and drag it, nudge it with the Placement controls (rotation, height off the floor, size), or swap it for a variant.',
+      body: 'Pick a room asset and press "Add to room"; objects you add can be dragged anywhere, duplicated and deleted. Objects already in the room are locked in place, but you can still turn them, change their height or size, swap them for a variant, or tag them as a fault or decoy with the Placement controls.',
     },
     {
       target: '[data-tour="g-scenario-editor-fault"]',
@@ -64,12 +64,12 @@ export default {
     {
       target: '[data-tour="g-scenario-editor-save"]',
       title: 'Save and preview',
-      body: 'A scenario needs a name and at least one fault. "Create scenario" saves it (Ctrl+S works too), and after that edits autosave. "Preview" runs the real inspection as a student with recording off, so it never touches anyone\'s record. Nothing autosaves before the first Create.',
+      body: 'A scenario needs a name and at least one fault. "Create scenario" saves it (Ctrl+S works too) as INACTIVE, and after that edits autosave. "Preview" runs the real inspection as a student with recording off, so it never touches anyone\'s record. Nothing autosaves before the first Create, and you are asked before closing, opening another scenario, starting a new one or changing the tier would discard unsaved work.',
     },
     {
       target: '[data-tour="g-scenario-editor-saved"]',
       title: 'Activate, disable, edit or delete',
-      body: 'Each saved scenario can be Activated or Disabled. Only active ones may be handed to students inspecting rooms of that tier; with none active, they get generated faults instead. "Edit" reopens one, and the trash button deletes it for good. The "+ New Scenario" button starts a blank one.',
+      body: 'A new scenario starts inactive, so a half-built one never reaches students: press Activate when it is ready. Each saved scenario can be Activated or Disabled. Only active ones may be handed to students inspecting rooms of that tier, and edits to an active scenario autosave straight to them (the toolbar says "Live"). With none active, students get generated faults instead. "Edit" reopens one, and the trash button deletes it for good. The "+ New Scenario" button starts a blank one.',
     },
   ],
 };

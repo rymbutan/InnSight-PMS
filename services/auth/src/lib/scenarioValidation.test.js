@@ -426,3 +426,24 @@ test('a condition must be text, and short enough to fit beside the answers', () 
 test('a tag with no condition is still fine', () => {
   assert.equal(validateScenario(withTag({ ref: 'r', defectId: 'lived_in' })).ok, true);
 });
+
+// ── Created inactive ────────────────────────────────────────────────────────
+
+test('a new scenario may be created inactive (the editor does this)', () => {
+  const r = validateScenario({
+    name: 'n', roomTier: 'Standard', furniture: [], anchors: [], swaps: {}, added: [], tags: [],
+    active: false,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.data.active, false);
+});
+
+test('a saved model prop with a tag round-trips through validation', () => {
+  const r = validateScenario({
+    name: 'n', roomTier: 'Standard', furniture: [], anchors: [],
+    swaps: { 'bed@0,0': { ry: 1.57 } },
+    added: [{ id: 'o1', model: 'sofa', pos: [1, 2], ry: 0, y: 0.5, scale: [1.2, 1.2, 1.2] }],
+    tags: [{ ref: 'o1', defectId: 'blocked_path', label: 'Sofa' }, { ref: 'bed@0,0', defectId: null, label: 'Bed' }],
+  });
+  assert.equal(r.ok, true);
+});
