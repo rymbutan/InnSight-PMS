@@ -5,6 +5,7 @@ import Avatar from '../components/Avatar';
 import EmptyState from '../components/EmptyState';
 import StatusPill from '../components/StatusPill';
 import Icon from '../components/Icon';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import ShareRecordDialog from '../components/ShareRecordDialog';
 import { guestRef } from '../lib/recordRefs';
 import { labelize } from '../lib/labels';
@@ -710,9 +711,7 @@ export default function Guests() {
 
           <h4 className="guest-sub" data-tour="g-guests-history">Booked reservations</h4>
           {history.loading ? (
-            <div className="loading-row">
-              <span className="spinner" /> Loading…
-            </div>
+            <SkeletonTableBlock rows={3} cols={5} label="Loading reservations" />
           ) : history.reservations.length === 0 ? (
             <p className="muted" style={{ fontSize: 12.5 }}>
               No reservations on file.

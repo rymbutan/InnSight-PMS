@@ -9,6 +9,7 @@ import StatusPill from '../components/StatusPill';
 import FilterPanel, { FilterField, FilterPill } from '../components/FilterPanel';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import Autocomplete from '../components/Autocomplete';
 import { labelize } from '../lib/labels';
 
@@ -354,9 +355,7 @@ export default function Reservations() {
         </div>
 
         {loading ? (
-          <div className="loading-row">
-            <span className="spinner" /> Loading…
-          </div>
+          <SkeletonTableBlock rows={10} cols={11} label="Loading reservations" />
         ) : filtered.length === 0 ? (
           <EmptyState
             kind="search"
