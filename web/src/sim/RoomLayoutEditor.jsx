@@ -1060,11 +1060,11 @@ export default function RoomLayoutEditor({
           <button
             onClick={guide.start}
             className="tool-btn"
-            title="Guide for this editor"
+            title="Guided tour of this editor"
             data-tour="g-layout-editor-guide"
-            aria-label="Guide for this editor"
+            aria-label="Guided tour of this editor"
           >
-            <Icon name="help-circle" size={16} strokeWidth={1.9} />
+            <Icon name="graduation-cap" size={18} strokeWidth={1.9} />
           </button>
         </div>
       </div>
@@ -1092,8 +1092,9 @@ export default function RoomLayoutEditor({
         )}
         <div
           style={{
-            width: 250,
+            width: 280,
             flex: 'none',
+            minWidth: 0,
             background: 'var(--panel)',
             display: leftOpen ? 'flex' : 'none',
             flexDirection: 'column',
@@ -1111,7 +1112,10 @@ export default function RoomLayoutEditor({
               justifyContent: 'space-between',
             }}
           >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span
+              title={`Layout editor · ${typeName}`}
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}
+            >
               Layout editor · {typeName}
             </span>
             <span style={{ display: 'flex', gap: 2, flex: 'none' }}>
@@ -1269,182 +1273,184 @@ export default function RoomLayoutEditor({
             flexDirection: 'column',
           }}
         >
-          <Canvas
-            shadows
-            dpr={[1, 2]}
-            camera={{ position: [0, 13, 12], fov: 50, near: 0.1, far: 120 }}
-            // WebGL cannot read a CSS variable, so the stage colour is resolved
-            // from the live computed style once here and again whenever the theme
-            // flips (see the effect above). `--stage` is the same token the app's
-            // other 3D surface uses, so the backdrop behind the room matches the
-            // rest of the product in both themes and under a custom accent.
-            onCreated={({ gl }) => {
-              glRef.current = gl;
-              gl.setClearColor(stageColor());
-            }}
-            onPointerMissed={() => {
-              if (draggingRef.current) return;
-              setSel([]);
-            }}
-          >
-            <Env room={room} walls={walls} />
-            {furniture.map((it, i) => (
-              <group
-                key={`f${i}`}
-                ref={(el) => {
-                  if (el) refs.furniture.current[i] = el;
-                }}
-                position={[it.pos[0], itemY(it), it.pos[1]]}
-                rotation={[0, it.ry || 0, 0]}
-                scale={it.scale || [1, 1, 1]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  pick('furniture', i, e);
-                }}
-              >
-                <GLBoundary fallback={null}>
-                  <FixtureBody item={it} />
-                </GLBoundary>
-              </group>
-            ))}
-            {walls.map((w, i) => (
-              <group
-                key={`w${i}`}
-                ref={(el) => {
-                  if (el) refs.wall.current[i] = el;
-                }}
-                position={[w.p[0], (room.h ?? 3) / 2, w.p[1]]}
-                rotation={[0, w.ry || 0, 0]}
-                scale={[1, 1, 1]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  pick('wall', i, e);
-                }}
-              >
-                <RoundedBox args={[w.w, room.h ?? 3, w.d]} radius={0.01}>
-                  <meshStandardMaterial color={w.c || '#cdb391'} />
-                </RoundedBox>
-              </group>
-            ))}
-            {stations.map((s, i) => (
-              <group
-                key={`s${i}`}
-                ref={(el) => {
-                  if (el) refs.station.current[i] = el;
-                }}
-                // Group sits at the station's real height; the ring is offset a hair
-                // above the group origin so a floor station (y=0) still reads, and the
-                // gizmo's Y drag maps 1:1 to the stored `y` with no drift.
-                position={[s.pos[0], s.y ?? 0, s.pos[1]]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  pick('station', i, e);
-                }}
-              >
-                <mesh rotation-x={-Math.PI / 2} position-y={0.04}>
-                  <ringGeometry args={[0.42, 0.6, 32]} />
-                  <meshBasicMaterial
-                    color={has(sel, 'station', i) ? warnColor : '#38bdf8'}
-                    transparent
-                    opacity={0.7}
-                    side={THREE.DoubleSide}
-                  />
-                </mesh>
-                <mesh position={[0, 0.5, 0]}>
-                  <sphereGeometry args={[0.08, 10, 10]} />
-                  <meshBasicMaterial color="#38bdf8" />
-                </mesh>
-              </group>
-            ))}
-            {/* Amber floor rings mark a multi-selection. depthTest off so a marker
-              under the bed is still visible while you work. */}
-            {multi &&
-              sel.map((r) => {
-                const it = arrays[r.kind]?.[r.i];
-                if (!it) return null;
-                const [mx, mz] = r.kind === 'wall' ? it.p : it.pos;
-                return (
-                  <mesh key={`mk${r.kind}${r.i}`} rotation-x={-Math.PI / 2} position={[mx, 0.03, mz]}>
-                    <ringGeometry args={[0.3, 0.44, 24]} />
+          <div className="cv-unzoom">
+            <Canvas
+              shadows
+              dpr={[1, 2]}
+              camera={{ position: [0, 13, 12], fov: 50, near: 0.1, far: 120 }}
+              // WebGL cannot read a CSS variable, so the stage colour is resolved
+              // from the live computed style once here and again whenever the theme
+              // flips (see the effect above). `--stage` is the same token the app's
+              // other 3D surface uses, so the backdrop behind the room matches the
+              // rest of the product in both themes and under a custom accent.
+              onCreated={({ gl }) => {
+                glRef.current = gl;
+                gl.setClearColor(stageColor());
+              }}
+              onPointerMissed={() => {
+                if (draggingRef.current) return;
+                setSel([]);
+              }}
+            >
+              <Env room={room} walls={walls} />
+              {furniture.map((it, i) => (
+                <group
+                  key={`f${i}`}
+                  ref={(el) => {
+                    if (el) refs.furniture.current[i] = el;
+                  }}
+                  position={[it.pos[0], itemY(it), it.pos[1]]}
+                  rotation={[0, it.ry || 0, 0]}
+                  scale={it.scale || [1, 1, 1]}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    pick('furniture', i, e);
+                  }}
+                >
+                  <GLBoundary fallback={null}>
+                    <FixtureBody item={it} />
+                  </GLBoundary>
+                </group>
+              ))}
+              {walls.map((w, i) => (
+                <group
+                  key={`w${i}`}
+                  ref={(el) => {
+                    if (el) refs.wall.current[i] = el;
+                  }}
+                  position={[w.p[0], (room.h ?? 3) / 2, w.p[1]]}
+                  rotation={[0, w.ry || 0, 0]}
+                  scale={[1, 1, 1]}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    pick('wall', i, e);
+                  }}
+                >
+                  <RoundedBox args={[w.w, room.h ?? 3, w.d]} radius={0.01}>
+                    <meshStandardMaterial color={w.c || '#cdb391'} />
+                  </RoundedBox>
+                </group>
+              ))}
+              {stations.map((s, i) => (
+                <group
+                  key={`s${i}`}
+                  ref={(el) => {
+                    if (el) refs.station.current[i] = el;
+                  }}
+                  // Group sits at the station's real height; the ring is offset a hair
+                  // above the group origin so a floor station (y=0) still reads, and the
+                  // gizmo's Y drag maps 1:1 to the stored `y` with no drift.
+                  position={[s.pos[0], s.y ?? 0, s.pos[1]]}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    pick('station', i, e);
+                  }}
+                >
+                  <mesh rotation-x={-Math.PI / 2} position-y={0.04}>
+                    <ringGeometry args={[0.42, 0.6, 32]} />
                     <meshBasicMaterial
-                      color={warnColor}
+                      color={has(sel, 'station', i) ? warnColor : '#38bdf8'}
                       transparent
-                      opacity={0.9}
+                      opacity={0.7}
                       side={THREE.DoubleSide}
-                      depthTest={false}
                     />
                   </mesh>
-                );
-              })}
-            {/* Invisible pivot the group gizmo drives. Keyed so it remounts at the
+                  <mesh position={[0, 0.5, 0]}>
+                    <sphereGeometry args={[0.08, 10, 10]} />
+                    <meshBasicMaterial color="#38bdf8" />
+                  </mesh>
+                </group>
+              ))}
+              {/* Amber floor rings mark a multi-selection. depthTest off so a marker
+              under the bed is still visible while you work. */}
+              {multi &&
+                sel.map((r) => {
+                  const it = arrays[r.kind]?.[r.i];
+                  if (!it) return null;
+                  const [mx, mz] = r.kind === 'wall' ? it.p : it.pos;
+                  return (
+                    <mesh key={`mk${r.kind}${r.i}`} rotation-x={-Math.PI / 2} position={[mx, 0.03, mz]}>
+                      <ringGeometry args={[0.3, 0.44, 24]} />
+                      <meshBasicMaterial
+                        color={warnColor}
+                        transparent
+                        opacity={0.9}
+                        side={THREE.DoubleSide}
+                        depthTest={false}
+                      />
+                    </mesh>
+                  );
+                })}
+              {/* Invisible pivot the group gizmo drives. Keyed so it remounts at the
               fresh centroid after every commit. */}
-            {multi && <group key={pivotEpoch} ref={setPivotObj} position={[pivot[0], 0.01, pivot[1]]} />}
-            {multi && pivotObj && (
-              <TransformControls
-                object={pivotObj}
-                // Group SCALE is deliberately unsupported: a wall stores w/d while
-                // furniture stores a scale triple, so one gizmo handle has no single
-                // correct meaning and would silently deform walls.
-                mode={mode === 'scale' ? 'translate' : mode}
-                translationSnap={snap ? 0.1 : null}
-                rotationSnap={snap ? Math.PI / 12 : null}
-                showX={mode !== 'rotate'}
-                showZ={mode !== 'rotate'}
-                showY={mode === 'rotate'}
-                onMouseDown={groupDragStart}
-                onObjectChange={groupDragMove}
-                onMouseUp={groupDragEnd}
+              {multi && <group key={pivotEpoch} ref={setPivotObj} position={[pivot[0], 0.01, pivot[1]]} />}
+              {multi && pivotObj && (
+                <TransformControls
+                  object={pivotObj}
+                  // Group SCALE is deliberately unsupported: a wall stores w/d while
+                  // furniture stores a scale triple, so one gizmo handle has no single
+                  // correct meaning and would silently deform walls.
+                  mode={mode === 'scale' ? 'translate' : mode}
+                  translationSnap={snap ? 0.1 : null}
+                  rotationSnap={snap ? Math.PI / 12 : null}
+                  showX={mode !== 'rotate'}
+                  showZ={mode !== 'rotate'}
+                  showY={mode === 'rotate'}
+                  onMouseDown={groupDragStart}
+                  onObjectChange={groupDragMove}
+                  onMouseUp={groupDragEnd}
+                />
+              )}
+              {single &&
+                selObj() &&
+                (() => {
+                  const m = single.kind === 'station' ? 'translate' : mode; // stations move only; walls + furniture use the active mode
+                  return (
+                    <TransformControls
+                      object={selObj()}
+                      mode={m}
+                      translationSnap={snap ? 0.1 : null}
+                      rotationSnap={snap ? Math.PI / 12 : null}
+                      scaleSnap={snap ? 0.1 : null}
+                      showX={m !== 'rotate'}
+                      showZ={m !== 'rotate'}
+                      showY={
+                        m === 'translate' || m === 'rotate' || (m === 'scale' && single.kind === 'furniture')
+                      }
+                      onMouseDown={() => {
+                        draggingRef.current = true;
+                        snapshot();
+                        if (orbit.current) orbit.current.enabled = false;
+                      }}
+                      onMouseUp={() => {
+                        if (orbit.current) orbit.current.enabled = true;
+                        commit();
+                        setTimeout(() => {
+                          draggingRef.current = false;
+                        }, 0);
+                      }}
+                    />
+                  );
+                })()}
+              <OrbitControls
+                ref={orbit}
+                makeDefault
+                target={[0, 0.8, 0]}
+                maxPolarAngle={Math.PI / 2.05}
+                // Spelled out rather than left to the default, because the
+                // default for two fingers is DOLLY_PAN and the pan half of that
+                // fights the drag-to-move gesture on a selected fixture: a
+                // two-finger adjust would slide the camera at the same time. One
+                // finger orbits (look around the room), two fingers zoom and pan
+                // the view itself.
+                touches={{ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN }}
+                // A tablet's orbit is a coarse gesture; the mouse default
+                // overshoots badly when the whole travel is a thumb-sweep.
+                rotateSpeed={0.55}
+                zoomSpeed={0.8}
               />
-            )}
-            {single &&
-              selObj() &&
-              (() => {
-                const m = single.kind === 'station' ? 'translate' : mode; // stations move only; walls + furniture use the active mode
-                return (
-                  <TransformControls
-                    object={selObj()}
-                    mode={m}
-                    translationSnap={snap ? 0.1 : null}
-                    rotationSnap={snap ? Math.PI / 12 : null}
-                    scaleSnap={snap ? 0.1 : null}
-                    showX={m !== 'rotate'}
-                    showZ={m !== 'rotate'}
-                    showY={
-                      m === 'translate' || m === 'rotate' || (m === 'scale' && single.kind === 'furniture')
-                    }
-                    onMouseDown={() => {
-                      draggingRef.current = true;
-                      snapshot();
-                      if (orbit.current) orbit.current.enabled = false;
-                    }}
-                    onMouseUp={() => {
-                      if (orbit.current) orbit.current.enabled = true;
-                      commit();
-                      setTimeout(() => {
-                        draggingRef.current = false;
-                      }, 0);
-                    }}
-                  />
-                );
-              })()}
-            <OrbitControls
-              ref={orbit}
-              makeDefault
-              target={[0, 0.8, 0]}
-              maxPolarAngle={Math.PI / 2.05}
-              // Spelled out rather than left to the default, because the
-              // default for two fingers is DOLLY_PAN and the pan half of that
-              // fights the drag-to-move gesture on a selected fixture: a
-              // two-finger adjust would slide the camera at the same time. One
-              // finger orbits (look around the room), two fingers zoom and pan
-              // the view itself.
-              touches={{ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN }}
-              // A tablet's orbit is a coarse gesture; the mouse default
-              // overshoots badly when the whole travel is a thumb-sweep.
-              rotateSpeed={0.55}
-              zoomSpeed={0.8}
-            />
-          </Canvas>
+            </Canvas>
+          </div>
         </div>
 
         {/* ── RIGHT: inspector + scene lists ── */}
@@ -1964,27 +1970,29 @@ function ThumbForge({ keys }) {
     // Off-screen rather than `display: none` — a hidden canvas is never
     // composited and WebGL will not render into it.
     <div aria-hidden="true" style={{ position: 'fixed', left: -9999, top: 0, width: 96, height: 96 }}>
-      <Canvas
-        key={next}
-        camera={{ position: [1.9, 1.5, 2.3], fov: 45 }}
-        dpr={1}
-        // Required for toDataURL: without it the drawing buffer is cleared
-        // before we can read it back.
-        gl={{ preserveDrawingBuffer: true, alpha: true, antialias: true }}
-        onCreated={({ gl }) => gl.setClearAlpha(0)}
-      >
-        <ambientLight intensity={1.05} />
-        <directionalLight position={[3, 5, 3]} intensity={1.15} />
-        <hemisphereLight args={['#ffffff', '#444a55', 0.55]} />
-        <Suspense fallback={null}>
-          <GLBoundary key={next} fallback={null}>
-            <Bounds fit clip margin={1.25}>
-              <FixtureBody item={item} />
-            </Bounds>
-          </GLBoundary>
-        </Suspense>
-        <ThumbCapture itemKey={next} onCapture={publishThumb} />
-      </Canvas>
+      <div className="cv-unzoom">
+        <Canvas
+          key={next}
+          camera={{ position: [1.9, 1.5, 2.3], fov: 45 }}
+          dpr={1}
+          // Required for toDataURL: without it the drawing buffer is cleared
+          // before we can read it back.
+          gl={{ preserveDrawingBuffer: true, alpha: true, antialias: true }}
+          onCreated={({ gl }) => gl.setClearAlpha(0)}
+        >
+          <ambientLight intensity={1.05} />
+          <directionalLight position={[3, 5, 3]} intensity={1.15} />
+          <hemisphereLight args={['#ffffff', '#444a55', 0.55]} />
+          <Suspense fallback={null}>
+            <GLBoundary key={next} fallback={null}>
+              <Bounds fit clip margin={1.25}>
+                <FixtureBody item={item} />
+              </Bounds>
+            </GLBoundary>
+          </Suspense>
+          <ThumbCapture itemKey={next} onCapture={publishThumb} />
+        </Canvas>
+      </div>
     </div>
   );
 }
@@ -2226,20 +2234,22 @@ function PalettePreview({ addKey }) {
       >
         preview
       </span>
-      <Canvas camera={{ position: [1.9, 1.5, 2.3], fov: 45 }} dpr={[1, 1.5]}>
-        <ambientLight intensity={0.95} />
-        <directionalLight position={[3, 5, 3]} intensity={1.1} />
-        <hemisphereLight args={['#ffffff', '#444a55', 0.5]} />
-        <Suspense fallback={null}>
-          <GLBoundary key={addKey} fallback={null}>
-            <Bounds fit clip margin={1.35}>
-              <SpinGroup>
-                <FixtureBody item={item} />
-              </SpinGroup>
-            </Bounds>
-          </GLBoundary>
-        </Suspense>
-      </Canvas>
+      <div className="cv-unzoom">
+        <Canvas camera={{ position: [1.9, 1.5, 2.3], fov: 45 }} dpr={[1, 1.5]}>
+          <ambientLight intensity={0.95} />
+          <directionalLight position={[3, 5, 3]} intensity={1.1} />
+          <hemisphereLight args={['#ffffff', '#444a55', 0.5]} />
+          <Suspense fallback={null}>
+            <GLBoundary key={addKey} fallback={null}>
+              <Bounds fit clip margin={1.35}>
+                <SpinGroup>
+                  <FixtureBody item={item} />
+                </SpinGroup>
+              </Bounds>
+            </GLBoundary>
+          </Suspense>
+        </Canvas>
+      </div>
     </div>
   );
 }
@@ -2327,6 +2337,10 @@ function Num({ v, on, step = 0.1, min = null }) {
       }}
       style={{
         width: 56,
+        minWidth: 0,
+        flex: '1 1 56px',
+        maxWidth: 80,
+        boxSizing: 'border-box',
         background: 'var(--field)',
         color: 'var(--text)',
         border: '1px solid var(--border)',
@@ -2338,10 +2352,20 @@ function Num({ v, on, step = 0.1, min = null }) {
   );
 }
 function Row({ children }) {
-  return <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 5 }}>{children}</div>;
+  return (
+    <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 5, minWidth: 0 }}>
+      {children}
+    </div>
+  );
 }
 function Lbl({ children }) {
-  return <span style={{ fontSize: 11, color: 'var(--muted)', width: 34 }}>{children}</span>;
+  // flex: none + nowrap: a shrinkable 34px label was squeezed by its number
+  // box and the text ("length", "height") ran underneath the input.
+  return (
+    <span style={{ fontSize: 11, color: 'var(--muted)', flex: 'none', minWidth: 40, whiteSpace: 'nowrap' }}>
+      {children}
+    </span>
+  );
 }
 const swatch = {
   width: 40,

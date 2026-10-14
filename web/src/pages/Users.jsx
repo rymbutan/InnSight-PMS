@@ -581,25 +581,24 @@ export default function Users() {
                         No roles
                       </span>
                     )}
-                    {/* A MANAGER cannot edit an admin account's roles — see
-                        blockIfAdminTarget. */}
-                    {canManage && (isAdmin || !isAdminRow(u)) && (
-                      <button
-                        type="button"
-                        className="role-edit-btn"
-                        onClick={() => openRoleEditor(u)}
-                        title={`Edit roles for ${u.username}`}
-                      >
-                        <Icon name="pencil" size={11} />
-                        Edit
-                      </button>
-                    )}
                   </div>
                 </td>
                 <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
                 <td className="t-actions">
                   {canManage && (isAdmin || !isAdminRow(u)) ? (
                     <>
+                      {/* Moved here from beside the role capsules: it is an
+                          action on the row like the rest, and a MANAGER still
+                          cannot edit an admin account's roles — this whole group
+                          is already gated on that (see blockIfAdminTarget). */}
+                      <button
+                        type="button"
+                        className="small secondary"
+                        onClick={() => openRoleEditor(u)}
+                        title={`Edit roles for ${u.username}`}
+                      >
+                        <Icon name="pencil" size={11} /> Edit roles
+                      </button>{' '}
                       <button className="small secondary" onClick={() => openReset(u)}>
                         Reset Password
                       </button>{' '}

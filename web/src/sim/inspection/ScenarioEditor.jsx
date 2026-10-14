@@ -220,9 +220,9 @@ function ScenarioHelp({ onClose }) {
             A new scenario is created <strong>inactive</strong> and does not autosave until you press Create
             scenario; once it exists, edits autosave. It only reaches students after you press{' '}
             <strong>Activate</strong> in the saved list, and edits to an active scenario are live for them
-            immediately. Objects that come from the room&apos;s built-in layout can be turned, resized, swapped
-            and tagged, but not moved, deleted or duplicated; objects you add can do all three. You are asked
-            before unsaved work is discarded.
+            immediately. Objects that come from the room&apos;s built-in layout can be turned, resized,
+            swapped and tagged, but not moved, deleted or duplicated; objects you add can do all three. You
+            are asked before unsaved work is discarded.
           </p>
         </div>
       </div>
@@ -308,7 +308,9 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     // hydrateCategories swallows a failure (the built-ins still work), which left
     // the author looking at a stale list with no hint that it was stale.
     if (rows === null) {
-      toast.warning('Could not refresh the fault-category list — it may be out of date. Reload the page to retry.');
+      toast.warning(
+        'Could not refresh the fault-category list — it may be out of date. Reload the page to retry.'
+      );
       return false;
     }
     return true;
@@ -399,7 +401,11 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     if (!why) return toast.error('Say why it is a fault — the student sees this after grading.');
     // The server derives the id from the label, so a label that matches a
     // built-in or an existing category would collide with it. Say so up front.
-    const key = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const key = (v) =>
+      String(v || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
     if (BUILTIN_CATEGORIES.some((c) => key(c.label) === key(label) || key(c.title) === key(label))) {
       return toast.error(`"${label}" is already a built-in category — pick a different name.`);
     }
@@ -876,7 +882,8 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
       const ok = await confirm({
         title: 'Change room tier',
         message: `Switch to ${next}?`,
-        detail: 'The room is rebuilt from that tier’s layout; objects you added, edited or tagged will be discarded.',
+        detail:
+          'The room is rebuilt from that tier’s layout; objects you added, edited or tagged will be discarded.',
         confirmLabel: 'Change tier',
       });
       if (!ok) return;
@@ -904,7 +911,9 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
     setSaveState('idle');
     setSaveError('');
     if (isLegacy) {
-      toast.warning('This scenario uses an older format. You can preview it, but it cannot be edited or saved here.');
+      toast.warning(
+        'This scenario uses an older format. You can preview it, but it cannot be edited or saved here.'
+      );
     }
     if (droppedTags) {
       const one = droppedTags === 1;
@@ -1515,7 +1524,8 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
                           it the select fell back to showing "Not inspectable". */}
                       {sel.defectId && !offerableCategories().some((o) => o.id === sel.defectId) && (
                         <option value={sel.defectId}>
-                          {allCategories().find((c) => c.id === sel.defectId)?.label || sel.defectId} (retired)
+                          {allCategories().find((c) => c.id === sel.defectId)?.label || sel.defectId}{' '}
+                          (retired)
                         </option>
                       )}
                     </select>
@@ -1604,90 +1614,92 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
         </div>
 
         <div className="se-stage" data-tour="g-scenario-editor-stage">
-          <Canvas
-            shadows
-            dpr={[1, 2]}
-            camera={{ position: [7, 6, 7], fov: 50 }}
-            gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-            onCreated={({ gl }) => gl.setClearColor(stageColor())}
-            onPointerMissed={() => {
-              if (draggingRef.current) return;
-              setSelId(null);
-            }}
-          >
-            {/* No `observe`: that made Bounds continuously recompute the scene's
+          <div className="cv-unzoom">
+            <Canvas
+              shadows
+              dpr={[1, 2]}
+              camera={{ position: [7, 6, 7], fov: 50 }}
+              gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
+              onCreated={({ gl }) => gl.setClearColor(stageColor())}
+              onPointerMissed={() => {
+                if (draggingRef.current) return;
+                setSelId(null);
+              }}
+            >
+              {/* No `observe`: that made Bounds continuously recompute the scene's
                 bounding box and replay its fit/zoom animation on every geometry
                 change (adding, dragging, or resizing an object) — fighting the
                 user's own OrbitControls zoom and reading as a random zoom-out
                 while scrolling. Fit once on mount instead, like RoomLayoutEditor
                 already does. */}
-            <Bounds fit clip margin={1.1}>
-              <RoomShell layout={{ ...base, furniture: [] }} />
-              {objects.map((o) => (
-                <EditorObject
-                  key={o.id}
-                  item={o}
-                  selected={o.id === selId}
-                  onSelect={(id) => {
-                    if (draggingRef.current) return;
-                    setSelId(id);
+              <Bounds fit clip margin={1.1}>
+                <RoomShell layout={{ ...base, furniture: [] }} />
+                {objects.map((o) => (
+                  <EditorObject
+                    key={o.id}
+                    item={o}
+                    selected={o.id === selId}
+                    onSelect={(id) => {
+                      if (draggingRef.current) return;
+                      setSelId(id);
+                    }}
+                    onAttach={attachSelObj}
+                  />
+                ))}
+              </Bounds>
+              {sel && selObj && (
+                <TransformControls
+                  object={selObj}
+                  mode={mode}
+                  translationSnap={0.1}
+                  rotationSnap={Math.PI / 12}
+                  // Rotation here is HORIZONTAL only — yaw about Y, the axis that
+                  // turns a fixture to face a different way on the floor.
+                  //
+                  // It used to be the one axis you could NOT use. showY was false
+                  // whenever mode was 'rotate', while showX/showZ defaulted to true,
+                  // so the gizmo offered exactly the two rings that tumble an object
+                  // onto its side — and commitGizmo() persists `ry` and nothing else,
+                  // so those rotations were applied on screen and then silently
+                  // discarded on mouse-up. Showing only the Y ring makes the gizmo
+                  // match what can actually be saved. (RoomLayoutEditor already did
+                  // this correctly; this editor was the outlier.)
+                  showX={mode !== 'rotate' && !isLockedBase(sel)}
+                  showZ={mode !== 'rotate' && !isLockedBase(sel)}
+                  // Y is available to EVERYTHING in translate mode. It used to be
+                  // gated on `!!sel.prim`, so a model fixture had no vertical arrow at
+                  // all — and even if you found one, commitGizmo() only persisted `y`
+                  // for prims, so the height was discarded on mouse-up. itemY() has
+                  // always honoured `y` for models; only the authoring was missing.
+                  // A built-in fixture cannot be moved (its position is not persisted), so
+                  // the translate gizmo is hidden for it; rotate still works.
+                  showY={mode === 'rotate' || (mode === 'translate' && !isLockedBase(sel))}
+                  enabled={mode === 'rotate' || !isLockedBase(sel)}
+                  onMouseDown={() => {
+                    draggingRef.current = true;
+                    snapshot();
+                    if (orbit.current) orbit.current.enabled = false;
                   }}
-                  onAttach={attachSelObj}
+                  onMouseUp={() => {
+                    if (orbit.current) orbit.current.enabled = true;
+                    commitGizmo();
+                    setTimeout(() => {
+                      draggingRef.current = false;
+                    }, 0);
+                  }}
                 />
-              ))}
-            </Bounds>
-            {sel && selObj && (
-              <TransformControls
-                object={selObj}
-                mode={mode}
-                translationSnap={0.1}
-                rotationSnap={Math.PI / 12}
-                // Rotation here is HORIZONTAL only — yaw about Y, the axis that
-                // turns a fixture to face a different way on the floor.
-                //
-                // It used to be the one axis you could NOT use. showY was false
-                // whenever mode was 'rotate', while showX/showZ defaulted to true,
-                // so the gizmo offered exactly the two rings that tumble an object
-                // onto its side — and commitGizmo() persists `ry` and nothing else,
-                // so those rotations were applied on screen and then silently
-                // discarded on mouse-up. Showing only the Y ring makes the gizmo
-                // match what can actually be saved. (RoomLayoutEditor already did
-                // this correctly; this editor was the outlier.)
-                showX={mode !== 'rotate' && !isLockedBase(sel)}
-                showZ={mode !== 'rotate' && !isLockedBase(sel)}
-                // Y is available to EVERYTHING in translate mode. It used to be
-                // gated on `!!sel.prim`, so a model fixture had no vertical arrow at
-                // all — and even if you found one, commitGizmo() only persisted `y`
-                // for prims, so the height was discarded on mouse-up. itemY() has
-                // always honoured `y` for models; only the authoring was missing.
-                // A built-in fixture cannot be moved (its position is not persisted), so
-                // the translate gizmo is hidden for it; rotate still works.
-                showY={mode === 'rotate' || (mode === 'translate' && !isLockedBase(sel))}
-                enabled={mode === 'rotate' || !isLockedBase(sel)}
-                onMouseDown={() => {
-                  draggingRef.current = true;
-                  snapshot();
-                  if (orbit.current) orbit.current.enabled = false;
-                }}
-                onMouseUp={() => {
-                  if (orbit.current) orbit.current.enabled = true;
-                  commitGizmo();
-                  setTimeout(() => {
-                    draggingRef.current = false;
-                  }, 0);
-                }}
+              )}
+              <OrbitControls
+                ref={orbit}
+                makeDefault
+                // Same touch mapping as RoomLayoutEditor - the two editors must
+                // not need different fingers for the same job.
+                touches={{ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN }}
+                rotateSpeed={0.55}
+                zoomSpeed={0.8}
               />
-            )}
-            <OrbitControls
-              ref={orbit}
-              makeDefault
-              // Same touch mapping as RoomLayoutEditor - the two editors must
-              // not need different fingers for the same job.
-              touches={{ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN }}
-              rotateSpeed={0.55}
-              zoomSpeed={0.8}
-            />
-          </Canvas>
+            </Canvas>
+          </div>
           {/* The emoji is gone; the swatch is the same red the halo is drawn in,
             so the key matches what is on screen instead of approximating it
             with whatever red the reader's emoji font happens to use. */}

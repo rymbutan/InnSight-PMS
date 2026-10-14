@@ -29,7 +29,7 @@ export default {
     {
       target: '[data-tour="g-users-table"]',
       title: 'The user table',
-      body: 'Admins are pinned at the top, everyone else is A to Z. Status shows Active or Disabled, the role capsules show current access, and Last login shows the last sign-in. The Edit button beside the roles opens a dialog to change them, and nothing changes until you press Save roles.',
+      body: 'Admins are pinned at the top, everyone else is A to Z. Status shows Active or Disabled, the role capsules show current access, and Last login shows the last sign-in. The Edit roles button in the Actions column opens a dialog to change them, and nothing changes until you press Save roles.',
     },
     {
       target: '[data-tour="g-users-table"]',
