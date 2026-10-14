@@ -121,7 +121,6 @@ Sidebar label and page heading only. The /rooms route is deliberately
 unchanged -- renaming the path would break existing links and the deep
 links other pages build, and the URL is not the label.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```

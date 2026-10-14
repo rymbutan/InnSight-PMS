@@ -224,7 +224,6 @@ All three date params write to where.checkIn, so they merge into one object
 and the tighter upper bound wins -- assigning outright, as `to` used to,
 would silently drop a bound and widen the result set.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -398,7 +397,6 @@ Week and month are rolling windows, not calendar ones: "who is coming in the
 next 7 days" is the desk's question, and a calendar week answers it with one
 day of data on a Saturday.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1052,7 +1050,6 @@ Adds range=today|week|month, surfaces overdue arrivals in every range, and
 degrades to local stays with degraded:true rather than 500ing when the
 reservation service is unreachable.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1360,7 +1357,6 @@ date, since Week and Month show guests who are not due today.
 
 A degraded response renders a warning rather than a silently short list.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1527,7 +1523,6 @@ read .length or iterated the response directly, so the night audit would have
 recorded undefined as the arrival count for every business day it closed --
 a wrong number in a financial record with nothing reporting it.
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```

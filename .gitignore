@@ -17,3 +17,6 @@ backups/
 # Phase 2 had to clean out of web/src/sim/models/.
 web/src/**/*-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-].glb
 web/src/**/assets/
+
+# Local tool configuration
+.claude/
