@@ -109,10 +109,15 @@ test('applying a defect mutates the layout and never mutates the input', () => {
 test('room mismatch replaces the single bed with two twins', () => {
   const c = baseCase({ injected: ['room_mismatch'] });
   const out = applyDefects(layout(), c);
-  // `type`, not `model` — 'twin' has no registered .glb, only the procedural
-  // box geometry RoomFreeRoam's renderFix builds for it.
-  const beds = out.layout.furniture.filter((f) => f.type === 'twin');
+  // Two real single-bed .glb items, never the procedural `twin` box.
+  const beds = out.layout.furniture.filter((f) => f.fault === 'twin');
   assert.equal(beds.length, 2);
+  for (const b of beds) {
+    assert.equal(b.model, 'bedplain');
+    assert.equal(b.type, undefined);
+    assert.ok(b.size[0] < 1.2, 'a single bed, not a double');
+  }
+  assert.equal(out.layout.furniture.some((f) => f.type === 'twin' || f.model === 'twin'), false);
   assert.equal(
     out.layout.furniture.some((f) => f.model === 'bed'),
     false
@@ -140,19 +145,30 @@ test('blocked path leaves an obstruction in the walkway without moving furniture
   const out = applyDefects(layout(), c);
   const after = out.layout.furniture.find((f) => f.model === 'sofa').pos;
   assert.deepEqual(after, before, 'the sofa must not move');
-  const obstruction = out.layout.furniture.find((f) => f.prim === 'luggagerack');
+  const obstruction = out.layout.furniture.find((f) => f.fault === 'blocked');
   assert.ok(obstruction, 'an obstruction is placed in the walkway');
+  assert.equal(obstruction.model, 'divider');
+  assert.equal(obstruction.prim, undefined);
   assert.deepEqual(obstruction.pos, [0, 0.6]);
 });
 
-test('lingering equipment adds primitive props, not model lookups', () => {
+test('lingering equipment adds real model props, never primitive boxes', () => {
   const c = baseCase({ injected: ['lingering_equipment'] });
   const out = applyDefects(layout(), c);
-  const prims = out.layout.furniture.filter((f) => f.prim);
-  assert.ok(prims.length >= 2);
-  // A primitive prop must never masquerade as a .glb model, or the loader will
-  // be asked for an asset that does not exist.
-  for (const p of prims) assert.equal(p.model, undefined);
+  assert.equal(out.layout.furniture.some((f) => f.prim), false);
+  const added = out.layout.furniture.filter((f) => ['cart', 'supplies', 'chemicals'].includes(f.fault));
+  assert.ok(added.length >= 3);
+  for (const p of added) assert.ok(MODEL_FILES[p.model], `${p.model} is not a registered asset`);
+  assert.ok(added.some((f) => f.model === 'cleaningcart'));
+});
+
+test('lived-in swaps the bed for the messy-bed model in place', () => {
+  const c = baseCase({ injected: ['lived_in'] });
+  const out = applyDefects(layout(), c);
+  assert.equal(out.layout.furniture.some((f) => f.prim), false);
+  const bed = out.layout.furniture.find((f) => f.model === 'messybed');
+  assert.ok(bed);
+  assert.deepEqual(bed.pos, [0, -2]);
 });
 
 test('incomplete stock marks the minibar emptied rather than deleting it', () => {
@@ -192,7 +208,7 @@ test('an anchor is never labelled with the answer', () => {
 test('applying several defects at once keeps all of them present', () => {
   const c = baseCase({ injected: ['room_mismatch', 'blocked_path', 'incomplete_stock'] });
   const { layout: out, anchors } = applyDefects(layout(), c);
-  assert.equal(out.furniture.filter((f) => f.type === 'twin').length, 2);
+  assert.equal(out.furniture.filter((f) => f.fault === 'twin').length, 2);
   assert.equal(out.furniture.find((f) => f.model === 'minibar').emptied, true);
   assert.equal(anchors.filter((a) => a.defectId).length, 3);
 });
@@ -209,6 +225,7 @@ test('applying several defects at once keeps all of them present', () => {
 
 import { LAYOUTS } from '../roomLayouts.js';
 import { blockersOf } from '../roomCollision.js';
+import { MODEL_FILES } from '../modelSizes.js';
 
 const TIERS = ['Standard', 'Deluxe', 'Suite', 'Presidential'];
 const ALL = DEFECTS.map((d) => d.id);
@@ -319,6 +336,23 @@ test('every injected defect produces an anchor in every real tier', () => {
   }
 });
 
+test('no defect leaves a primitive or procedural-type prop in any real tier', () => {
+  for (const tier of TIERS) {
+    const base = LAYOUTS[tier].furniture.length;
+    const c = { ...bigParty(tier), injected: ALL };
+    const { layout: out, anchors } = applyDefects(LAYOUTS[tier], c);
+    assert.equal(out.furniture.some((f) => f.prim), false, `${tier} has a prim`);
+    assert.equal(out.furniture.some((f) => f.type === 'twin'), false, `${tier} has a twin box`);
+    for (const f of out.furniture.slice(base - 1)) {
+      if (f.fault) assert.ok(MODEL_FILES[f.model], `${tier}: ${f.fault} uses unknown model ${f.model}`);
+    }
+    for (const id of ALL) {
+      if (!DEFECTS.find((d) => d.id === id).appliesTo(c)) continue;
+      assert.ok(anchors.some((a) => a.defectId === id), `${tier}/${id} produced no anchor`);
+    }
+  }
+});
+
 test('an anchor label names the object that is actually there', () => {
   // blocked_path labelled a small brown luggage-rack primitive "Sofa", because it
   // searched for model 'sofa' while every tier declares 'sofa3'.
@@ -328,6 +362,11 @@ test('an anchor label names the object that is actually there', () => {
     const a = anchors.find((x) => x.defectId === 'blocked_path');
     const at = layout.furniture.find((f) => f.pos[0] === a.pos[0] && f.pos[1] === a.pos[1]);
     const realName = at?.model || at?.type || at?.prim || '(nothing)';
+    if (at?.fault === 'blocked') {
+      assert.equal(a.label, 'Bench');
+      assert.equal(realName, 'divider');
+      continue;
+    }
     assert.ok(
       a.label.toLowerCase().replace(/\s/g, '').includes(realName.toLowerCase().slice(0, 5)) ||
         realName.toLowerCase().includes(a.label.toLowerCase().replace(/\s/g, '').slice(0, 5)),

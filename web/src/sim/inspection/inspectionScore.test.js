@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 
 import { GOOD, ISSUES } from '../taskScore.js';
-import { scoreInspection, passesInspection } from './inspectionScore.js';
+import { scoreInspection, passesInspection, isCorrectChoice } from './inspectionScore.js';
 
 const c = { injected: ['room_mismatch', 'amenity_math'], roomTier: 'Standard', pax: 4 };
 const itemFor = (items, key) => items.find((i) => i.key === key);
@@ -164,4 +164,12 @@ test('a case with no injected defects still returns a precision item', () => {
   const items = scoreInspection({ caseFile: { injected: [] }, flags: [], elapsedSec: 5 });
   assert.equal(items.length, 1);
   assert.equal(items[0].key, 'precision');
+});
+
+test('isCorrectChoice: a fault needs its own category, a decoy needs "ok"', () => {
+  assert.equal(isCorrectChoice({ defectId: 'room_mismatch' }, 'room_mismatch'), true);
+  assert.equal(isCorrectChoice({ defectId: 'room_mismatch' }, 'blocked_path'), false);
+  assert.equal(isCorrectChoice({ defectId: 'room_mismatch' }, 'ok'), false);
+  assert.equal(isCorrectChoice({ defectId: null }, 'ok'), true);
+  assert.equal(isCorrectChoice({ defectId: null }, 'blocked_path'), false);
 });

@@ -14,9 +14,11 @@
 //     restocked" is the actual competency, so a miscategorisation is coached,
 //     not just marked wrong.
 //
-// Props with no .glb in the library (vacuum, mop bucket, rags, chemicals, a
-// rumpled duvet) are emitted as `{ prim: … }` entries and drawn with primitives
-// by InspectionShift — the same approach the old Inspection3D used.
+// Every prop is a real .glb `{ model, pos, ry }` item (cleaning cart, cleaning
+// supplies, bench, messy bed, single beds), so it renders through <Model> like
+// the rest of the room. Props this file ADDS carry a `fault` tag so anchors find
+// them without guessing by model key. `{ prim }` boxes survive only in
+// InspectionShift as a fallback for legacy stored scenarios.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { LAYOUTS, canonicalTier } from '../roomLayouts.js';
@@ -48,6 +50,11 @@ function cloneLayout(layout) {
 
 const findIdx = (furniture, model) => furniture.findIndex((f) => f.model === model);
 
+// Offset a point along an item's LOCAL x axis (three.js: ry rotates local x to
+// world [cos ry, -sin ry]), so side-by-side props follow the fixture's facing.
+const alongX = (pos, ry = 0, d = 0) => [pos[0] + Math.cos(ry) * d, pos[1] - Math.sin(ry) * d];
+const isBedModel = (f) => f.model === 'bed' || f.model === 'bedplain' || f.model === 'messybed';
+
 export const DEFECTS = [
   {
     id: 'room_mismatch',
@@ -66,24 +73,26 @@ export const DEFECTS = [
       if (i === -1) return next;
       const [x, z] = next.furniture[i].pos;
       const ry = next.furniture[i].ry;
-      // `type`, not `model`: 'twin' has no registered .glb (see MODEL_FILES in
-      // modelSizes.js) — FixtureBody only falls through to procedural geometry
-      // for a `type`-tagged item, so `model: 'twin'` rendered NEITHER a real
-      // asset NOR the procedural box bed already defined for it, just an empty
-      // gap where the beds should be. The student had nothing to inspect, so
-      // this defect could never be found — every pass on a two-adult booking
-      // failed and sent the room back to Vacant Dirty regardless of how the
-      // rest of the inspection went.
-      next.furniture.splice(
-        i,
-        1,
-        { type: 'twin', pos: [x - 0.95, z], ry },
-        { type: 'twin', pos: [x + 0.95, z], ry }
-      );
+      // Two SINGLE beds from the real bed asset, each half the double's width
+      // (a `size` on the item overrides the model's fit), side by side along the
+      // bed's own width axis. The old procedural `type: 'twin'` was a plain box.
+      const orig = next.furniture[i];
+      const sx = orig.scale?.[0] ?? 1;
+      const single = (d) => ({
+        model: 'bedplain',
+        pos: alongX([x, z], ry, d * sx),
+        ry,
+        size: [0.95, 0.55, 2.05],
+        ...(orig.scale ? { scale: [...orig.scale] } : {}),
+        ...(orig.y !== undefined ? { y: orig.y } : {}),
+        ...(orig.box ? { box: [0.95, 2.05] } : {}),
+        fault: 'twin',
+      });
+      next.furniture.splice(i, 1, single(-0.5), single(0.5));
       return next;
     },
     anchorAt(layout) {
-      const t = layout.furniture.filter((f) => f.type === 'twin');
+      const t = layout.furniture.filter((f) => f.fault === 'twin');
       if (!t.length) return null;
       const x = t.reduce((s, f) => s + f.pos[0], 0) / t.length;
       const z = t.reduce((s, f) => s + f.pos[1], 0) / t.length;
@@ -131,7 +140,7 @@ export const DEFECTS = [
     why: 'A large item has been left across the route to the bathroom and the door. Clear egress is a life-safety requirement, not a tidiness preference — it must be clear even when the room otherwise looks presentable.',
     feedback:
       'The issue here is obstruction, not the item itself being dirty or out of place decoratively. Anything that narrows the path to the bathroom or the exit is a safety fault and is escalated as one.',
-    anchorLabel: 'Luggage rack',
+    anchorLabel: 'Bench',
     apply(layout) {
       const next = cloneLayout(layout);
       // This used to search for `model: 'sofa'` and drag it into the walkway. No
@@ -141,13 +150,14 @@ export const DEFECTS = [
       //   1. A scenario must never RELOCATE a fixture. The room is the one the
       //      teacher laid out, and moving furniture into the through-route can
       //      wedge a student against real geometry.
-      //   2. The obstruction is a `prim`, which carries no collision box, so it
-      //      reads as blocking the walkway without ever being able to trap anyone.
-      next.furniture.push({ prim: 'luggagerack', pos: [0, 0.6], size: [1.1, 0.6, 0.6] });
+      //   2. The obstruction carries no collision `box`, so it reads as blocking
+      //      the walkway without ever being able to trap anyone.
+      // A low wooden bench (the `divider` asset) turned across the route.
+      next.furniture.push({ model: 'divider', pos: [0, 0.6], ry: Math.PI / 2, fault: 'blocked' });
       return next;
     },
     anchorAt(layout) {
-      const it = layout.furniture.find((f) => f.prim === 'luggagerack');
+      const it = layout.furniture.find((f) => f.fault === 'blocked');
       return it ? { pos: [...it.pos], size: [1.8, 1.4, 1.4] } : null;
     },
   },
@@ -157,32 +167,37 @@ export const DEFECTS = [
     category: 'lingering_equipment',
     title: 'Cleaning equipment or chemicals left behind',
     appliesTo: () => true,
-    why: 'The attendant left a vacuum and a mop bucket in the middle of the room and set cleaning chemicals down beside the guest toiletries. Chemicals next to items a guest puts on their skin is a contamination risk, and equipment left out means the room was never actually finished.',
+    why: 'The attendant left a housekeeping cart and a caddy of cleaning supplies in the middle of the room and set cleaning chemicals down beside the guest toiletries. Chemicals next to items a guest puts on their skin is a contamination risk, and equipment left out means the room was never actually finished.',
     feedback:
       'This is equipment left behind by staff, not the room being under-stocked or used by a guest. The distinction matters: it is a service-recovery issue with the attendant, and the chemicals beside the toiletries make it a safety escalation.',
     anchorLabel: 'Cleaning equipment',
     apply(layout) {
       const next = cloneLayout(layout);
       next.furniture.push(
-        { prim: 'vacuum', pos: [-0.9, -0.2], size: [0.35, 0.95, 0.45] },
-        { prim: 'bucket', pos: [-0.3, 0.3], size: [0.42, 0.5, 0.42] }
+        { model: 'cleaningcart', pos: [-0.9, -0.2], ry: 0.4, fault: 'cart' },
+        { model: 'cleaningsupply', pos: [-0.3, 0.3], ry: 0.8, fault: 'supplies' }
       );
       // Presidential declares `type: 'twinvanity'`, so matching only on
       // `model: 'vanity'` silently skipped the chemicals-beside-the-toiletries
       // half of this fault in that tier.
       const vanity = next.furniture.find((f) => f.model === 'vanity' || f.type === 'twinvanity');
       if (vanity) {
+        // Set on the counter at one end of the vanity, along ITS width axis. The
+        // counter rides the vanity's own vertical scale; 0.9 m is a best guess.
+        const sy = vanity.scale?.[1] ?? 1;
         next.furniture.push({
-          prim: 'chemicals',
-          pos: [vanity.pos[0] - 0.35, vanity.pos[1]],
-          size: [0.22, 0.34, 0.16],
-          y: 0.95,
+          model: 'cleaningsupply',
+          pos: alongX(vanity.pos, vanity.ry || 0, -0.35 * (vanity.scale?.[0] ?? 1)),
+          ry: vanity.ry || 0,
+          y: (vanity.y ?? 0) + 0.9 * sy,
+          h: 0.25,
+          fault: 'chemicals',
         });
       }
       return next;
     },
     anchorAt(layout) {
-      const v = layout.furniture.find((f) => f.prim === 'vacuum');
+      const v = layout.furniture.find((f) => f.fault === 'cart');
       return v ? { pos: [...v.pos], size: [1.4, 1.4, 1.4] } : null;
     },
   },
@@ -198,14 +213,14 @@ export const DEFECTS = [
     anchorLabel: 'Bed linen',
     apply(layout) {
       const next = cloneLayout(layout);
-      const bed = next.furniture.find((f) => f.model === 'bed' || f.model === 'twin');
+      // Swap the made bed for the authored messy-bed asset IN PLACE: same
+      // position, facing, scale and collision box, so nothing is moved.
+      const bed = next.furniture.find(isBedModel);
       if (bed) {
-        next.furniture.push({
-          prim: 'rumpled',
-          pos: [bed.pos[0], bed.pos[1] + 0.25],
-          size: [1.5, 0.22, 1.1],
-          y: 0.62,
-        });
+        bed.model = 'messybed';
+        if (bed.size) bed.size = [bed.size[0], 0.7, bed.size[2]];
+        bed.fault = bed.fault === 'twin' ? 'twin' : 'lived_in';
+        bed.messy = true;
       }
       // The curtain half of this cue is deliberately gone. It rotated the window
       // dressing by 0.5 rad, which read as broken geometry rather than as
@@ -217,9 +232,7 @@ export const DEFECTS = [
       return next;
     },
     anchorAt(layout) {
-      const r = layout.furniture.find((f) => f.prim === 'rumpled');
-      if (r) return { pos: [...r.pos], size: [2.0, 1.2, 1.6], y: 0.8 };
-      const bed = layout.furniture.find((f) => f.model === 'bed' || f.model === 'twin');
+      const bed = layout.furniture.find((f) => f.messy) || layout.furniture.find(isBedModel);
       return bed ? { pos: [...bed.pos], size: [2.0, 1.2, 1.6], y: 0.8 } : null;
     },
   },
