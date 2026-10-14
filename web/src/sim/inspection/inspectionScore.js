@@ -108,6 +108,18 @@ export function scoreInspection({ caseFile, flags = [], elapsedSec = 0 }) {
 }
 
 /**
+ * Was this one choice right? A real fault is right only when the student named
+ * its own category; a clean object (decoy) is right only when they said it was
+ * fine. Used for the instant red/green highlight on the item just judged.
+ *
+ * @param {{defectId?: string|null}} anchor
+ * @param {string} chosenCategory  a category id, or 'ok' for "no issue"
+ */
+export function isCorrectChoice(anchor, chosenCategory) {
+  return chosenCategory === (anchor?.defectId || NO_ISSUE);
+}
+
+/**
  * Whether a completed inspection is clean enough to sign the room off as
  * guest-ready: every injected defect was found AND correctly categorised, and
  * nothing clean was condemned. Partial credit (found but miscategorised, or a

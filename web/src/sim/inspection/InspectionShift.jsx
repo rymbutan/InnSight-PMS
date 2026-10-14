@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
 
 import { RoomShell, Player } from '../RoomFreeRoam';
@@ -13,7 +12,7 @@ import api from '../../api';
 import { makeCaseFile } from './caseFile';
 import { applyDefects } from './defects';
 import { fromScenario, pickScenario } from './scenario';
-import { scoreInspection } from './inspectionScore';
+import { scoreInspection, isCorrectChoice } from './inspectionScore';
 import Clipboard from './Clipboard';
 import FlagMenu from './FlagMenu';
 import Icon from '../../components/Icon';
@@ -30,39 +29,22 @@ import inspectionGuide from '../../guides/inspection-shift';
 // layer on top changed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Props with no .glb in the library are drawn as primitives, the same approach
-// the previous Inspection3D used for its lamp/trash/pillow markers.
-const PRIM_STYLE = {
-  vacuum: { color: '#334155', label: 'vacuum cleaner' },
-  bucket: { color: '#eab308', label: 'mop bucket' },
-  chemicals: { color: '#16a34a', label: 'cleaning chemicals' },
-  rumpled: { color: '#e2e8f0', label: 'unmade bedding' },
-  luggagerack: { color: '#78350f', label: 'luggage rack' },
-  bottle: { color: '#0ea5e9', label: 'minibar stock' },
-  pricecard: { color: '#f8fafc', label: 'price list' },
-};
+// Invisible hitboxes over the inspectable objects. They must not look like
+// targets until hovered, or the room would advertise its own answers.
+const VERDICT_GREEN = '#22c55e';
+const VERDICT_RED = '#ef4444';
 
-function Prim({ item }) {
-  const style = PRIM_STYLE[item.prim] || { color: '#94a3b8' };
-  const [w, h, d] = item.size || [0.3, 0.3, 0.3];
-  // Scale is applied to the GROUP so a resized prop keeps its authored footprint
-  // maths, and the group rides half a scaled height up so it stays on the floor.
-  const sy = item.scale?.[1] ?? 1;
+// The outline round a judged item. A component so the geometry is built once per
+// size, not on every render of the whole shift.
+function VerdictEdges({ size, color }) {
+  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(...size)), [size[0], size[1], size[2]]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <group
-      position={[item.pos[0], (item.y ?? 0) + (h * sy) / 2, item.pos[1]]}
-      rotation={[0, item.ry || 0, 0]}
-      scale={item.scale || [1, 1, 1]}
-    >
-      <RoundedBox args={[w, h, d]} radius={0.03} smoothness={2}>
-        <meshStandardMaterial color={style.color} roughness={0.75} />
-      </RoundedBox>
-    </group>
+    <lineSegments geometry={geo}>
+      <lineBasicMaterial color={color} />
+    </lineSegments>
   );
 }
 
-// Invisible hitboxes over the inspectable objects. They must not look like
-// targets until hovered, or the room would advertise its own answers.
 function Anchors({ anchors, resolved, hover, groupRef }) {
   return (
     <group ref={groupRef}>
@@ -70,6 +52,9 @@ function Anchors({ anchors, resolved, hover, groupRef }) {
         const done = resolved[a.id];
         const active = hover === a.id;
         const [w, h, d] = a.size || [1, 1, 1];
+        // Once judged, the box turns green if the call was right and red if it
+        // was wrong, and gets an outline so it still reads over a busy model.
+        const verdict = done ? (isCorrectChoice(a, done) ? VERDICT_GREEN : VERDICT_RED) : null;
         return (
           <group key={a.id} position={[a.pos[0], (a.y ?? 0) + h / 2, a.pos[1]]}>
             {/* No onClick and no cursor swapping any more. Under pointer lock
@@ -81,13 +66,14 @@ function Anchors({ anchors, resolved, hover, groupRef }) {
             <mesh userData={{ anchorId: a.id, done: !!done }}>
               <boxGeometry args={[w, h, d]} />
               <meshBasicMaterial
-                color={done ? '#22c55e' : '#38bdf8'}
+                color={verdict || '#38bdf8'}
                 transparent
-                opacity={done ? 0.16 : active ? 0.22 : 0.0}
+                opacity={done ? 0.3 : active ? 0.22 : 0.0}
                 depthWrite={false}
                 side={THREE.DoubleSide}
               />
             </mesh>
+            {verdict && <VerdictEdges size={[w, h, d]} color={verdict} />}
           </group>
         );
       })}
@@ -216,29 +202,29 @@ export default function InspectionShift({
   const builtLayout = built.layout;
   const anchors = built.anchors;
 
-  // Primitive props are rendered here, not by RoomShell: FixtureBody falls
-  // through to renderFix(item.type) for anything without a `model`, and these
-  // have neither.
-  const prims = useMemo(() => builtLayout.furniture.filter((f) => f.prim), [builtLayout]);
-
-  // A stocked minibar shows bottles and a price card; an emptied one shows
+  // A stocked minibar shows drink cans; an emptied one shows
   // neither. Without the stocked version to compare against, "empty" would be
   // invisible — absence is only legible next to presence.
   const stockProps = useMemo(() => {
     const bar = builtLayout.furniture.find((f) => f.model === 'minibar' || f.model === 'wetbar');
     if (!bar || bar.emptied) return [];
-    const [x, z] = bar.pos;
-    return [
-      { prim: 'bottle', pos: [x - 0.18, z], size: [0.09, 0.24, 0.09], y: 0.95 },
-      { prim: 'bottle', pos: [x - 0.02, z], size: [0.09, 0.24, 0.09], y: 0.95 },
-      { prim: 'bottle', pos: [x + 0.14, z], size: [0.09, 0.24, 0.09], y: 0.95 },
-      { prim: 'pricecard', pos: [x + 0.32, z], size: [0.16, 0.2, 0.02], y: 0.95 },
-    ];
+    // Drink cans (real .glb models) standing along the unit's own width axis,
+    // so they follow its facing.
+    const ry = bar.ry || 0;
+    const sx = bar.scale?.[0] ?? 1;
+    const y = (bar.y ?? 0) + 0.95 * (bar.scale?.[1] ?? 1);
+    return [-0.18, -0.02, 0.14].map((d, i) => ({
+      model: i === 1 ? 'canB' : 'canA',
+      pos: [bar.pos[0] + Math.cos(ry) * d * sx, bar.pos[1] - Math.sin(ry) * d * sx],
+      ry,
+      y,
+      h: 0.15,
+    }));
   }, [builtLayout]);
 
   const shellLayout = useMemo(
-    () => ({ ...builtLayout, furniture: builtLayout.furniture.filter((f) => !f.prim) }),
-    [builtLayout]
+    () => ({ ...builtLayout, furniture: [...builtLayout.furniture.filter((f) => !f.prim), ...stockProps] }),
+    [builtLayout, stockProps]
   );
 
   // Player derives proximity hover from `layout.stations`; feeding it the
@@ -453,9 +439,6 @@ export default function InspectionShift({
             onCreated={({ gl }) => gl.setClearColor(stageColor())}
           >
             <RoomShell layout={shellLayout} />
-            {[...prims, ...stockProps].map((p, i) => (
-              <Prim key={`p${i}`} item={p} />
-            ))}
             <Anchors anchors={anchors} resolved={resolved} hover={hover} groupRef={anchorsGroup} />
             <CrosshairAim groupRef={anchorsGroup} onAim={setHover} paused={paused} />
             <Player
