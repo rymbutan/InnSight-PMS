@@ -5,6 +5,8 @@ import {
   MAP_ZOOM_MAX,
   MAP_ZOOM_MIN,
   minUserZoom,
+  panBy,
+  screenScale,
   PITCH_MAX,
   PITCH_MIN,
   STICK_DEADZONE,
@@ -199,6 +201,34 @@ test('the map cannot be flicked completely out of view', () => {
   const farNeg = clampPan({ x: -99999, y: -99999, z: 1 }, viewport, content);
   assert.ok(farNeg.x >= -content.w, `x ${farNeg.x}`);
   assert.ok(farNeg.y >= -content.h, `y ${farNeg.y}`);
+});
+
+test('screenScale measures the page zoom from rect vs layout width', () => {
+  assert.ok(near(screenScale(700, 1000), 0.7));
+  assert.equal(screenScale(1000, 1000), 1); // engine reporting the rect pre-zoom
+  assert.equal(screenScale(0, 1000), 1); // unmeasured / hidden
+  assert.equal(screenScale(500, 0), 1);
+  assert.equal(screenScale(NaN, 100), 1);
+  assert.equal(screenScale(1, 1000), 1); // absurd ratio is ignored
+});
+
+test('panBy moves the content 1:1 with the finger under page zoom', () => {
+  const from = { x: 10, y: 20, z: 2 };
+  // Finger travels 70 screen px under zoom 0.7: translate must change by 100
+  // local px, which the zoom then draws as 70 screen px.
+  const out = panBy(from, 70, -35, 0.7);
+  assert.ok(near(out.x, 110) && near(out.y, -30) && out.z === 2);
+  assert.deepEqual(panBy(from, 5, 5), { x: 15, y: 25, z: 2 });
+  assert.deepEqual(panBy(from, 5, 5, 0), { x: 15, y: 25, z: 2 });
+});
+
+test('the map can be panned far in both axes when the drawing is taller than the panel', () => {
+  const viewport = { w: 1600, h: 1000 };
+  const content = { w: 1400, h: 3000 };
+  const bottom = clampPan({ x: 0, y: -99999, z: 1 }, viewport, content);
+  assert.equal(bottom.y, 80 - 3000); // last floor reachable, 80px of margin
+  const top = clampPan({ x: 0, y: 99999, z: 1 }, viewport, content);
+  assert.equal(top.y, 1000 - 80);
 });
 
 test('clampPan leaves an in-bounds view untouched and keeps the zoom', () => {

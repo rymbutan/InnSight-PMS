@@ -166,6 +166,34 @@ export function clampZoom(z, min = MAP_ZOOM_MIN, max = MAP_ZOOM_MAX) {
   return Math.max(min, Math.min(max, z));
 }
 
+/**
+ * How many SCREEN pixels one LAYOUT pixel of an element covers.
+ *
+ * The app runs under CSS `zoom` on <html> (0.7, 0.9 on phones). Under zoom,
+ * pointer clientX/Y and getBoundingClientRect() are in post-zoom screen pixels
+ * while clientWidth/offsetWidth, CSS lengths and `translate(Npx)` are in the
+ * element's own zoomed-local pixels, which the zoom then scales AGAIN. Feeding a
+ * finger delta straight into translate() therefore moves the content by only
+ * `zoom` of the finger distance (0.7 here) - the map lags the finger.
+ *
+ * rect.width / offsetWidth is that factor measured, not assumed: 0.7 where the
+ * engine reports the rect post-zoom, and 1 where it reports it pre-zoom (then
+ * the pointer coordinates are in the same space and no conversion is wanted
+ * either). Either way `screenDelta / scale` is local px. Anything unusable
+ * (unmeasured, hidden) is 1.
+ */
+export function screenScale(rectWidth, layoutWidth) {
+  if (!(rectWidth > 0) || !(layoutWidth > 0)) return 1;
+  const s = rectWidth / layoutWidth;
+  return Number.isFinite(s) && s > 0.05 && s < 20 ? s : 1;
+}
+
+/** A pan from `from` by a finger travel in screen px, converted to local px. */
+export function panBy(from, dxScreen, dyScreen, scale = 1) {
+  const k = scale > 0 ? scale : 1;
+  return { ...from, x: from.x + dxScreen / k, y: from.y + dyScreen / k };
+}
+
 /** Distance between two touch points, for pinch. */
 export function touchDistance(a, b) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);

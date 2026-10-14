@@ -8,6 +8,8 @@ import {
   focusView,
   initialView,
   minUserZoom,
+  panBy,
+  screenScale,
   touchDistance,
   touchMidpoint,
   zoomAbout,
@@ -123,13 +125,21 @@ const PanZoom = forwardRef(function PanZoom(
   function onPointerDown(e) {
     if (!enabled) return;
     const host = hostRef.current;
+    // A stale flag from a pan whose click never came (iOS Safari does not
+    // synthesise one after a drag) must not eat THIS tap.
+    swallowClick.current = false;
+    // Screen px per local px, measured now (see screenScale): the finger's
+    // clientX/Y deltas are screen px, translate() is zoomed-local px.
+    const scale = screenScale(host.getBoundingClientRect().width, host.offsetWidth);
     // A second finger does not need handling here: the pinch listener below
     // runs on the native touch events, and its `touchstart` clears this drag
     // the moment two points are down. Pinch is tracked there rather than from
     // pointer ids because the midpoint and the span need BOTH points at once,
     // and a pointer event only ever carries one of them.
-    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, from: viewRef.current };
-    host.setPointerCapture?.(e.pointerId);
+    // No pointer capture yet: capturing on press would retarget the click of a
+    // plain TAP to the capturing element and a room would never be selected.
+    // It is taken in onPointerMove once the gesture is a pan.
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, from: viewRef.current, scale, captured: false };
   }
 
   function onPointerMove(e) {
@@ -138,20 +148,25 @@ const PanZoom = forwardRef(function PanZoom(
     const d = drag.current;
     d.moved = Math.max(d.moved, Math.hypot(e.clientX - d.x, e.clientY - d.y));
     if (d.moved <= TAP_SLOP_PX) return; // still possibly a tap — do not move yet
-    const next = {
-      ...d.from,
-      x: d.from.x + (e.clientX - d.x),
-      y: d.from.y + (e.clientY - d.y),
-    };
-    setView(clampPan(next, viewport, content));
+    if (!d.captured) {
+      // Capture on the element that owns these handlers (the surface). It used
+      // to be captured on the HOST, a parent: move/up were then dispatched at
+      // the host, never reached the surface's React handlers, and a one-finger
+      // drag did nothing at all.
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      d.captured = true;
+    }
+    setView(clampPan(panBy(d.from, e.clientX - d.x, e.clientY - d.y, d.scale), viewport, content));
   }
 
   function onPointerUp(e) {
     if (!enabled || !drag.current || drag.current.id !== e.pointerId) return;
-    hostRef.current?.releasePointerCapture?.(e.pointerId);
+    if (drag.current.captured) e.currentTarget.releasePointerCapture?.(e.pointerId);
     // Over the slop it was a pan, so the click that the browser is about to
-    // synthesise must not reach the room under the finger.
+    // synthesise must not reach the room under the finger. Disarmed shortly
+    // after in case no click ever comes.
     swallowClick.current = drag.current.moved > TAP_SLOP_PX;
+    if (swallowClick.current) setTimeout(() => { swallowClick.current = false; }, 400);
     drag.current = null;
   }
 
@@ -191,7 +206,9 @@ const PanZoom = forwardRef(function PanZoom(
       if (pinch.current.dist <= 0) return;
       const mid = touchMidpoint(a, b);
       const r = el.getBoundingClientRect();
-      const anchor = { x: mid.x - r.left, y: mid.y - r.top };
+      // Fingers are in screen px, the view in zoomed-local px: convert.
+      const k = screenScale(r.width, el.offsetWidth);
+      const anchor = { x: (mid.x - r.left) / k, y: (mid.y - r.top) / k };
       const floor = minUserZoom({ w: el.clientWidth, h: el.clientHeight }, content);
       const target = clampZoom(pinch.current.from.z * (dist / pinch.current.dist), floor, MAP_ZOOM_MAX);
       setView(
