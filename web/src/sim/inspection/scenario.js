@@ -14,6 +14,7 @@ import { DEFECT_IDS, buildClipboard } from './caseFile.js';
 import { DEFECTS } from './defects.js';
 import { getRoomPlan } from '../roomLayouts.js';
 import { isKnownCategory } from './categories.js';
+import { fitAddedToLayout } from './randomScenario.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -93,6 +94,7 @@ export function fromScenario(scenario, { rng = Math.random, plan = null, reserva
   const legacy = Array.isArray(scenario?.furniture) && scenario.furniture.length > 0;
 
   let furniture;
+  let fit = { moved: [], dropped: [] };
   if (legacy) {
     furniture = scenario.furniture;
   } else {
@@ -122,7 +124,10 @@ export function fromScenario(scenario, { rng = Math.random, plan = null, reserva
         ...(to.y !== undefined ? { y: to.y } : {}),
       };
     });
-    for (const a of scenario?.added || []) furniture.push({ ...a, added: true });
+    // The layout is live, the scenario is a snapshot: re-check what it added
+    // against the room as it is now (see fitAddedToLayout).
+    fit = fitAddedToLayout(scenario?.added || [], base, scenario?.tags || []);
+    for (const a of fit.added) furniture.push({ ...a, added: true });
   }
 
   // Index by the ref the fixture had BEFORE any override. refOf() derives from
@@ -196,7 +201,13 @@ export function fromScenario(scenario, { rng = Math.random, plan = null, reserva
     scenarioName: scenario?.name || null,
   };
 
-  return { caseFile, layout: { ...base, furniture }, anchors };
+  return {
+    caseFile,
+    layout: { ...base, furniture },
+    anchors,
+    // Props the live layout no longer had room for, so a caller can say so.
+    fit: { moved: fit.moved, dropped: fit.dropped },
+  };
 }
 
 // Parties that unlock a booking-relative fault: a couple (room_mismatch) and a
