@@ -75,6 +75,17 @@ export const LABELS = {
   dishes: 'Used dishes',
   trashcan: 'Trash can',
   clutterpile: 'Pile of clutter',
+  canA: 'Drinks can',
+  canB: 'Drinks can (alt)',
+  rat: 'Rat',
+  toiletry: 'Toiletry bottle',
+  pottedplant: 'Potted plant',
+  accentchair: 'Accent chair',
+  sidetable: 'Side table',
+  ottoman: 'Ottoman',
+  playkitchen: 'Play kitchen',
+  orchid: 'Orchid',
+  desklamp: 'Desk lamp',
 };
 
 /** Label for a model key; falls back to the key so the UI never renders blank. */

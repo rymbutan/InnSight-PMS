@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert';
 
-import { generateRandomScenario, fitAddedToLayout, makeRng, LEVELS } from './randomScenario.js';
+import { generateRandomScenario, fitAddedToLayout, makeRng, LEVELS, FOOTPRINT } from './randomScenario.js';
+import { MODEL_FILES, renderedSize } from '../modelSizes.js';
+import { readFileSync } from 'node:fs';
 import { buildScenarioPayload, savableProblem } from './scenarioEdit.js';
 import { fromScenario, refOf, scenarioCounts } from './scenario.js';
 import { isKnownCategory } from './categories.js';
@@ -88,7 +90,8 @@ test('added props sit in the room, off solid furniture and off the doorstep', ()
     const boxes = solidBoxes(plan);
     for (let seed = 1; seed <= 150; seed += 1) {
       const r = roll(tier, seed, { level: 'hard' });
-      for (const o of r.objects.filter((x) => x.added && x.defectId !== 'blocked_path')) {
+      // Tabletop props (y > 0) stand ON a fixture, so they are meant to be inside its box.
+      for (const o of r.objects.filter((x) => x.added && x.defectId !== 'blocked_path' && !x.y)) {
         const [x, z] = o.pos;
         assert.ok(
           Math.abs(x) < plan.w / 2 && Math.abs(z) < plan.l / 2,
@@ -124,7 +127,8 @@ test('a fault is only offered when the layout owns the fixture', () => {
   };
   for (let seed = 1; seed <= 60; seed += 1) {
     const r = generateRandomScenario({ plan, baseObjects: seedObjects(plan), makeId, seed, level: 'hard' });
-    for (const o of r.objects) {
+    // Swaps only: an ADDED towel on the floor needs no towel fixture.
+    for (const o of r.objects.filter((x) => !x.added)) {
       assert.ok(!['fridgeempty', 'dirtytoilet', 'dirtysink', 'towelfloor', 'towel'].includes(o.model));
     }
   }
@@ -200,4 +204,115 @@ test('fit: fromScenario reports what it moved', () => {
   };
   const out = fromScenario(sc, { rng: makeRng(1) });
   assert.deepEqual(out.fit.moved, ['a']);
+});
+
+test('FOOTPRINT matches what the room actually renders', () => {
+  const metrics = JSON.parse(
+    readFileSync(new URL('../../../../scripts/model-metrics.json', import.meta.url), 'utf8')
+  ).models;
+  for (const [model, [w, d]] of Object.entries(FOOTPRINT)) {
+    const native = metrics[MODEL_FILES[model]];
+    assert.ok(native, `no measured size for ${model}`);
+    const [rw, , rd] = renderedSize({ model }, native);
+    assert.ok(Math.abs(rw - w) < 0.02 && Math.abs(rd - d) < 0.02, `${model}: table ${w}x${d}, rendered ${rw.toFixed(2)}x${rd.toFixed(2)}`);
+  }
+});
+
+test('a swap never grows into a wall, another fixture or out of the room', () => {
+  for (const tier of TIERS) {
+    for (let seed = 1; seed <= 80; seed += 1) {
+      const plan = LAYOUTS[tier];
+      const r = roll(tier, seed, { level: 'hard' });
+      const others = solidBoxes(plan);
+      r.objects.forEach((o, i) => {
+        const base = plan.furniture[i];
+        if (o.added || !base || o.model === base.model || !o.box || !FOOTPRINT[o.model] || !FOOTPRINT[base.model]) return;
+        const k = [Math.max(1, FOOTPRINT[o.model][0] / FOOTPRINT[base.model][0]), Math.max(1, FOOTPRINT[o.model][1] / FOOTPRINT[base.model][1])];
+        let [w, d] = [o.box[0] * (o.scale?.[0] ?? 1) * k[0], o.box[1] * (o.scale?.[2] ?? 1) * k[1]];
+        if (Math.abs(((o.ry ?? 0) % Math.PI + Math.PI) % Math.PI - Math.PI / 2) < 0.5) [w, d] = [d, w];
+        if (k[0] <= 1.05 && k[1] <= 1.05) return;
+        const [x, z] = o.pos;
+        assert.ok(Math.abs(x) + w / 2 <= plan.w / 2, `${tier}/${seed}: ${o.model} pokes out of the room`);
+        assert.ok(Math.abs(z) + d / 2 <= plan.l / 2, `${tier}/${seed}: ${o.model} pokes out of the room`);
+        const self = blockersOf([base])[0];
+        for (const b of others) {
+          if (b === self || b.every((v, j) => v === self[j])) continue;
+          const hit = x - w / 2 < b[1] && x + w / 2 > b[0] && z - d / 2 < b[3] && z + d / 2 > b[2];
+          assert.ok(!hit, `${tier}/${seed}: ${o.model} grows into ${b[4]}`);
+        }
+      });
+    }
+  }
+});
+
+test('carts are laid square to a wall or to the room, not at a random angle', () => {
+  let seen = 0;
+  for (const tier of TIERS) {
+    for (let seed = 1; seed <= 120; seed += 1) {
+      for (const o of roll(tier, seed, { level: 'hard' }).objects) {
+        if (!o.added || o.defectId === 'blocked_path' || o.model !== 'cleaningcart') continue;
+        seen += 1;
+        const off = Math.abs((o.ry % (Math.PI / 2) + Math.PI / 2) % (Math.PI / 2));
+        const dev = Math.min(off, Math.PI / 2 - off);
+        assert.ok(dev < 0.07, `${tier}/${seed}: ${o.model} at ry ${o.ry}`);
+      }
+    }
+  }
+  assert.ok(seen > 0, 'no long prop was ever generated');
+});
+
+test('the whole prop library is used: every clutter, tabletop and decoy asset turns up', () => {
+  const seen = new Set();
+  for (const tier of TIERS) {
+    for (let seed = 1; seed <= 300; seed += 1) {
+      for (const o of roll(tier, seed, { level: 'hard' }).objects) seen.add(o.model);
+    }
+  }
+  const expected = [
+    'dishes', 'trashcan', 'clutterpile', 'canA', 'canB', 'rat', 'towelfloor', 'toiletry', 'cleaningsupply',
+    'cleaningcart', 'dirtymattress', 'messybed', 'messybed2', 'pottedplant', 'accentchair', 'sidetable',
+    'ottoman', 'woodring', 'woodring2', 'playkitchen', 'orchid', 'desklamp',
+  ];
+  for (const m of expected) assert.ok(seen.has(m), `${m} was never generated`);
+});
+
+test('tabletop props rest on the surface they stand on, not in the floor or the air', () => {
+  let seen = 0;
+  for (const tier of TIERS) {
+    const plan = LAYOUTS[tier];
+    for (let seed = 1; seed <= 100; seed += 1) {
+      for (const o of roll(tier, seed, { level: 'hard' }).objects.filter((x) => x.added && x.y)) {
+        seen += 1;
+        const under = plan.furniture.find(
+          (f) => f.model && ['coffee', 'desk', 'nightstand', 'sidetable'].includes(f.model) && Math.hypot(f.pos[0] - o.pos[0], f.pos[1] - o.pos[1]) < 0.3
+        );
+        assert.ok(under, `${tier}/${seed}: ${o.model} floats at ${o.pos}`);
+        assert.ok(o.y >= 0.3 && o.y <= 1.05, `${tier}/${seed}: ${o.model} at height ${o.y}`);
+      }
+    }
+  }
+  assert.ok(seen > 0, 'no tabletop prop was ever generated');
+});
+
+test('re-rolling varies: consecutive rolls share few faults, and no story dominates', () => {
+  for (const tier of ['Deluxe', 'Presidential']) {
+    const count = {};
+    let shared = 0;
+    let total = 0;
+    let recent = [];
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const r = roll(tier, seed, { level: 'medium', recent });
+      const faultKeys = r.keys.filter((k) => !k.startsWith('decoy:'));
+      const prev = new Set((recent[0] || []).filter((k) => !k.startsWith('decoy:')));
+      shared += faultKeys.filter((k) => prev.has(k)).length;
+      total += faultKeys.length;
+      faultKeys.forEach((k) => (count[k] = (count[k] || 0) + 1));
+      recent = [r.keys, ...recent].slice(0, 2);
+    }
+    assert.ok(shared / total < 0.2, `${tier}: ${Math.round((100 * shared) / total)}% of faults repeat the last roll`);
+    const kinds = Object.keys(count).length;
+    assert.ok(kinds >= 10, `${tier}: only ${kinds} different faults in 200 rolls: ${JSON.stringify(count)}`);
+    const top = Math.max(...Object.values(count)) / total;
+    assert.ok(top < 0.2, `${tier}: one fault is ${Math.round(top * 100)}% of everything`);
+  }
 });

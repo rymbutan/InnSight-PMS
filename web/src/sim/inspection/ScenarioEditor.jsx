@@ -263,6 +263,8 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   const [randLevel, setRandLevel] = useState('medium');
   const [randBooking, setRandBooking] = useState(false);
   const [lastSeed, setLastSeed] = useState(null);
+  // The `keys` of the last two rolls, newest first — fed back so a re-roll varies.
+  const recentRolls = useRef([]);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   // idle | saving | saved | error — what the autosave is doing, mirrored into
@@ -604,7 +606,10 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
       seed,
       level: randLevel,
       includeBookingFaults: randBooking,
+      recent: recentRolls.current,
     });
+    // Remember the last two rolls so the next one leans away from them.
+    recentRolls.current = [r.keys, ...recentRolls.current].slice(0, 2);
     setObjects(r.objects);
     setSelId(null);
     setLastSeed(seed);
