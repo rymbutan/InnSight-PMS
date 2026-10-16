@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 
 const ToastCtx = createContext({ push: () => {} });
@@ -39,6 +39,34 @@ export function ToastProvider({ children }) {
     [dismiss]
   );
 
+  // api.js raises this when a request has been pending for several seconds, and
+  // lowers it once nothing is pending. One sticky notice, never stacked.
+  const slowId = useRef(null);
+  useEffect(() => {
+    const onSlow = (e) => {
+      if (e.detail?.slow) {
+        if (slowId.current) return;
+        const id = Math.random().toString(36).slice(2);
+        slowId.current = id;
+        setItems((prev) => [
+          ...prev,
+          {
+            id,
+            kind: 'warning',
+            title: 'Connection is slow',
+            msg: 'Your internet seems slow. Still loading — hang tight.',
+          },
+        ]);
+      } else if (slowId.current) {
+        const id = slowId.current;
+        slowId.current = null;
+        setItems((prev) => prev.filter((i) => i.id !== id));
+      }
+    };
+    window.addEventListener('innsight:slow-connection', onSlow);
+    return () => window.removeEventListener('innsight:slow-connection', onSlow);
+  }, []);
+
   const api = {
     push,
     success: (m, o) => push(m, { kind: 'success', ...o }),
@@ -54,13 +82,22 @@ export function ToastProvider({ children }) {
         {items.map((t) => {
           const k = KINDS[t.kind];
           return (
-            <div key={t.id} className={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : 'status'}>
+            <div
+              key={t.id}
+              className={`toast toast-${t.kind}`}
+              role={t.kind === 'error' ? 'alert' : 'status'}
+            >
               <div className="toast-head">
                 <span className="toast-icon">
                   <Icon name={k.icon} size={16} strokeWidth={2} />
                 </span>
                 <span className="toast-title">{t.title || k.title}</span>
-                <button type="button" className="toast-close" onClick={() => dismiss(t.id)} aria-label="Dismiss">
+                <button
+                  type="button"
+                  className="toast-close"
+                  onClick={() => dismiss(t.id)}
+                  aria-label="Dismiss"
+                >
                   <Icon name="x" size={14} />
                 </button>
               </div>

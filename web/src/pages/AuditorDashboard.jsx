@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { labelize } from '../lib/labels';
@@ -53,6 +54,8 @@ export default function AuditorDashboard() {
   const [folioTab, setFolioTab] = useState('Today');
   const [busyId, setBusyId] = useState(null);
 
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     try {
       const to = new Date();
@@ -75,6 +78,8 @@ export default function AuditorDashboard() {
       setFolios(folioRes.data);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setLoaded(true);
     }
   }
   useEffect(() => {
@@ -103,10 +108,7 @@ export default function AuditorDashboard() {
   const totalBookings = bookingSourceMix.reduce((s, x) => s + x.value, 0);
 
   const visibleFolios = useMemo(
-    () =>
-      folios
-        .filter((f) => inFolioRange(f.openedAt, folioTab))
-        .slice(0, 8),
+    () => folios.filter((f) => inFolioRange(f.openedAt, folioTab)).slice(0, 8),
     [folios, folioTab]
   );
 
@@ -154,9 +156,18 @@ export default function AuditorDashboard() {
       <div className="row" style={{ alignItems: 'stretch' }}>
         {/* Left column: channel mix, add-on revenue */}
         <div style={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
-          <div className="panel" data-tour="g-dashboard-aud-channels" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div
+            className="panel"
+            data-tour="g-dashboard-aud-channels"
+            style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+          >
             <div
-              style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                marginBottom: 8,
+              }}
             >
               <h3 style={{ margin: 0 }}>Booking Channels</h3>
               <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
@@ -186,9 +197,18 @@ export default function AuditorDashboard() {
             )}
           </div>
 
-          <div className="panel" data-tour="g-dashboard-aud-addons" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div
+            className="panel"
+            data-tour="g-dashboard-aud-addons"
+            style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+          >
             <div
-              style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                marginBottom: 4,
+              }}
             >
               <h3 style={{ margin: 0 }}>Add-on Revenue</h3>
               <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
@@ -249,9 +269,18 @@ export default function AuditorDashboard() {
             )}
           </div>
 
-          <div className="panel" data-tour="g-dashboard-aud-folios" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div
+            className="panel"
+            data-tour="g-dashboard-aud-folios"
+            style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+          >
             <div
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 8,
+              }}
             >
               <h3 style={{ margin: 0 }}>Folio</h3>
               <button className="icon" title="Refresh" onClick={load}>
@@ -276,11 +305,15 @@ export default function AuditorDashboard() {
               </thead>
               <tbody>
                 {visibleFolios.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="loading-row">
-                      No folios opened this {folioTab.toLowerCase()}.
-                    </td>
-                  </tr>
+                  loaded ? (
+                    <tr>
+                      <td colSpan={4} className="loading-row">
+                        No folios opened this {folioTab.toLowerCase()}.
+                      </td>
+                    </tr>
+                  ) : (
+                    <SkeletonRows rows={4} cols={4} />
+                  )
                 ) : (
                   visibleFolios.map((f) => (
                     <tr
@@ -292,7 +325,9 @@ export default function AuditorDashboard() {
                       <td className="table-link">{f.guestName || '—'}</td>
                       <td>{f.folioNumber}</td>
                       <td className="t-c">
-                        <span className={`badge ${String(f.status).toLowerCase()}`}>{labelize(f.status)}</span>
+                        <span className={`badge ${String(f.status).toLowerCase()}`}>
+                          {labelize(f.status)}
+                        </span>
                         {f.auditApprovedAt && (
                           <Icon
                             name="check-circle"

@@ -30,7 +30,40 @@ function uuid() {
   });
 }
 
+// Slow-connection watch. When any request has been in flight longer than
+// SLOW_AFTER_MS the UI is told (once) via a window event; it is told again when
+// nothing is pending any more. Toast.jsx turns those into a "connection is
+// slow" notice, so a bad network reads as a slow network instead of a failure.
+const SLOW_AFTER_MS = 5000;
+let inFlight = 0;
+const slowTimers = new Map();
+let slowShown = false;
+
+function startSlowWatch(config) {
+  inFlight += 1;
+  const t = setTimeout(() => {
+    if (!slowShown) {
+      slowShown = true;
+      window.dispatchEvent(new CustomEvent('innsight:slow-connection', { detail: { slow: true } }));
+    }
+  }, SLOW_AFTER_MS);
+  slowTimers.set(config, t);
+}
+
+function endSlowWatch(config) {
+  const t = slowTimers.get(config);
+  if (t === undefined) return;
+  clearTimeout(t);
+  slowTimers.delete(config);
+  inFlight = Math.max(0, inFlight - 1);
+  if (inFlight === 0 && slowShown) {
+    slowShown = false;
+    window.dispatchEvent(new CustomEvent('innsight:slow-connection', { detail: { slow: false } }));
+  }
+}
+
 api.interceptors.request.use((config) => {
+  startSlowWatch(config);
   const token = localStorage.getItem('innsight_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   if ((config.method || '').toLowerCase() === 'post' && !config.headers['Idempotency-Key']) {
@@ -40,8 +73,12 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (r) => r,
+  (r) => {
+    endSlowWatch(r.config);
+    return r;
+  },
   (err) => {
+    if (err.config) endSlowWatch(err.config);
     // Auth: drop session and redirect to login on 401
     if (err.response?.status === 401) {
       // Same cleanup as auth.jsx's logout() and for the same reason: these two
@@ -71,13 +108,19 @@ api.interceptors.response.use(
     if (err.response?.status === 429) {
       err.message = 'Too many requests right now — the gateway is throttling. Wait a few seconds and retry.';
     }
-    // Friendlier message when the backend is unreachable. Axios sets
-    // err.code='ERR_NETWORK' for connection refused / DNS / proxy down.
-    if (!err.response && (err.code === 'ERR_NETWORK' || err.message === 'Network Error')) {
-      err.message =
-        'Cannot reach the backend (gateway). Is `docker compose up` running? Tried: ' +
-        (API_BASE || window.location.origin) +
-        '/api';
+    // No response at all: tell a slow link, a dropped link and a down backend
+    // apart, since each needs a different reaction from the user.
+    if (!err.response) {
+      if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || /timeout/i.test(err.message || '')) {
+        err.message = 'Your connection is slow and the request took too long. Please try again in a moment.';
+      } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        err.message = "You're offline. Check your internet connection and try again.";
+      } else if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') {
+        err.message =
+          "Can't reach the server. Your connection may be unstable. Check your internet and try again. (Tried: " +
+          (API_BASE || window.location.origin) +
+          '/api)';
+      }
     }
     return Promise.reject(err);
   }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents, centsToPesos, formatPeso } from '../lib/money';
@@ -8,7 +9,12 @@ import Autocomplete from '../components/Autocomplete';
 import Icon from '../components/Icon';
 import { paymentMethodGroups } from '../lib/paymentMethods';
 import { SPECIAL_REQUEST_QUICK_PICKS, BANK_NAMES, TRANSFER_NETWORKS } from '../lib/reservationOptions';
-import { CARD_BRANDS, EMPTY_DEPOSIT_DETAIL, nowForDateTimeLocal, missingDepositField } from '../lib/depositDetail';
+import {
+  CARD_BRANDS,
+  EMPTY_DEPOSIT_DETAIL,
+  nowForDateTimeLocal,
+  missingDepositField,
+} from '../lib/depositDetail';
 import { ADDON_PREFERENCE_CATEGORY, useAddOnCatalog } from '../lib/guestAddonPreferences';
 
 // A walk-in is a booking too, just one that skips the future-dated hold and
@@ -29,6 +35,7 @@ export default function WalkIn() {
 
   const [rooms, setRooms] = useState([]);
   const [inHouse, setInHouse] = useState([]);
+  const [roomsLoaded, setRoomsLoaded] = useState(false);
 
   useEffect(() => {
     Promise.all([api.get('/api/rooms'), api.get('/api/in-house')])
@@ -36,7 +43,8 @@ export default function WalkIn() {
         setRooms(r.data);
         setInHouse(h.data);
       })
-      .catch((e) => toast.error(errMsg(e)));
+      .catch((e) => toast.error(errMsg(e)))
+      .finally(() => setRoomsLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -45,7 +53,8 @@ export default function WalkIn() {
     (r) => ['CLEAN', 'CLEAN_INSPECTED'].includes(r.status) && !occupied.has(r.id)
   );
   const availableSorted = [...available].sort(
-    (a, b) => a.floor - b.floor || String(a.number).localeCompare(String(b.number), undefined, { numeric: true })
+    (a, b) =>
+      a.floor - b.floor || String(a.number).localeCompare(String(b.number), undefined, { numeric: true })
   );
 
   // Step 1 — Rooms. The "accommodation list": what's actually free right now,
@@ -296,13 +305,22 @@ export default function WalkIn() {
   );
 
   function next() {
+    if (step === 1 && !roomsLoaded) return;
     if (step === 1 && availableSorted.length === 0) {
       return toast.error('No clean, vacant rooms are available right now.');
     }
     if (step === 3 && !pickedGuest) {
-      const missing = ['firstName', 'lastName', 'email', 'phone', 'streetAddress', 'city', 'country', 'state', 'postal'].filter(
-        (k) => !String(newGuest[k] || '').trim()
-      );
+      const missing = [
+        'firstName',
+        'lastName',
+        'email',
+        'phone',
+        'streetAddress',
+        'city',
+        'country',
+        'state',
+        'postal',
+      ].filter((k) => !String(newGuest[k] || '').trim());
       if (missing.length) return toast.error('Fill in all guest details, or search for an existing guest.');
     }
     setStep((s) => Math.min(4, s + 1));
@@ -332,7 +350,8 @@ export default function WalkIn() {
         guest = data;
       } else if (
         guest &&
-        (companyName.trim() !== (guest.companyName || '') || employeeName.trim() !== (guest.employeeName || ''))
+        (companyName.trim() !== (guest.companyName || '') ||
+          employeeName.trim() !== (guest.employeeName || ''))
       ) {
         const { data } = await api.patch(`/api/guests/${guest.id}`, {
           companyName: companyName.trim(),
@@ -423,11 +442,13 @@ export default function WalkIn() {
       {step === 1 && (
         <div className="panel" data-tour="g-walk-in-intro">
           <p className="muted">
-            Unreserved guest walking up to the front desk. Checks them straight in as an in-house stay — the room
-            has to be free right now, not just on some future date.
+            Unreserved guest walking up to the front desk. Checks them straight in as an in-house stay — the
+            room has to be free right now, not just on some future date.
           </p>
           <h3>Accommodation list</h3>
-          {roomTypes.length === 0 ? (
+          {!roomsLoaded ? (
+            <SkeletonTableBlock rows={4} cols={4} label="Loading available rooms" />
+          ) : roomTypes.length === 0 ? (
             <p className="error">No clean vacant rooms are available right now.</p>
           ) : (
             <table>
@@ -441,7 +462,10 @@ export default function WalkIn() {
               </thead>
               <tbody>
                 {roomTypes.map((t) => (
-                  <tr key={t.typeCode} style={pickedTypeCode === t.typeCode ? { background: 'var(--accent-soft)' } : undefined}>
+                  <tr
+                    key={t.typeCode}
+                    style={pickedTypeCode === t.typeCode ? { background: 'var(--accent-soft)' } : undefined}
+                  >
                     <td>{t.name}</td>
                     <td className="t-c">{t.count}</td>
                     <td className="t-n">{formatPeso(t.ratePerNightCents)}</td>
@@ -630,7 +654,10 @@ export default function WalkIn() {
                 value={newBankAccount.accountNumberLast4}
                 maxLength={4}
                 onChange={(e) =>
-                  setNewBankAccount({ ...newBankAccount, accountNumberLast4: e.target.value.replace(/\D/g, '') })
+                  setNewBankAccount({
+                    ...newBankAccount,
+                    accountNumberLast4: e.target.value.replace(/\D/g, ''),
+                  })
                 }
               />
             </div>
@@ -650,7 +677,12 @@ export default function WalkIn() {
             </div>
             {pickedGuest && (
               <div style={{ alignSelf: 'flex-end' }}>
-                <button type="button" className="secondary small" disabled={savingBankAccount} onClick={addGuestBankAccount}>
+                <button
+                  type="button"
+                  className="secondary small"
+                  disabled={savingBankAccount}
+                  onClick={addGuestBankAccount}
+                >
                   + Add account
                 </button>
               </div>
@@ -669,7 +701,13 @@ export default function WalkIn() {
           <div className="row" style={{ marginBottom: 16 }}>
             <div>
               <label>Adults</label>
-              <input type="number" min="1" required value={adults} onChange={(e) => setAdults(e.target.value)} />
+              <input
+                type="number"
+                min="1"
+                required
+                value={adults}
+                onChange={(e) => setAdults(e.target.value)}
+              />
             </div>
             <div>
               <label>Children</label>
@@ -690,7 +728,11 @@ export default function WalkIn() {
             >
               <strong>{pickedGuest.displayName}</strong>
               <span className="muted">{pickedGuest.email || pickedGuest.phone}</span>
-              <button className="secondary small" style={{ marginLeft: 'auto' }} onClick={() => setPickedGuest(null)}>
+              <button
+                className="secondary small"
+                style={{ marginLeft: 'auto' }}
+                onClick={() => setPickedGuest(null)}
+              >
                 Change
               </button>
             </div>
@@ -706,7 +748,14 @@ export default function WalkIn() {
                 {addonCatalog.map((o) => (
                   <label
                     key={o.code}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, width: 'auto', textTransform: 'none', fontWeight: 400 }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      width: 'auto',
+                      textTransform: 'none',
+                      fontWeight: 400,
+                    }}
                   >
                     <input
                       type="checkbox"
@@ -781,7 +830,11 @@ export default function WalkIn() {
                 </div>
                 <div>
                   <label>City *</label>
-                  <input required value={newGuest.city} onChange={(e) => setNewGuest({ ...newGuest, city: e.target.value })} />
+                  <input
+                    required
+                    value={newGuest.city}
+                    onChange={(e) => setNewGuest({ ...newGuest, city: e.target.value })}
+                  />
                 </div>
                 <div>
                   <label>Country *</label>
@@ -912,7 +965,10 @@ export default function WalkIn() {
                     placeholder="4242"
                     value={depositDetail.cardLast4}
                     onChange={(e) =>
-                      setDepositDetail({ ...depositDetail, cardLast4: e.target.value.replace(/\D/g, '').slice(0, 4) })
+                      setDepositDetail({
+                        ...depositDetail,
+                        cardLast4: e.target.value.replace(/\D/g, '').slice(0, 4),
+                      })
                     }
                   />
                 </div>
@@ -998,7 +1054,9 @@ export default function WalkIn() {
                   style={{ marginTop: 8 }}
                   placeholder="Transfer network / channel"
                   value={depositDetail.transferNetworkOther}
-                  onChange={(e) => setDepositDetail({ ...depositDetail, transferNetworkOther: e.target.value })}
+                  onChange={(e) =>
+                    setDepositDetail({ ...depositDetail, transferNetworkOther: e.target.value })
+                  }
                 />
               )}
               <label style={{ marginTop: 10 }}>Sender / account holder name</label>

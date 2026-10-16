@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 import { useSearchParams } from 'react-router-dom';
 import { LAYOUTS } from '../sim/roomLayouts';
 import api from '../api';
+import { SkeletonPanel } from '../components/Skeleton';
 import Icon from '../components/Icon';
 import LayoutPlan from '../sim/LayoutPlan';
 import { useToast } from '../components/Toast';
@@ -421,7 +422,9 @@ export default function RoomLayouts() {
           fallback={
             <div className="cg-overlay">
               <div className="cg-window">
-                <p style={{ padding: 24 }}>Loading the editor…</p>
+                <div style={{ padding: 24 }}>
+                  <SkeletonPanel lines={6} label="Loading the editor" />
+                </div>
               </div>
             </div>
           }

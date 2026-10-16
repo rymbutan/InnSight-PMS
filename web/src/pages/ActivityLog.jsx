@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import EmptyState from '../components/EmptyState';
 import { FilterField } from '../components/FilterPanel';
 import Icon from '../components/Icon';
@@ -127,7 +128,11 @@ export default function ActivityLog() {
             <input type="date" value={filters.to} onChange={(e) => setFilter('to', e.target.value)} />
           </FilterField>
           <FilterField label="User">
-            <select data-tour="g-activity-user" value={filters.actorId} onChange={(e) => setFilter('actorId', e.target.value)}>
+            <select
+              data-tour="g-activity-user"
+              value={filters.actorId}
+              onChange={(e) => setFilter('actorId', e.target.value)}
+            >
               <option value="">Everyone</option>
               {options.actors.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -191,7 +196,9 @@ export default function ActivityLog() {
           </div>
         </div>
 
-        {data.rows.length === 0 && !loading ? (
+        {loading && data.rows.length === 0 ? (
+          <SkeletonTableBlock rows={10} cols={5} label="Loading activity" />
+        ) : data.rows.length === 0 ? (
           <EmptyState
             kind="search"
             title={activeCount > 0 ? 'No activity matches these filters' : 'No activity recorded yet'}

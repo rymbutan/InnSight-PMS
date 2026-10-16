@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
+import { Skeleton } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import SectionSwitcher, { REPORTS_SECTIONS } from '../components/SectionSwitcher';
 import { formatPeso } from '../lib/money';
@@ -42,7 +43,7 @@ export default function Revenue() {
   const toast = useToast();
   const [days, setDays] = useState([]);
   const [reservations, setReservations] = useState([]);
-  const [_loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([api.get('/api/audit/days'), api.get('/api/reservations').catch(() => ({ data: [] }))])
@@ -128,25 +129,33 @@ export default function Revenue() {
       <div className="kpi-row" data-tour="g-revenue-kpis">
         <div className="kpi-tile">
           <div>
-            <div className="kpi-num">{totals.avgOcc.toFixed(1)}%</div>
+            <div className="kpi-num">
+              {loading ? <Skeleton width={56} height={28} /> : <>{totals.avgOcc.toFixed(1)}%</>}
+            </div>
             <div className="kpi-label">Avg occupancy (30d)</div>
           </div>
         </div>
         <div className="kpi-tile">
           <div>
-            <div className="kpi-num">{formatPeso(totals.avgAdr)}</div>
+            <div className="kpi-num">
+              {loading ? <Skeleton width={56} height={28} /> : formatPeso(totals.avgAdr)}
+            </div>
             <div className="kpi-label">Avg ADR</div>
           </div>
         </div>
         <div className="kpi-tile">
           <div>
-            <div className="kpi-num">{formatPeso(totals.avgRevPar)}</div>
+            <div className="kpi-num">
+              {loading ? <Skeleton width={56} height={28} /> : formatPeso(totals.avgRevPar)}
+            </div>
             <div className="kpi-label">Avg RevPAR</div>
           </div>
         </div>
         <div className="kpi-tile">
           <div>
-            <div className="kpi-num">{formatPeso(totals.totalRev)}</div>
+            <div className="kpi-num">
+              {loading ? <Skeleton width={56} height={28} /> : formatPeso(totals.totalRev)}
+            </div>
             <div className="kpi-label">Room revenue (30d)</div>
           </div>
         </div>
@@ -155,7 +164,9 @@ export default function Revenue() {
       <div className="row" style={{ alignItems: 'stretch' }}>
         <div className="panel" style={{ flex: 2 }} data-tour="g-revenue-forecast">
           <h3>Occupancy trend & 14-day forecast</h3>
-          {occSeries.length < 2 ? (
+          {loading ? (
+            <Skeleton width="100%" height={120} radius={8} />
+          ) : occSeries.length < 2 ? (
             <EmptyState
               kind="chart"
               title="Run more night audits"
@@ -181,7 +192,9 @@ export default function Revenue() {
         </div>
         <div className="panel" style={{ flex: 1 }} data-tour="g-revenue-source">
           <h3>Booking source mix</h3>
-          {sourceMix.length === 0 ? (
+          {loading ? (
+            <Skeleton width={140} height={140} radius={70} />
+          ) : sourceMix.length === 0 ? (
             <EmptyState kind="inbox" title="No reservations yet" />
           ) : (
             <DonutChart segments={sourceMix} size={140} thickness={20} />
@@ -192,7 +205,9 @@ export default function Revenue() {
       <div className="row" style={{ alignItems: 'stretch' }}>
         <div className="panel" style={{ flex: 1 }} data-tour="g-revenue-adr">
           <h3>ADR per day</h3>
-          {adrSeries.length < 2 ? (
+          {loading ? (
+            <Skeleton width="100%" height={120} radius={8} />
+          ) : adrSeries.length < 2 ? (
             <EmptyState kind="chart" title="No data" />
           ) : (
             <BarChart
@@ -211,7 +226,9 @@ export default function Revenue() {
         </div>
         <div className="panel" style={{ flex: 1 }} data-tour="g-revenue-revpar">
           <h3>RevPAR per day</h3>
-          {revparSeries.length < 2 ? (
+          {loading ? (
+            <Skeleton width="100%" height={120} radius={8} />
+          ) : revparSeries.length < 2 ? (
             <EmptyState kind="chart" title="No data" />
           ) : (
             <BarChart

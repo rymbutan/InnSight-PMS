@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth';
@@ -104,6 +105,8 @@ export default function ManagerDashboard() {
   const [search, setSearch] = useState('');
   const [outlook, setOutlook] = useState({ types: [], days: [], cells: {} });
 
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     try {
       const [a, h, d, rs, days, res, types, _rooms] = await Promise.all([
@@ -164,6 +167,8 @@ export default function ManagerDashboard() {
       setOutlook({ types: types.data, days: dayList, cells });
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setLoaded(true);
     }
   }
   useEffect(() => {
@@ -512,7 +517,11 @@ export default function ManagerDashboard() {
               end in "not authorised" reads as the app being broken. Matches the
               guard on /reservations/new and on POST /api/reservations. */}
           {canBook && (
-            <button className="btn-cta" data-tour="g-dashboard-mgr-create" onClick={() => navigate('/reservations/new')}>
+            <button
+              className="btn-cta"
+              data-tour="g-dashboard-mgr-create"
+              onClick={() => navigate('/reservations/new')}
+            >
               <Icon name="plus" size={14} style={{ marginRight: 6 }} />
               Create new reservation
             </button>
@@ -523,7 +532,9 @@ export default function ManagerDashboard() {
       <div className="kpi-row" data-tour="g-dashboard-mgr-kpis">
         <div className="kpi-tile kpi-arrivals">
           <div>
-            <div className="kpi-num">{data.arrivals.length}</div>
+            <div className="kpi-num">
+              {loaded ? data.arrivals.length : <Skeleton width={56} height={28} />}
+            </div>
             <div className="kpi-label">Arrivals</div>
           </div>
           <div className="kpi-icon">
@@ -532,7 +543,9 @@ export default function ManagerDashboard() {
         </div>
         <div className="kpi-tile kpi-departures">
           <div>
-            <div className="kpi-num">{data.departures.length}</div>
+            <div className="kpi-num">
+              {loaded ? data.departures.length : <Skeleton width={56} height={28} />}
+            </div>
             <div className="kpi-label">Departures</div>
           </div>
           <div className="kpi-icon">
@@ -541,7 +554,7 @@ export default function ManagerDashboard() {
         </div>
         <div className="kpi-tile kpi-booked">
           <div>
-            <div className="kpi-num">{occRoomCount}</div>
+            <div className="kpi-num">{loaded ? occRoomCount : <Skeleton width={56} height={28} />}</div>
             <div className="kpi-label" title="Accommodations booked">
               Booked
             </div>
@@ -552,7 +565,13 @@ export default function ManagerDashboard() {
           <>
             <div className="kpi-tile" data-tour="g-dashboard-mgr-audit">
               <div>
-                <div className="kpi-num">{(lastDay.occupancyPct ?? 0).toFixed(1)}%</div>
+                <div className="kpi-num">
+                  {loaded ? (
+                    <>{(lastDay.occupancyPct ?? 0).toFixed(1)}%</>
+                  ) : (
+                    <Skeleton width={56} height={28} />
+                  )}
+                </div>
                 <div className="kpi-label" title="Occupancy (last audit)">
                   Occupancy
                 </div>
@@ -561,21 +580,27 @@ export default function ManagerDashboard() {
             </div>
             <div className="kpi-tile">
               <div>
-                <div className="kpi-num">{formatPeso(lastDay.adr)}</div>
+                <div className="kpi-num">
+                  {loaded ? formatPeso(lastDay.adr) : <Skeleton width={56} height={28} />}
+                </div>
                 <div className="kpi-label">ADR</div>
                 <DeltaPill value={pctChange(lastDay.adr, prevDay?.adr)} />
               </div>
             </div>
             <div className="kpi-tile">
               <div>
-                <div className="kpi-num">{formatPeso(lastDay.revPar)}</div>
+                <div className="kpi-num">
+                  {loaded ? formatPeso(lastDay.revPar) : <Skeleton width={56} height={28} />}
+                </div>
                 <div className="kpi-label">RevPAR</div>
                 <DeltaPill value={pctChange(lastDay.revPar, prevDay?.revPar)} />
               </div>
             </div>
             <div className="kpi-tile">
               <div>
-                <div className="kpi-num">{formatPeso(lastDay.roomRevenueCents)}</div>
+                <div className="kpi-num">
+                  {loaded ? formatPeso(lastDay.roomRevenueCents) : <Skeleton width={56} height={28} />}
+                </div>
                 <div className="kpi-label" title="Room revenue (last audit)">
                   Room revenue
                 </div>
@@ -596,7 +621,11 @@ export default function ManagerDashboard() {
         <div style={{ flex: 3, minWidth: 480, display: 'flex', flexDirection: 'column' }}>
           <div className="row" style={{ alignItems: 'stretch', flex: 1 }}>
             {/* Occupancy trend */}
-            <div className="panel" data-tour="g-dashboard-mgr-occtrend" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}>
+            <div
+              className="panel"
+              data-tour="g-dashboard-mgr-occtrend"
+              style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}
+            >
               <h3 style={{ margin: '0 0 8px' }}>Occupancy Trend</h3>
               {occupancySeries.length < 2 ? (
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -605,17 +634,30 @@ export default function ManagerDashboard() {
               ) : (
                 <>
                   <div className="dash-chart" style={{ flex: 1 }}>
-                    <SparkLine data={occupancySeries} width={420} height={130} color="var(--accent)" min={0} max={100} fill />
+                    <SparkLine
+                      data={occupancySeries}
+                      width={420}
+                      height={130}
+                      color="var(--accent)"
+                      min={0}
+                      max={100}
+                      fill
+                    />
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
-                    {occupancySeries[0].toFixed(1)}% → {occupancySeries[occupancySeries.length - 1].toFixed(1)}%
+                    {occupancySeries[0].toFixed(1)}% →{' '}
+                    {occupancySeries[occupancySeries.length - 1].toFixed(1)}%
                   </div>
                 </>
               )}
             </div>
 
             {/* Revenue trend */}
-            <div className="panel" data-tour="g-dashboard-mgr-revtrend" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}>
+            <div
+              className="panel"
+              data-tour="g-dashboard-mgr-revtrend"
+              style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column' }}
+            >
               <h3 style={{ margin: '0 0 8px' }}>Revenue Trend</h3>
               {revenueSeries.length < 2 ? (
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -636,8 +678,19 @@ export default function ManagerDashboard() {
 
           <div className="row" style={{ alignItems: 'stretch', flex: 1 }}>
             {/* Bookings made per day */}
-            <div className="panel" data-tour="g-dashboard-mgr-bookings" style={{ flex: 1.4, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div
+              className="panel"
+              data-tour="g-dashboard-mgr-bookings"
+              style={{ flex: 1.4, minWidth: 320, display: 'flex', flexDirection: 'column' }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  marginBottom: 8,
+                }}
+              >
                 <h3 style={{ margin: 0 }}>Bookings</h3>
                 <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
                   {bookingsSeries.series.reduce((s, v) => s + v, 0)} in 14 days
@@ -656,7 +709,11 @@ export default function ManagerDashboard() {
             </div>
 
             {/* Bookings by source */}
-            <div className="panel" data-tour="g-dashboard-mgr-source" style={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column' }}>
+            <div
+              className="panel"
+              data-tour="g-dashboard-mgr-source"
+              style={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column' }}
+            >
               <h3 style={{ margin: '0 0 8px' }}>Bookings by Source</h3>
               {bookingSourceMix.length === 0 ? (
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -687,8 +744,19 @@ export default function ManagerDashboard() {
 
         <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column' }}>
           {/* Room occupancy */}
-          <div className="panel" data-tour="g-dashboard-mgr-rooms" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div
+            className="panel"
+            data-tour="g-dashboard-mgr-rooms"
+            style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                marginBottom: 8,
+              }}
+            >
               <h3 style={{ margin: 0 }}>Room Occupancy</h3>
               <span className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
                 {totalRooms} rooms
@@ -812,11 +880,15 @@ export default function ManagerDashboard() {
             </thead>
             <tbody>
               {reservationsList.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="loading-row">
-                    No {resTab.toLowerCase()}.
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={5} className="loading-row">
+                      No {resTab.toLowerCase()}.
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={5} />
+                )
               ) : (
                 reservationsList.slice(0, 7).map((r) => (
                   <tr
@@ -936,11 +1008,15 @@ export default function ManagerDashboard() {
             </thead>
             <tbody>
               {activity.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="loading-row">
-                    {activity.empty}
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={3} className="loading-row">
+                      {activity.empty}
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={3} />
+                )
               ) : (
                 activity.rows.map((r) => {
                   // Only a reservation row can be opened; a sold-out date has
@@ -1032,11 +1108,15 @@ export default function ManagerDashboard() {
             </thead>
             <tbody>
               {outlook.types.length === 0 ? (
-                <tr>
-                  <td colSpan={15} className="loading-row">
-                    No room types yet.
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={15} className="loading-row">
+                      No room types yet.
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={15} />
+                )
               ) : (
                 outlook.types.map((t) => (
                   <tr key={t.code}>

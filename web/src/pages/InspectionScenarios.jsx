@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect } from 'react';
+import { SkeletonPanel } from '../components/Skeleton';
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -119,7 +120,9 @@ export default function InspectionScenarios({ showTitle = true }) {
           fallback={
             <div className="cg-overlay">
               <div className="cg-window">
-                <p style={{ padding: 24 }}>Loading editor…</p>
+                <div style={{ padding: 24 }}>
+                  <SkeletonPanel lines={6} label="Loading editor" />
+                </div>
               </div>
             </div>
           }

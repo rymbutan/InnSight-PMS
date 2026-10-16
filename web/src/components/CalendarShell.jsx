@@ -10,6 +10,7 @@
 // `display: contents` wrappers. A shell that owned the rows would have to own
 // the cells too, and then it would have to know about drag handles and lanes.
 
+import { SkeletonList } from './Skeleton';
 import Icon from './Icon';
 import { localDay, addDays, startOfDay } from '../lib/date';
 
@@ -83,7 +84,13 @@ export default function CalendarShell({
               </div>
             );
           })}
-          {children}
+          {loading ? (
+            <div style={{ gridColumn: '1 / -1', padding: 14 }}>
+              <SkeletonList rows={8} label="Loading calendar" />
+            </div>
+          ) : (
+            children
+          )}
         </div>
       </div>
 

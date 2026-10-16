@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
+import { SkeletonPanel, SkeletonTableBlock } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -14,6 +15,7 @@ export default function Audit() {
   const [days, setDays] = useState([]);
   const [inHouseCount, setInHouseCount] = useState(0);
   const [running, setRunning] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   async function load() {
     try {
@@ -27,6 +29,8 @@ export default function Audit() {
       setInHouseCount(h.data.length);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setLoaded(true);
     }
   }
   useEffect(() => {
@@ -76,7 +80,9 @@ export default function Audit() {
 
       <div className="panel" data-tour="g-audit-current-day">
         <h3>Current business day</h3>
-        {current ? (
+        {!loaded ? (
+          <SkeletonPanel lines={5} label="Loading business day" />
+        ) : current ? (
           <>
             <p>
               Date: <strong>{new Date(current.businessDate).toDateString()}</strong> · Status:{' '}
@@ -124,14 +130,18 @@ export default function Audit() {
         ) : (
           <>
             <p className="muted">No open business day.</p>
-            <button data-tour="g-audit-open-day" onClick={openDay}>Open today</button>
+            <button data-tour="g-audit-open-day" onClick={openDay}>
+              Open today
+            </button>
           </>
         )}
       </div>
 
       <div className="panel" data-tour="g-audit-history">
         <h3>History</h3>
-        {days.length === 0 ? (
+        {!loaded ? (
+          <SkeletonTableBlock rows={5} cols={11} label="Loading audit history" />
+        ) : days.length === 0 ? (
           <div className="loading-row">No audit history yet.</div>
         ) : (
           <table>
