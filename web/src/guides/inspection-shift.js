@@ -45,21 +45,21 @@ export default {
     },
     {
       title: 'Choose a category, or mark it correct',
-      body: 'The menu asks what is wrong, if anything. Pick the fault category that fits, because a missed restock and an attendant leaving something behind are fixed by different people. If the object is fine, choose "This is correct - no issue". Cancel lets you keep looking.',
+      body: 'The menu asks what is wrong, if anything. Pick the fault category that fits, because a missed restock and an attendant leaving something behind are fixed by different people. If the object is fine, choose "This is correct - no issue". The mouse pointer appears as soon as the menu opens. Cancel lets you keep looking.',
     },
     {
       title: 'Why false alarms hurt',
-      body: 'Flagging something that is actually fine counts against your inspection precision and sends attendants back to a clean room. Marking something correct that is actually faulty counts as a miss, so judge each item against the booking.',
+      body: 'Flagging something that is actually fine counts against your inspection precision and sends attendants back to a clean room. Marking something correct that is actually faulty counts as a miss, so judge each item against the booking. A wrong call turns the item red and you must inspect it again until you get it right, but your first answer is the one that is graded.',
     },
     {
       target: '[data-tour="g-inspection-progress"]',
       title: 'Track your progress',
-      body: 'This counter shows how many items you have reviewed out of the total in the room. Every item needs a decision, either a fault category or "correct".',
+      body: 'This counter shows how many items you have reviewed correctly out of the total in the room. Every item needs the right decision, either its fault category or "correct".',
     },
     {
       target: '[data-tour="g-inspection-finish"]',
       title: 'Finishing',
-      body: 'Finish inspection stays greyed out until every item has been reviewed, and shows how many are left. Once it is available, press it to see your result. Leave exits without grading.',
+      body: 'Finish inspection and Leave both stay greyed out until every item has been reviewed correctly, and Finish shows how many are left. You cannot walk out of the room half done. Once Finish is available, press it to see your result.',
     },
     {
       title: 'Reading the result',

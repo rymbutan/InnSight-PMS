@@ -48,7 +48,7 @@ function VerdictEdges({ size, color }) {
   );
 }
 
-function Anchors({ anchors, resolved, hover, groupRef }) {
+function Anchors({ anchors, resolved, wrong, hover, groupRef }) {
   return (
     <group ref={groupRef}>
       {anchors.map((a) => {
@@ -57,7 +57,9 @@ function Anchors({ anchors, resolved, hover, groupRef }) {
         const [w, h, d] = a.size || [1, 1, 1];
         // Once judged, the box turns green if the call was right and red if it
         // was wrong, and gets an outline so it still reads over a busy model.
-        const verdict = done ? (isCorrectChoice(a, done) ? VERDICT_GREEN : VERDICT_RED) : null;
+        // A wrong call is not final: the item stays red AND stays a target until
+        // the student gets it right, so `done` only ever means "judged correctly".
+        const verdict = done ? VERDICT_GREEN : wrong[a.id] ? VERDICT_RED : null;
         return (
           <group key={a.id} position={[a.pos[0], (a.y ?? 0) + h / 2, a.pos[1]]}>
             {/* No onClick and no cursor swapping any more. Under pointer lock
@@ -71,7 +73,7 @@ function Anchors({ anchors, resolved, hover, groupRef }) {
               <meshBasicMaterial
                 color={verdict || '#38bdf8'}
                 transparent
-                opacity={done ? 0.3 : active ? 0.22 : 0.0}
+                opacity={done || wrong[a.id] ? 0.3 : active ? 0.22 : 0.0}
                 depthWrite={false}
                 side={THREE.DoubleSide}
               />
@@ -238,7 +240,14 @@ export default function InspectionShift({
   );
 
   const [flags, setFlags] = useState([]);
+  // `resolved` holds only items judged CORRECTLY. A wrong call goes into `wrong`
+  // (red, still a target) and the student has to try again — see choose().
   const [resolved, setResolved] = useState({});
+  const [wrong, setWrong] = useState({});
+  const [retryNote, setRetryNote] = useState(null);
+  // First verdict per item. Only that one is graded: retrying until right is what
+  // lets the student leave, it must not also erase the fact they got it wrong.
+  const attempted = useRef(new Set());
   const [openAnchor, setOpenAnchor] = useState(null);
   const [hover, setHover] = useState(null);
   const [clipboard, setClipboard] = useState(true);
@@ -266,6 +275,27 @@ export default function InspectionShift({
   useEffect(() => {
     if (guide.open && document.pointerLockElement) document.exitPointerLock?.();
   }, [guide.open]);
+
+  // Same for the judgement menu: it is a set of buttons, so the cursor has to be
+  // there the moment it opens. Left locked, the student had to press Esc before
+  // the pointer came back.
+  useEffect(() => {
+    if (openAnchor && document.pointerLockElement) document.exitPointerLock?.();
+  }, [openAnchor]);
+
+  // Put the student straight back into look mode when the menu closes, rather
+  // than making them click the room again. Only works from inside a click (the
+  // browser demands a user gesture), which every menu button is; after Esc it is
+  // refused, harmlessly, and the "Click to look around" prompt covers it.
+  const relock = useCallback(() => {
+    if (touch) return;
+    const el = document.querySelector('.fr-stage canvas');
+    try {
+      el?.requestPointerLock?.()?.catch?.(() => {});
+    } catch {
+      /* no gesture / unsupported — the prompt tells them to click */
+    }
+  }, [touch]);
 
   // Act on whatever the crosshair is on. Click and E do the same thing, which is
   // the first-person convention — and E still works while the pointer is not
@@ -332,10 +362,36 @@ export default function InspectionShift({
   function choose(category) {
     const a = anchors.find((x) => x.id === openAnchor);
     if (!a) return;
-    setFlags((list) => [...list, { anchorId: a.id, defectId: a.defectId, chosenCategory: category }]);
-    setResolved((r) => ({ ...r, [a.id]: category }));
+    // Graded on the FIRST verdict only.
+    if (!attempted.current.has(a.id)) {
+      attempted.current.add(a.id);
+      setFlags((list) => [...list, { anchorId: a.id, defectId: a.defectId, chosenCategory: category }]);
+    }
+    if (isCorrectChoice(a, category)) {
+      setResolved((r) => ({ ...r, [a.id]: category }));
+      setWrong((w) => {
+        const { [a.id]: _gone, ...rest } = w;
+        return rest;
+      });
+    } else {
+      setWrong((w) => ({ ...w, [a.id]: true }));
+      setRetryNote(`Not quite — ${a.label} is not right yet. Look again and re-inspect it.`);
+    }
     setOpenAnchor(null);
+    relock();
   }
+
+  function cancelInspect() {
+    setOpenAnchor(null);
+    relock();
+  }
+
+  // The "try again" note fades by itself; it is a nudge, not a dialog.
+  useEffect(() => {
+    if (!retryNote) return undefined;
+    const t = setTimeout(() => setRetryNote(null), 4500);
+    return () => clearTimeout(t);
+  }, [retryNote]);
 
   const items = useMemo(
     () => (phase === 'done' ? scoreInspection({ caseFile, flags, elapsedSec: elapsed }) : []),
@@ -401,7 +457,7 @@ export default function InspectionShift({
             {tier} · {caseFile.confirmationNumber}
           </span>
           <span className="cg-task-label" data-tour="g-inspection-progress">
-            {reviewed}/{anchors.length} items reviewed
+            {reviewed}/{anchors.length} items reviewed correctly
           </span>
           <button
             className="secondary"
@@ -418,7 +474,20 @@ export default function InspectionShift({
           >
             <Icon name="help-circle" size={16} />
           </button>
-          <button className="secondary" onClick={onExit}>
+          {/* A real inspection cannot be walked out of half done: Leave stays locked
+              until every item has been judged correctly. A preview from the
+              scenario editor (recordResult false) is the instructor checking their
+              own authoring, so it is never held in the room. */}
+          <button
+            className="secondary"
+            onClick={onExit}
+            disabled={recordResult && reviewed < anchors.length}
+            title={
+              recordResult && reviewed < anchors.length
+                ? `Review every item correctly to leave (${anchors.length - reviewed} left)`
+                : 'Leave the room'
+            }
+          >
             Leave
           </button>
           {/* Disabled rather than confirmed: passesInspection() requires EVERY
@@ -447,7 +516,7 @@ export default function InspectionShift({
               onCreated={({ gl }) => gl.setClearColor(stageColor())}
             >
               <RoomShell layout={shellLayout} />
-              <Anchors anchors={anchors} resolved={resolved} hover={hover} groupRef={anchorsGroup} />
+              <Anchors anchors={anchors} resolved={resolved} wrong={wrong} hover={hover} groupRef={anchorsGroup} />
               <CrosshairAim groupRef={anchorsGroup} onAim={setHover} paused={paused} />
               <Player
                 paused={paused}
@@ -461,6 +530,12 @@ export default function InspectionShift({
             </Canvas>
           </div>
           <div className="fr-crosshair" data-tour="g-inspection-crosshair" />
+
+          {retryNote && !openAnchor && (
+            <div className="fr-prompt" role="alert" style={{ top: 70, bottom: 'auto' }}>
+              {retryNote}
+            </div>
+          )}
 
           {nearby && !resolved[nearby.id] && !openAnchor && (
             <div className="fr-prompt">
@@ -503,7 +578,7 @@ export default function InspectionShift({
             `.fr-window` is the only `position: relative` ancestor — the clipboard's
             `top: 52px` means "under the titlebar", not "under the app header". */}
         <Clipboard caseFile={caseFile} open={clipboard} onClose={() => setClipboard(false)} />
-        <FlagMenu anchor={active} onChoose={choose} onCancel={() => setOpenAnchor(null)} />
+        <FlagMenu anchor={active} onChoose={choose} onCancel={cancelInspect} />
         {guide.element}
       </div>
     </div>
