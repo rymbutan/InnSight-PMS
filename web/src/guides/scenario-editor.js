@@ -38,6 +38,11 @@ export default {
       try: 'click the Build tab.',
     },
     {
+      target: '[data-tour="g-scenario-editor-randomize"]',
+      title: 'Short on time? Randomize',
+      body: 'Pick a difficulty and press "Randomize scenario" to get a whole scenario built from the current layout of this room: a few faults of different kinds, some clean decoys, and props placed on free floor. Built-in furniture never moves. It is an ordinary unsaved edit, so you can tweak it, press Randomize again for another, or Undo to get your previous work back. Give it a name and it is ready to save.',
+    },
+    {
       target: '[data-tour="g-scenario-editor-add-select"]',
       title: 'Add or reposition objects',
       body: 'Pick a room asset and press "Add to room"; objects you add can be dragged anywhere, duplicated and deleted. Objects already in the room are locked in place, but you can still turn them, change their height or size, swap them for a variant, or tag them as a fault or decoy with the Placement controls.',

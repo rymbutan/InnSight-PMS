@@ -11,6 +11,7 @@ import Icon from '../../components/Icon';
 import { useTheme } from '../../theme';
 import { RoomShell, FixtureBody, itemY } from '../RoomFreeRoam';
 import { refOf, scenarioCounts } from './scenario';
+import { generateRandomScenario, fitAddedToLayout, newSeed, LEVELS } from './randomScenario';
 import {
   yawFromQuaternion,
   isLockedBase,
@@ -257,6 +258,13 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
   const [selId, setSelId] = useState(null);
   const [mode, setMode] = useState('translate');
   const [addKey, setAddKey] = useState('sofa');
+  // The randomizer's knobs, and the seed of the last roll so a good one can be
+  // told apart from the next.
+  const [randLevel, setRandLevel] = useState('medium');
+  const [randBooking, setRandBooking] = useState(false);
+  const [lastSeed, setLastSeed] = useState(null);
+  // The `keys` of the last two rolls, newest first — fed back so a re-roll varies.
+  const recentRolls = useRef([]);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   // idle | saving | saved | error — what the autosave is doing, mirrored into
@@ -570,6 +578,47 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
 
   function patchSel(patch) {
     setObjects((list) => list.map((o) => (o.id === selId ? { ...o, ...patch } : o)));
+  }
+
+  // Build a whole scenario from the tier's CURRENT layout in one click. It lands
+  // as an ordinary unsaved edit — snapshot() first, so Undo brings back whatever
+  // was here — and the author can tweak, re-roll or save it like any other.
+  async function randomize() {
+    if (legacy) {
+      return toast.error('This scenario uses an older format that cannot be edited here.');
+    }
+    const hasWork = !!editingId || objects.some((o) => o.added || o.defectId !== undefined);
+    if (hasWork) {
+      const ok = await confirm({
+        title: 'Randomize this scenario?',
+        message: 'This replaces the faults, decoys and added props you have here with a new random set.',
+        detail: 'You can undo it straight afterwards.',
+        confirmLabel: 'Randomize',
+      });
+      if (!ok) return;
+    }
+    snapshot();
+    const seed = newSeed();
+    const r = generateRandomScenario({
+      plan: getRoomPlan(tier),
+      baseObjects: seedFromTier(tier),
+      makeId: nextId,
+      seed,
+      level: randLevel,
+      includeBookingFaults: randBooking,
+      recent: recentRolls.current,
+    });
+    // Remember the last two rolls so the next one leans away from them.
+    recentRolls.current = [r.keys, ...recentRolls.current].slice(0, 2);
+    setObjects(r.objects);
+    setSelId(null);
+    setLastSeed(seed);
+    if (!name.trim()) setName(`${tier} · Random ${seed.toString(36).slice(-4).toUpperCase()}`);
+    const short = r.faults < r.wanted;
+    toast.success(
+      `Randomized: ${r.faults} fault${r.faults === 1 ? '' : 's'} and ${r.decoys} decoy${r.decoys === 1 ? '' : 's'}.` +
+        (short ? ` This room only supports ${r.faults} of the ${r.wanted} you asked for.` : '')
+    );
   }
 
   function addObject() {
@@ -921,6 +970,19 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
         `${droppedTags} tag${one ? '' : 's'} on this scenario pointed at room fixtures that have moved or been removed since it was saved, so ${one ? 'it was' : 'they were'} dropped. Your next change will save without ${one ? 'it' : 'them'}.`
       );
     }
+    // The layout may have been edited since this was saved. Say so rather than
+    // changing the scenario underneath the author: the objects stay as saved, and
+    // the inspection nudges or drops what no longer fits when it is played.
+    if (!isLegacy && Array.isArray(s.added) && s.added.length) {
+      const fit = fitAddedToLayout(s.added, getRoomPlan(s.roomTier), s.tags);
+      const n = fit.moved.length + fit.dropped.length;
+      if (n) {
+        toast.warning(
+          `${n} added item${n === 1 ? '' : 's'} no longer fit${n === 1 ? 's' : ''} this room's layout (it was edited after this scenario was saved). ` +
+            `They will be ${fit.dropped.length ? 'moved or removed' : 'moved'} when it is played — move ${n === 1 ? 'it' : 'them'} here and save to fix that.`
+        );
+      }
+    }
     if (droppedPrims) {
       const one = droppedPrims === 1;
       toast.warning(
@@ -1244,6 +1306,49 @@ export default function ScenarioEditor({ onClose, initialScenarioId = null, onSc
 
           {panelTab === 'build' && (
             <>
+              <div className="se-section" data-tour="g-scenario-editor-randomize">
+                Randomize
+              </div>
+              <p className="muted se-note" style={{ marginTop: 0 }}>
+                Builds a whole scenario from this room's layout: some faults, some clean decoys, props placed
+                on free floor. Built-in furniture never moves.
+              </p>
+              <select
+                value={randLevel}
+                onChange={(e) => setRandLevel(e.target.value)}
+                aria-label="Difficulty"
+              >
+                {Object.entries(LEVELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v.label} — about {v.faults} faults
+                  </option>
+                ))}
+              </select>
+              <label
+                style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '6px 0', fontWeight: 400 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={randBooking}
+                  onChange={(e) => setRandBooking(e.target.checked)}
+                />
+                Include faults that depend on the booking
+              </label>
+              <button
+                onClick={randomize}
+                className="tool-btn has-label is-on"
+                style={{ width: '100%' }}
+                title="Replace this scenario with a random one for the room layout"
+              >
+                <Icon name="sparkles" size={15} strokeWidth={1.9} />
+                Randomize scenario
+              </button>
+              {lastSeed && (
+                <p className="muted se-note" style={{ marginBottom: 0 }}>
+                  Last roll: {lastSeed.toString(36).toUpperCase()}. Press again for a different one, or Undo.
+                </p>
+              )}
+
               <div className="se-section">Add an object</div>
               <select
                 value={addKey}
