@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth';
@@ -89,6 +90,8 @@ function FrontOfficeDashboard() {
   const [search, setSearch] = useState('');
   const [outlook, setOutlook] = useState({ types: [], days: [], cells: {} });
 
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     try {
       const [a, h, d, rs, days, res, types, _rooms] = await Promise.all([
@@ -149,6 +152,8 @@ function FrontOfficeDashboard() {
       setOutlook({ types: types.data, days: dayList, cells });
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setLoaded(true);
     }
   }
   useEffect(() => {
@@ -392,7 +397,11 @@ function FrontOfficeDashboard() {
               end in "not authorised" reads as the app being broken. Matches the
               guard on /reservations/new and on POST /api/reservations. */}
           {canBook && (
-            <button className="btn-cta" data-tour="g-dashboard-fo-create" onClick={() => navigate('/reservations/new')}>
+            <button
+              className="btn-cta"
+              data-tour="g-dashboard-fo-create"
+              onClick={() => navigate('/reservations/new')}
+            >
               <Icon name="plus" size={14} style={{ marginRight: 6 }} />
               Create new reservation
             </button>
@@ -403,7 +412,9 @@ function FrontOfficeDashboard() {
       <div className="kpi-row" data-tour="g-dashboard-fo-kpis">
         <div className="kpi-tile kpi-arrivals" data-tour="g-dashboard-fo-arrivals">
           <div>
-            <div className="kpi-num">{data.arrivals.length}</div>
+            <div className="kpi-num">
+              {loaded ? data.arrivals.length : <Skeleton width={56} height={28} />}
+            </div>
             <div className="kpi-label">Arrivals</div>
           </div>
           <div className="kpi-icon">
@@ -412,7 +423,9 @@ function FrontOfficeDashboard() {
         </div>
         <div className="kpi-tile kpi-departures" data-tour="g-dashboard-fo-departures">
           <div>
-            <div className="kpi-num">{data.departures.length}</div>
+            <div className="kpi-num">
+              {loaded ? data.departures.length : <Skeleton width={56} height={28} />}
+            </div>
             <div className="kpi-label">Departures</div>
           </div>
           <div className="kpi-icon">
@@ -421,7 +434,7 @@ function FrontOfficeDashboard() {
         </div>
         <div className="kpi-tile kpi-booked" data-tour="g-dashboard-fo-booked">
           <div>
-            <div className="kpi-num">{occRoomCount}</div>
+            <div className="kpi-num">{loaded ? occRoomCount : <Skeleton width={56} height={28} />}</div>
             <div className="kpi-label" title="Accommodations booked">
               Booked
             </div>
@@ -432,7 +445,13 @@ function FrontOfficeDashboard() {
           <>
             <div className="kpi-tile" data-tour="g-dashboard-fo-audit">
               <div>
-                <div className="kpi-num">{(lastDay.occupancyPct ?? 0).toFixed(1)}%</div>
+                <div className="kpi-num">
+                  {loaded ? (
+                    <>{(lastDay.occupancyPct ?? 0).toFixed(1)}%</>
+                  ) : (
+                    <Skeleton width={56} height={28} />
+                  )}
+                </div>
                 <div className="kpi-label" title="Occupancy (last audit)">
                   Occupancy
                 </div>
@@ -440,19 +459,25 @@ function FrontOfficeDashboard() {
             </div>
             <div className="kpi-tile">
               <div>
-                <div className="kpi-num">{formatPeso(lastDay.adr)}</div>
+                <div className="kpi-num">
+                  {loaded ? formatPeso(lastDay.adr) : <Skeleton width={56} height={28} />}
+                </div>
                 <div className="kpi-label">ADR</div>
               </div>
             </div>
             <div className="kpi-tile">
               <div>
-                <div className="kpi-num">{formatPeso(lastDay.revPar)}</div>
+                <div className="kpi-num">
+                  {loaded ? formatPeso(lastDay.revPar) : <Skeleton width={56} height={28} />}
+                </div>
                 <div className="kpi-label">RevPAR</div>
               </div>
             </div>
             <div className="kpi-tile">
               <div>
-                <div className="kpi-num">{formatPeso(lastDay.roomRevenueCents)}</div>
+                <div className="kpi-num">
+                  {loaded ? formatPeso(lastDay.roomRevenueCents) : <Skeleton width={56} height={28} />}
+                </div>
                 <div className="kpi-label" title="Room revenue (last audit)">
                   Room revenue
                 </div>
@@ -514,11 +539,15 @@ function FrontOfficeDashboard() {
             </thead>
             <tbody>
               {reservationsList.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="loading-row">
-                    No {resTab.toLowerCase()}.
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={5} className="loading-row">
+                      No {resTab.toLowerCase()}.
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={5} />
+                )
               ) : (
                 reservationsList.slice(0, 7).map((r) => (
                   <tr
@@ -638,11 +667,15 @@ function FrontOfficeDashboard() {
             </thead>
             <tbody>
               {activity.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="loading-row">
-                    {activity.empty}
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={3} className="loading-row">
+                      {activity.empty}
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={3} />
+                )
               ) : (
                 activity.rows.map((r) => {
                   // Only a reservation row can be opened; a sold-out date has
@@ -734,11 +767,15 @@ function FrontOfficeDashboard() {
             </thead>
             <tbody>
               {outlook.types.length === 0 ? (
-                <tr>
-                  <td colSpan={15} className="loading-row">
-                    No room types yet.
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={15} className="loading-row">
+                      No room types yet.
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={15} />
+                )
               ) : (
                 outlook.types.map((t) => (
                   <tr key={t.code}>

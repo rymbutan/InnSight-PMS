@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -112,6 +113,8 @@ export default function HousekeepingDashboard() {
   // independent sources, and one of them being unreachable is no reason to
   // show none of the others — the shared dashboard had exactly that failure and
   // greeted the whole role with a red toast.
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     const [r, c, types, res] = await Promise.all([
       api.get('/api/rooms').catch(() => ({ data: [] })),
@@ -148,6 +151,7 @@ export default function HousekeepingDashboard() {
       }
     }
     setOutlook({ types: types.data, days: dayList, cells });
+    setLoaded(true);
   }
 
   useEffect(() => {
@@ -296,7 +300,9 @@ export default function HousekeepingDashboard() {
                 <tbody>
                   {myRooms.map((r) => {
                     const call = openCallByRoom.get(r.number);
-                    const pri = call ? CALL_PRIORITY[call.reason] || CALL_PRIORITY.DEFAULT : CALL_PRIORITY.NONE;
+                    const pri = call
+                      ? CALL_PRIORITY[call.reason] || CALL_PRIORITY.DEFAULT
+                      : CALL_PRIORITY.NONE;
                     return (
                       <tr key={r.id}>
                         <td>
@@ -497,11 +503,15 @@ export default function HousekeepingDashboard() {
             </thead>
             <tbody>
               {outlook.types.length === 0 ? (
-                <tr>
-                  <td colSpan={15} className="loading-row">
-                    No room types yet.
-                  </td>
-                </tr>
+                loaded ? (
+                  <tr>
+                    <td colSpan={15} className="loading-row">
+                      No room types yet.
+                    </td>
+                  </tr>
+                ) : (
+                  <SkeletonRows rows={4} cols={15} />
+                )
               ) : (
                 outlook.types.map((t) => (
                   <tr key={t.code}>

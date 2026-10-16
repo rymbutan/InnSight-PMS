@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
+import { Skeleton, SkeletonTableBlock } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { BarChart } from '../components/Chart';
@@ -129,7 +130,15 @@ export default function Reports() {
           the page. Either way, this region is never the blank space it used
           to be before the operator picked a report and hit Run. */}
       <div data-tour="g-reports-results">
-        {result ? <RenderReport type={result.type} data={result.data} /> : <DefaultDashboard />}
+        {loading ? (
+          <div className="panel">
+            <SkeletonTableBlock rows={8} cols={5} label="Running report" />
+          </div>
+        ) : result ? (
+          <RenderReport type={result.type} data={result.data} />
+        ) : (
+          <DefaultDashboard />
+        )}
       </div>
     </div>
   );
@@ -176,10 +185,9 @@ function DefaultDashboard() {
     return (
       <div className="panel" data-tour="g-reports-glance">
         <div className="metrics">
-          <Metric label="Total rooms" value="…" />
-          <Metric label="In-house guests" value="…" />
-          <Metric label="Vacant, ready" value="…" />
-          <Metric label="Needs attention" value="…" />
+          {['Total rooms', 'In-house guests', 'Vacant, ready', 'Needs attention'].map((l) => (
+            <Metric key={l} label={l} value={<Skeleton width={48} height={24} />} />
+          ))}
         </div>
       </div>
     );
@@ -472,7 +480,8 @@ function ResultTable({ rows, cols, filename }) {
           <button
             data-tour="g-reports-export"
             className="small secondary"
-            onClick={() => download(filename, toCSV(rows, cols))}>
+            onClick={() => download(filename, toCSV(rows, cols))}
+          >
             Export CSV
           </button>
         )}

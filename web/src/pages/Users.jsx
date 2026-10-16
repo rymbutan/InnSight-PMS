@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
+import { SkeletonRows } from '../components/Skeleton';
 import RoleBadge from '../components/RoleBadge';
 import Modal from '../components/Modal';
 import Icon from '../components/Icon';
@@ -91,6 +92,8 @@ export default function Users() {
   const [approveAllBusy, setApproveAllBusy] = useState(false);
   const [approveAllProgress, setApproveAllProgress] = useState(null);
 
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     try {
       const [u, r, ar] = await Promise.all([
@@ -104,6 +107,8 @@ export default function Users() {
       setRequests(ar.data);
     } catch (e) {
       setMsg(e.response?.data?.error || e.message || 'Failed to load users and roles.');
+    } finally {
+      setLoaded(true);
     }
   }
   useEffect(() => {
@@ -539,7 +544,8 @@ export default function Users() {
               {/* An explicit empty row rather than a bare table: a filter that
                 matches nothing otherwise renders a header with nothing under
                 it, which reads as the list failing to load. */}
-              {visibleUsers.length === 0 && (
+              {!loaded && <SkeletonRows rows={8} cols={7} />}
+              {loaded && visibleUsers.length === 0 && (
                 <tr>
                   <td colSpan={7} className="t-c muted" style={{ padding: '18px 0' }}>
                     No users match “{userQuery.trim()}”.

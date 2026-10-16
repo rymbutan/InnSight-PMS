@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
@@ -149,12 +150,15 @@ export default function Amenities() {
   const [addOnEdit, setAddOnEdit] = useState({}); // { [code]: pesos }
   const [addOnForm, setAddOnForm] = useState({ code: '', label: '', priceCents: '' });
 
+  const [addOnsLoaded, setAddOnsLoaded] = useState(false);
   async function loadAddOnCatalog() {
     try {
       const { data } = await api.get('/api/addon-catalog');
       setAddOnCatalog(data);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setAddOnsLoaded(true);
     }
   }
   async function createAddOnCatalogItem(e) {
@@ -214,12 +218,15 @@ export default function Amenities() {
   const [promos, setPromos] = useState([]);
   const [newPromo, setNewPromo] = useState({ code: '', percentOff: '', description: '' });
 
+  const [promosLoaded, setPromosLoaded] = useState(false);
   async function loadPromos() {
     try {
       const { data } = await api.get('/api/promo-codes');
       setPromos(data);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setPromosLoaded(true);
     }
   }
   async function createPromo(e) {
@@ -257,12 +264,16 @@ export default function Amenities() {
     }
   }
 
+  const [facilitiesLoaded, setFacilitiesLoaded] = useState(false);
+  const [bookingsLoaded, setBookingsLoaded] = useState(false);
   async function load() {
     try {
       const { data } = await api.get('/api/facilities');
       setFacilities(data);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setFacilitiesLoaded(true);
     }
   }
   async function loadBookings(d = schedDate) {
@@ -271,6 +282,8 @@ export default function Amenities() {
       setBookings(data);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setBookingsLoaded(true);
     }
   }
 
@@ -584,7 +597,12 @@ export default function Amenities() {
         <div className="panel-head">
           <h3>Overview</h3>
         </div>
-        <div className="filter-board" data-tour="g-amenities-overview" role="group" aria-label="Filter the catalogue by category">
+        <div
+          className="filter-board"
+          data-tour="g-amenities-overview"
+          role="group"
+          aria-label="Filter the catalogue by category"
+        >
           {categoryChips.map((c) => {
             const on = catFilter === c.key;
             return (
@@ -625,7 +643,9 @@ export default function Amenities() {
                   style={{ marginLeft: 'auto' }}
                 />
               </div>
-              {bookings.length === 0 ? (
+              {!bookingsLoaded ? (
+                <SkeletonTableBlock rows={4} cols={7} label="Loading bookings" />
+              ) : bookings.length === 0 ? (
                 <EmptyState
                   kind="inbox"
                   title="No bookings for this date"
@@ -715,7 +735,12 @@ export default function Amenities() {
                   {/* Who it is for. The two branches take different fields and
                       settle differently, so the choice comes first rather than
                       being inferred from whichever box got filled in. */}
-                  <div className="seg" role="tablist" aria-label="Guest type" data-tour="g-amenities-guesttype">
+                  <div
+                    className="seg"
+                    role="tablist"
+                    aria-label="Guest type"
+                    data-tour="g-amenities-guesttype"
+                  >
                     <button
                       type="button"
                       role="tab"
@@ -868,7 +893,12 @@ export default function Amenities() {
       {/* The catalogue, full width UNDER both — it is reference you open when
           setting a price, not something the desk needs beside it. */}
       {!catalogOpen ? (
-        <button type="button" className="am-catalog-toggle" data-tour="g-amenities-catalog-toggle" onClick={() => setCatalogOpen(true)}>
+        <button
+          type="button"
+          className="am-catalog-toggle"
+          data-tour="g-amenities-catalog-toggle"
+          onClick={() => setCatalogOpen(true)}
+        >
           <Icon name="box" size={15} strokeWidth={2} />
           View Amenities Catalog, Add-ons &amp; Promo Codes
           <span className="muted">{facilities.length} amenities</span>
@@ -971,7 +1001,8 @@ export default function Amenities() {
                 </span>
               </div>
             )}
-            {((amTab === 'promos' && canManagePromos) || (amTab !== 'laundry' && amTab !== 'promos' && isAdmin)) && (
+            {((amTab === 'promos' && canManagePromos) ||
+              (amTab !== 'laundry' && amTab !== 'promos' && isAdmin)) && (
               <button
                 type="button"
                 className="rt-add"
@@ -983,7 +1014,15 @@ export default function Amenities() {
                     ? `Close the add-${amTab === 'addons' ? 'add-on' : amTab === 'promos' ? 'promo' : 'amenity'} form`
                     : `Add ${amTab === 'addons' ? 'an add-on' : amTab === 'promos' ? 'a promo code' : 'an amenity'}`
                 }
-                title={addOpen ? 'Close' : amTab === 'addons' ? 'Add add-on' : amTab === 'promos' ? 'Add promo code' : 'Add amenity'}
+                title={
+                  addOpen
+                    ? 'Close'
+                    : amTab === 'addons'
+                      ? 'Add add-on'
+                      : amTab === 'promos'
+                        ? 'Add promo code'
+                        : 'Add amenity'
+                }
               >
                 <Icon name={addOpen ? 'x' : 'plus'} size={15} strokeWidth={2.6} />
               </button>
@@ -1034,7 +1073,9 @@ export default function Amenities() {
                   <input
                     required
                     value={addOnForm.code}
-                    onChange={(e) => setAddOnForm({ ...addOnForm, code: e.target.value.toUpperCase().replace(/\s+/g, '_') })}
+                    onChange={(e) =>
+                      setAddOnForm({ ...addOnForm, code: e.target.value.toUpperCase().replace(/\s+/g, '_') })
+                    }
                   />
                 </div>
                 <div>
@@ -1155,7 +1196,9 @@ export default function Amenities() {
               </div>
             </form>
           ) : amTab === 'promos' ? (
-            promos.length === 0 ? (
+            !promosLoaded ? (
+              <SkeletonTableBlock rows={4} cols={4} label="Loading promo codes" />
+            ) : promos.length === 0 ? (
               <EmptyState
                 kind="search"
                 title="No promo codes yet"
@@ -1183,7 +1226,9 @@ export default function Amenities() {
               </div>
             )
           ) : amTab === 'addons' ? (
-            addOnCatalog.length === 0 ? (
+            !addOnsLoaded ? (
+              <SkeletonTableBlock rows={4} cols={4} label="Loading add-ons" />
+            ) : addOnCatalog.length === 0 ? (
               <EmptyState
                 kind="search"
                 title="No add-ons in the catalog yet"
@@ -1306,7 +1351,9 @@ export default function Amenities() {
             </>
           ) : (
             <>
-              {facilities.length === 0 ? (
+              {!facilitiesLoaded ? (
+                <SkeletonTableBlock rows={8} cols={6} label="Loading amenities" />
+              ) : facilities.length === 0 ? (
                 <EmptyState kind="inbox" title="No amenities yet" />
               ) : visibleFacilities.length === 0 ? (
                 <EmptyState

@@ -4,6 +4,7 @@
 //   <Skeleton width="80%" height={20} />
 //   <SkeletonRow cols={5} />
 //   <SkeletonTable rows={6} cols={4} />
+//   <SkeletonRows rows={4} cols={5} />   just the <tr>s, for an existing <tbody>
 //   <SkeletonTableBlock rows={8} cols={6} />  the same, with a header row
 //   <SkeletonList rows={6} />        avatar + two lines, for contact/people lists
 //   <SkeletonPanel lines={5} />      a heading and a few paragraphs of text
@@ -37,6 +38,11 @@ export function SkeletonRow({ cols = 4 }) {
       ))}
     </tr>
   );
+}
+
+// Several placeholder rows for a <tbody> that is still waiting on its data.
+export function SkeletonRows({ rows = 4, cols = 4 }) {
+  return Array.from({ length: rows }).map((_, i) => <SkeletonRow key={i} cols={cols} />);
 }
 
 export function SkeletonTable({ rows = 5, cols = 4 }) {

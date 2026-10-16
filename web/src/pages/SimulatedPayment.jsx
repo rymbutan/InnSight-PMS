@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../api';
+import { SkeletonPanel } from '../components/Skeleton';
 import { formatPeso } from '../lib/money';
 
 // Explicit labels rather than mangling the enum. `.replace('_',' ')` plus a
@@ -75,7 +76,7 @@ export default function SimulatedPayment() {
 
         {err && !paid && <p className="pay-error">{err}</p>}
 
-        {!intent && !err && <p className="muted">Loading…</p>}
+        {!intent && !err && <SkeletonPanel lines={3} label="Loading payment" />}
 
         {intent && !paid && (
           <>

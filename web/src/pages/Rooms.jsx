@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
+import { SkeletonPanel, SkeletonTableBlock } from '../components/Skeleton';
 import { STATUS_ORDER as ROOM_STATUSES, statusMeta } from '../sim/statusMeta';
 import { labelize } from '../lib/labels';
 import { useAuth } from '../auth';
@@ -57,6 +58,8 @@ export default function Rooms() {
   const toast = useToast();
   const confirm = useConfirm();
 
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     try {
       const [r, t] = await Promise.all([api.get('/api/rooms'), api.get('/api/room-types')]);
@@ -64,6 +67,8 @@ export default function Rooms() {
       setTypes(t.data);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setLoaded(true);
     }
   }
   useEffect(() => {
@@ -219,7 +224,11 @@ export default function Rooms() {
               <div className="filter-bar" data-tour="g-rooms-filters">
                 <label className="filter-inline">
                   <span>Type</span>
-                  <select data-tour="g-rooms-type-filter" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                  <select
+                    data-tour="g-rooms-type-filter"
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                  >
                     <option value="">All types</option>
                     {types.map((t) => (
                       <option key={t.code} value={t.code}>
@@ -247,7 +256,9 @@ export default function Rooms() {
             {/* Only this scrolls. The board, the filters and the whole right
                 rail stay put — see .rooms-fixed. */}
             <div className="rooms-table-scroll">
-              {rooms.length === 0 ? (
+              {!loaded ? (
+                <SkeletonTableBlock rows={10} cols={6} label="Loading rooms" />
+              ) : rooms.length === 0 ? (
                 <EmptyState
                   kind="inbox"
                   title="No rooms yet"
@@ -481,7 +492,9 @@ export default function Rooms() {
                   </button>
                 )}
               </div>
-              {types.length === 0 ? (
+              {!loaded ? (
+                <SkeletonPanel lines={4} label="Loading room types" />
+              ) : types.length === 0 ? (
                 <EmptyState kind="inbox" title="No room types yet" />
               ) : (
                 <div className="rt-list" data-tour="g-rooms-types">

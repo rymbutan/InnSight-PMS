@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { SkeletonTableBlock } from '../components/Skeleton';
 import Modal from '../components/Modal';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -248,7 +249,9 @@ export default function Arrivals() {
           </p>
         )}
 
-        {arrivals.length === 0 && !loading ? (
+        {loading && arrivals.length === 0 ? (
+          <SkeletonTableBlock rows={4} cols={7} label="Loading arrivals" />
+        ) : arrivals.length === 0 ? (
           <EmptyState
             kind="inbox"
             title="No expected arrivals"
@@ -343,7 +346,9 @@ export default function Arrivals() {
 
       <div className="panel" data-tour="g-arrivals-inhouse">
         <h3>In-House Guests</h3>
-        {inHouse.length === 0 && !loading ? (
+        {loading && inHouse.length === 0 ? (
+          <SkeletonTableBlock rows={4} cols={6} label="Loading in-house guests" />
+        ) : inHouse.length === 0 ? (
           <EmptyState
             kind="guests"
             title="No in-house guests"
@@ -420,7 +425,9 @@ export default function Arrivals() {
 
       <div className="panel" data-tour="g-arrivals-departures">
         <h3>Today's departures</h3>
-        {departures.length === 0 && !loading ? (
+        {loading && departures.length === 0 ? (
+          <SkeletonTableBlock rows={4} cols={6} label="Loading departures" />
+        ) : departures.length === 0 ? (
           <EmptyState
             kind="calendar"
             title="No departures today"

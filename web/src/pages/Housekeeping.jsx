@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api';
+import { Skeleton, SkeletonPanel } from '../components/Skeleton';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import Icon from '../components/Icon';
@@ -354,6 +355,8 @@ export default function Housekeeping() {
     }
   }
 
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
     try {
       const r = await api.get('/api/rooms');
@@ -369,6 +372,8 @@ export default function Housekeeping() {
       }
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setLoaded(true);
     }
   }
   async function assign(roomId, u) {
@@ -487,7 +492,7 @@ export default function Housekeeping() {
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>Map &amp; Housekeeping</h1>
         </div>
         <span className="hk-occupancy" data-tour="g-housekeeping-occupancy">
-          Occupancy: <strong>{occupancy}%</strong>
+          Occupancy: <strong>{loaded ? `${occupancy}%` : <Skeleton width={36} height={14} />}</strong>
         </span>
       </div>
 
@@ -520,56 +525,60 @@ export default function Housekeeping() {
               finger (vertically through the floors, sideways if it is wider than
               the panel) instead of being dragged around. */}
           <div className="hk-map-scroll" ref={mapScrollRef} aria-label="Hotel floor map">
-            <svg
-              viewBox={`0 0 ${mapW} ${mapH || 420}`}
-              width={mapW}
-              height={mapH || 420}
-              className="hk-map"
-              data-tour="g-housekeeping-map"
-              role="img"
-              aria-label="Interactive hotel floor map"
-            >
-              {floors.map((f) => (
-                <g key={`floor-${f.floor}`}>
-                  <text x={MARGIN_X - 8} y={f.labelY} fontSize="12" fontWeight="700" fill="var(--muted)">
-                    FLOOR {f.floor}
-                  </text>
-                  <text x={MARGIN_X + 66} y={f.labelY} fontSize="11" fill="var(--muted-2)">
-                    {f.count} room{f.count === 1 ? '' : 's'}
-                  </text>
-                  <rect
-                    x={MARGIN_X - 8}
-                    y={f.corridorY}
-                    width={mapW - (MARGIN_X - 8) * 2}
-                    height={CORRIDOR_H}
-                    rx={4}
-                    fill="var(--row-hover)"
-                    stroke="var(--border)"
+            {!loaded ? (
+              <SkeletonPanel lines={9} label="Loading floor map" />
+            ) : (
+              <svg
+                viewBox={`0 0 ${mapW} ${mapH || 420}`}
+                width={mapW}
+                height={mapH || 420}
+                className="hk-map"
+                data-tour="g-housekeeping-map"
+                role="img"
+                aria-label="Interactive hotel floor map"
+              >
+                {floors.map((f) => (
+                  <g key={`floor-${f.floor}`}>
+                    <text x={MARGIN_X - 8} y={f.labelY} fontSize="12" fontWeight="700" fill="var(--muted)">
+                      FLOOR {f.floor}
+                    </text>
+                    <text x={MARGIN_X + 66} y={f.labelY} fontSize="11" fill="var(--muted-2)">
+                      {f.count} room{f.count === 1 ? '' : 's'}
+                    </text>
+                    <rect
+                      x={MARGIN_X - 8}
+                      y={f.corridorY}
+                      width={mapW - (MARGIN_X - 8) * 2}
+                      height={CORRIDOR_H}
+                      rx={4}
+                      fill="var(--row-hover)"
+                      stroke="var(--border)"
+                    />
+                    <text
+                      x={mapW / 2}
+                      y={f.corridorY + CORRIDOR_H / 2 + 4}
+                      textAnchor="middle"
+                      fontSize="11"
+                      letterSpacing="6"
+                      fill="var(--muted-2)"
+                    >
+                      CORRIDOR
+                    </text>
+                  </g>
+                ))}
+                {slots.map((slot) => (
+                  <RoomShape
+                    key={slot.room.id}
+                    slot={slot}
+                    selected={slot.room.id === selectedId}
+                    flashing={flash.has(slot.room.id)}
+                    onSelect={(room) => setSelectedId(room.id === selectedId ? null : room.id)}
+                    onHover={(room, e) => setHover(room ? { room, x: e.clientX, y: e.clientY } : null)}
+                    hoverable={!touch}
                   />
-                  <text
-                    x={mapW / 2}
-                    y={f.corridorY + CORRIDOR_H / 2 + 4}
-                    textAnchor="middle"
-                    fontSize="11"
-                    letterSpacing="6"
-                    fill="var(--muted-2)"
-                  >
-                    CORRIDOR
-                  </text>
-                </g>
-              ))}
-              {slots.map((slot) => (
-                <RoomShape
-                  key={slot.room.id}
-                  slot={slot}
-                  selected={slot.room.id === selectedId}
-                  flashing={flash.has(slot.room.id)}
-                  onSelect={(room) => setSelectedId(room.id === selectedId ? null : room.id)}
-                  onHover={(room, e) => setHover(room ? { room, x: e.clientX, y: e.clientY } : null)}
-                  hoverable={!touch}
-                />
-              ))}
-            </svg>
+                ))}
+              </svg>
+            )}
           </div>
 
           {hover && !touch && (
@@ -776,7 +785,9 @@ export default function Housekeeping() {
           fallback={
             <div className="cg-overlay">
               <div className="cg-window">
-                <p style={{ padding: 24 }}>Loading inspection…</p>
+                <div style={{ padding: 24 }}>
+                  <SkeletonPanel lines={6} label="Loading inspection" />
+                </div>
               </div>
             </div>
           }

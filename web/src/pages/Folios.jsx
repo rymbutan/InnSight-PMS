@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
+import { SkeletonPanel, SkeletonTableBlock } from '../components/Skeleton';
 import EmptyState from '../components/EmptyState';
 import Avatar from '../components/Avatar';
 import { useToast, errMsg } from '../components/Toast';
@@ -75,6 +76,7 @@ export default function Folios() {
   const [auditBusy, setAuditBusy] = useState(false);
   const [folioId, setFolioId] = useState(searchParams.get('id') || '');
   const [folio, setFolio] = useState(null);
+  const [folioLoading, setFolioLoading] = useState(false);
   const [statement, setStatement] = useState(null);
   const [charge, setCharge] = useState({ chargeCode: '', description: '', amount: '' });
   // Everything past `method`/`amount` only matters for CARD/BANK_TRANSFER
@@ -162,6 +164,9 @@ export default function Folios() {
   async function load(id) {
     const target = id || folioId;
     if (!target) return;
+    // Only a first open shows the skeleton; a refresh of the folio on screen
+    // (after a payment, say) updates in place instead of blanking the card.
+    if (!folio || folio.id !== target) setFolioLoading(true);
     try {
       const [f, s] = await Promise.all([
         api.get(`/api/folios/${target}`),
@@ -173,6 +178,8 @@ export default function Folios() {
       loadDisputes(target);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setFolioLoading(false);
     }
   }
 
@@ -886,7 +893,9 @@ export default function Folios() {
           )}
         </div>
 
-        {listMode === 'selected' ? null : results.length === 0 ? (
+        {listMode === 'selected' ? null : searching && results.length === 0 ? (
+          <SkeletonTableBlock rows={8} cols={6} label="Loading folios" />
+        ) : results.length === 0 ? (
           <EmptyState
             kind="search"
             title="No folios found"
@@ -967,6 +976,7 @@ export default function Folios() {
         )}
       </div>
 
+      {folioLoading && !folio && <SkeletonPanel lines={7} label="Loading folio" />}
       {folio && (
         <>
           {/* ── Summary: who this folio bills, its status, and its totals ──
@@ -1082,7 +1092,10 @@ export default function Folios() {
                 message or a clerk re-reads an approval badge that no longer
                 means anything. */}
             {folio.status === 'OPEN' && (
-              <p data-tour="g-folio-audit" className={`folio-audit-line ${folio.auditApproved ? 'is-ok' : 'is-pending'}`}>
+              <p
+                data-tour="g-folio-audit"
+                className={`folio-audit-line ${folio.auditApproved ? 'is-ok' : 'is-pending'}`}
+              >
                 {folio.auditApproved ? (
                   <>Audit approved — this folio is cleared for check-out.</>
                 ) : folio.auditApprovalStale ? (
@@ -1926,8 +1939,8 @@ export default function Folios() {
                 the ceiling IS the amount and repeating it is noise. */}
             {refundFor.refundableCents !== Number(refundFor.amountCents) && (
               <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                {formatPeso(refundFor.refundableCents)} of the original {formatPeso(refundFor.amountCents)}{' '}
-                is still refundable — the rest has already gone back to the guest.
+                {formatPeso(refundFor.refundableCents)} of the original {formatPeso(refundFor.amountCents)} is
+                still refundable — the rest has already gone back to the guest.
               </p>
             )}
             <label style={{ marginTop: 10 }}>Reason</label>
@@ -2021,9 +2034,8 @@ export default function Folios() {
         {voidFor && (
           <form onSubmit={submitVoid}>
             <p className="muted" style={{ marginTop: 0 }}>
-              Posts a reversal of {formatPeso(voidFor.amountCents)} against this line. This cannot be
-              undone — it does not delete the original charge, it nets it to zero and keeps both rows on
-              the ledger.
+              Posts a reversal of {formatPeso(voidFor.amountCents)} against this line. This cannot be undone —
+              it does not delete the original charge, it nets it to zero and keeps both rows on the ledger.
             </p>
             <label>Reason *</label>
             <textarea

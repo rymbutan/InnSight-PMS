@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../api';
+import { SkeletonPanel } from '../components/Skeleton';
 import { useAuth } from '../auth';
 import { useTheme } from '../theme';
 import Icon from '../components/Icon';
@@ -129,6 +130,9 @@ export default function Settings() {
   // depends on the room the terminal is in, not on who is signed in to it.
   const [soundOn, setSoundOn] = useMessageSound();
   const [retention, setRetention] = useState(null);
+  // The tax and hotel forms open pre-filled with defaults; until the real values
+  // arrive they are masked, so nobody edits (and then saves) the placeholders.
+  const [billingReady, setBillingReady] = useState(false);
 
   useEffect(() => {
     if (!canRetention) return;
@@ -168,17 +172,19 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    api
-      .get('/api/settings/tax-rates')
-      .then((r) => {
-        setTaxRates(r.data);
-        setTaxCountryInput(r.data.country);
-      })
-      .catch(() => {});
-    api
-      .get('/api/settings/hotel')
-      .then((r) => setHotel(r.data))
-      .catch(() => {});
+    Promise.all([
+      api
+        .get('/api/settings/tax-rates')
+        .then((r) => {
+          setTaxRates(r.data);
+          setTaxCountryInput(r.data.country);
+        })
+        .catch(() => {}),
+      api
+        .get('/api/settings/hotel')
+        .then((r) => setHotel(r.data))
+        .catch(() => {}),
+    ]).finally(() => setBillingReady(true));
     api
       .get('/api/settings/payment-fee-percent')
       .then((r) => setPaymentFeePercent(r.data.feePercent))
@@ -601,7 +607,7 @@ export default function Settings() {
                 </div>
               </div>
             </div>
-            <div className="set-card-body">
+            <div className={`set-card-body${billingReady ? '' : ' is-loading'}`} aria-busy={!billingReady}>
               <div className="set-row-3" style={{ marginBottom: 12 }}>
                 <Field label="Viewing jurisdiction">
                   <div style={{ display: 'flex', gap: 6 }}>
@@ -702,7 +708,7 @@ export default function Settings() {
                 <div className="set-card-sub">Printed at the top of every guest folio.</div>
               </div>
             </div>
-            <div className="set-card-body">
+            <div className={`set-card-body${billingReady ? '' : ' is-loading'}`} aria-busy={!billingReady}>
               <div className="set-row-3">
                 {[
                   ['name', 'Hotel name'],
@@ -901,9 +907,7 @@ export default function Settings() {
             </div>
             <div className="set-card-body">
               {!retention ? (
-                <p className="muted" style={{ fontSize: 12 }}>
-                  Loading current setting…
-                </p>
+                <SkeletonPanel lines={3} label="Loading current setting" />
               ) : (
                 <>
                   <div className="retention-options">
@@ -1015,9 +1019,9 @@ function SidebarVisibility() {
 
   if (!cfg)
     return (
-      <p className="muted" style={{ padding: 16 }}>
-        Loading layout…
-      </p>
+      <div style={{ padding: 16 }}>
+        <SkeletonPanel lines={5} label="Loading layout" />
+      </div>
     );
 
   const hiddenForRole = hidden[role] || [];

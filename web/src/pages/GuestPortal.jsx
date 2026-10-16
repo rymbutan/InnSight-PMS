@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../api';
+import { SkeletonPanel } from '../components/Skeleton';
 import { formatPeso } from '../lib/money';
 import StatusPill from '../components/StatusPill';
 import Icon from '../components/Icon';
@@ -60,6 +61,12 @@ export default function GuestPortal() {
             <div className="error" role="alert">
               {err}
             </div>
+          </div>
+        )}
+
+        {!res && !err && (
+          <div className="panel" style={{ maxWidth: 760, margin: '0 auto' }}>
+            <SkeletonPanel lines={6} label="Loading your reservation" />
           </div>
         )}
 

@@ -5413,6 +5413,27 @@ th.sortable.active .sort-arrow {
   }
 }
 
+.set-card-body.is-loading {
+  position: relative;
+  min-height: 140px;
+}
+.set-card-body.is-loading > * {
+  visibility: hidden;
+}
+.set-card-body.is-loading::after {
+  content: '';
+  position: absolute;
+  inset: 4px 0;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e9edf3 0%, #f3f5f9 50%, #e9edf3 100%);
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.4s linear infinite;
+}
+html[data-theme='dark'] .set-card-body.is-loading::after {
+  background: linear-gradient(90deg, #1e293b 0%, #273449 50%, #1e293b 100%);
+  background-size: 200% 100%;
+}
+
 /* ==========================================================================
    Print stylesheet — strip chrome, expand panels, hide nav
    ========================================================================== */
