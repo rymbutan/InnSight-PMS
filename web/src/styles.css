@@ -12254,3 +12254,28 @@ html[data-theme='dark'] .chat-launcher-pop {
     margin: 0;
   }
 }
+
+/* iPad / touch hardening.
+   - Safari inflates text in landscape unless told not to.
+   - Safari zooms the WHOLE page when a field with a computed font-size under
+     16px is focused, and does not zoom back out: tapping Search, a date or any
+     form field left the app magnified and shifted. Fields are 13px by default,
+     so touch devices get 16px.
+   - Double-tap on empty space zooms the page; `manipulation` keeps pinch zoom
+     but drops double-tap zoom and the click delay.
+   - The grey tap flash on every button is browser chrome, not app styling. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (pointer: coarse) {
+  html {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
