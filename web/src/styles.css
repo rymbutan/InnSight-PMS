@@ -12194,3 +12194,28 @@ html[data-theme='dark'] .chat-launcher-pop {
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+/* Layout editor on a touch tablet. The whole app renders at zoom 0.7, which
+   leaves the editor's two side panels tiny on an iPad. They are scaled up here
+   with their own zoom, only for a coarse pointer wider than a phone (phones are
+   already on the milder 0.9). The panels hold WebGL canvases inside .cv-unzoom,
+   which cancels the page zoom through --app-zoom-inv, so the variable is
+   re-derived for the combined zoom: 1 / (0.7 * 1.25). */
+@media (pointer: coarse) and (min-width: 641px) {
+  .ed-panel {
+    zoom: 1.25;
+    --app-zoom-inv: 1.142857;
+  }
+  .ed-rail {
+    width: 44px;
+  }
+  .ed-panel .tool-btn,
+  .ed-rail .tool-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .ed-panel .tool-btn--text {
+    width: auto;
+    padding: 0 12px;
+  }
+}
