@@ -381,10 +381,15 @@ export default function Amenities() {
     if (bookMode === 'hotel' && !stay) return toast.error('Pick the in-house guest.');
 
     setBookBusy(true);
+    // `booking` and `settled` exist so a failure in step 2 can tell whether the
+    // slot is being held with nothing charged against it (release it) or money
+    // has already been posted (leave it, and say so).
+    let booking = null;
+    let settled = false;
     try {
       // Step 1 — the slot. Same call for both guest types: a booking is a
       // booking, and it is what holds the room against a double-sale.
-      const { data: booking } = await api.post('/api/facility-bookings', {
+      const { data: created } = await api.post('/api/facility-bookings', {
         facilityCode: bookFacility.code,
         guestName: bookMode === 'hotel' ? stay.guestName : bookForm.guestName || 'Walk-in',
         guestPhone: bookMode === 'walkin' ? bookForm.guestPhone || undefined : undefined,
@@ -392,6 +397,7 @@ export default function Amenities() {
         endAt,
         persons: Number(bookForm.persons) || 1,
       });
+      booking = created;
 
       if (bookMode === 'hotel') {
         // Step 2a — post to the stay's OPEN folio. No money moves now; it
@@ -410,6 +416,7 @@ export default function Amenities() {
             reference: booking.id,
             sourceSystem: 'AMENITIES',
           });
+          settled = true;
           await api.patch(`/api/facility-bookings/${booking.id}`, { folioId: open.id });
           toast.success(`${bookFacility.name} booked for ${stay.guestName} — posted to their folio.`);
         }
@@ -425,6 +432,7 @@ export default function Amenities() {
           method: bookForm.method,
           facilityBookingId: booking.id,
         });
+        settled = true;
         toast.success(
           `${bookFacility.name} booked — ${formatPeso(Number(data.amountCents))} · folio ${data.folioNumber}`
         );
@@ -436,7 +444,22 @@ export default function Amenities() {
       setSchedDate(bookForm.date);
       loadBookings(bookForm.date);
     } catch (err) {
-      toast.error(errMsg(err));
+      // The slot was taken in step 1 but the charge/payment in step 2 failed.
+      // Left alone it stays booked with nothing paid, and the retry then fails
+      // with "already booked" against the agent's own half-made booking.
+      let released = false;
+      if (booking && !settled) {
+        released = await api
+          .patch(`/api/facility-bookings/${booking.id}`, { status: 'CANCELLED' })
+          .then(() => true)
+          .catch(() => false);
+        loadBookings(bookForm.date);
+      }
+      toast.error(
+        booking && !settled
+          ? `${errMsg(err)} ${released ? 'The slot was released, so you can try again.' : 'The slot is still held; cancel it from the bookings list.'}`
+          : errMsg(err)
+      );
     } finally {
       setBookBusy(false);
     }
