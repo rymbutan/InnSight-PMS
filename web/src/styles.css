@@ -12279,3 +12279,37 @@ html {
     font-size: 16px;
   }
 }
+
+/* Narrow iPad windows (split view, Slide Over, a resized Safari/Chrome window).
+   Found by rendering every page at iPad widths: clean at 744px and wider, but
+   at ~640px the touch rule above makes seven topbar icons 44px each, which
+   leaves the search field a sliver that runs UNDER the "+" button.
+   - Search keeps a floor width, and the bar gives the room back by trimming the
+     icon buttons to 40px, closing their gaps and dropping "Back" to its arrow.
+   - From 641px the topbar has the room, so nothing changes there. */
+@media (pointer: coarse) and (max-width: 760px) {
+  .cb-search-wrap {
+    min-width: 120px;
+  }
+  .cb-icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .cb-actions,
+  .cb-util-group,
+  .cb-comms {
+    gap: 0;
+  }
+  .cb-back {
+    font-size: 0;
+    gap: 0;
+  }
+}
+/* The mobile tab bar (z-index 130, pinned to the bottom edge) covers the chat
+   launcher (z-index 90, also at bottom: 0): the two overlapped and the Chat
+   button was unreachable. Below the tab bar's breakpoint the dock sits above it. */
+@media (max-width: 640px) {
+  .chat-dock {
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+}
