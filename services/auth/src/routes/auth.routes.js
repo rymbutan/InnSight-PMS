@@ -646,7 +646,7 @@ router.get('/avatar/:userId', verifyToken, async (req, res) => {
 // SHA-256 lands in PasswordReset. So this table cannot be read back into a
 // working link, and the plaintext exists only in the message and the user's
 // address bar.
-const RESET_TTL_MIN = 30;
+const RESET_TTL_MIN = 5;
 const RESET_THROTTLE_MIN = 2; // one email per user per this window
 const hashResetToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 
@@ -723,23 +723,41 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-// GET /api/auth/reset-password/status?token=  — lets the page know, before the
-// person types anything, whether this link is still good. Same yes/no either
-// way regardless of WHY it's not (missing, spent, expired): see the comment
-// on `invalid` below.
-router.get('/reset-password/status', async (req, res) => {
+// POST /api/auth/reset-password/open  { token }
+//
+// OPENING THE LINK SPENDS IT. The emailed token is exchanged, atomically, for a
+// fresh secret that only this page holds (in memory, never in the URL): the row's
+// tokenHash is rotated from hash(emailed) to hash(secret), so the emailed link
+// matches nothing from this moment on. A second visit, a refresh, a forwarded
+// copy or a thief with the URL all land on "invalid or expired". It is a POST,
+// not a GET, because it changes state — a GET like the old /status would be
+// fired by anything that merely prefetches the URL.
+//
+// Trade-off the owner chose: mail scanners that open links will burn them, and a
+// refresh on the reset page needs a new link. The expiry is NOT extended here, so
+// the whole flow still has to finish inside RESET_TTL_MIN of the email.
+//
+// Same yes/no for missing, spent and expired: see `invalid` below.
+router.post('/reset-password/open', async (req, res) => {
   try {
-    const token = String(req.query?.token || '');
+    const token = String(req.body?.token || '');
     if (!token) return res.json({ valid: false });
-    const row = await prisma.passwordReset.findUnique({ where: { tokenHash: hashResetToken(token) } });
-    res.json({ valid: Boolean(row && !row.usedAt && row.expiresAt > new Date()) });
+    const session = crypto.randomBytes(32).toString('hex');
+    const claimed = await prisma.passwordReset.updateMany({
+      where: { tokenHash: hashResetToken(token), usedAt: null, expiresAt: { gt: new Date() } },
+      data: { tokenHash: hashResetToken(session) },
+    });
+    if (claimed.count === 0) return res.json({ valid: false });
+    res.json({ valid: true, session });
   } catch (err) {
-    console.error('[Auth] Reset status error:', err.message);
+    console.error('[Auth] Reset open error:', err.message);
     res.status(500).json({ valid: false });
   }
 });
 
 // POST /api/auth/reset-password  { token, newPassword }
+// `token` is the session secret returned by /reset-password/open (the emailed
+// token stops matching once opened, so it is not accepted here after that).
 router.post('/reset-password', async (req, res) => {
   try {
     const { token, newPassword } = req.body || {};

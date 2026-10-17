@@ -39,7 +39,7 @@ export default function ForgotPassword() {
     return (
       <AuthShell
         title="Check your email"
-        lede="If that email matches an account, a reset link is on its way. It expires in 30 minutes and works once."
+        lede="If that email matches an account, a reset link is on its way. It expires in 5 minutes and stops working once opened."
       >
         <p className="login-note">
           Nothing arrived? Check your spam folder first, then confirm you used the address your account was
