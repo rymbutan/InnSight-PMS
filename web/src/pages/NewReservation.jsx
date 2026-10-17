@@ -4,7 +4,8 @@ import api from '../api';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { formatPeso, pesosToCents } from '../lib/money';
+import { formatPeso, pesosToCents, afterPromoCents } from '../lib/money';
+import { usePromo, promoHint } from '../lib/promo';
 import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 
@@ -28,7 +29,9 @@ export default function NewReservation() {
   const [source, setSource] = useState('DIRECT');
   const [checkIn, setCheckIn] = useState(params.get('checkIn') || '');
   const [checkOut, setCheckOut] = useState('');
-  const [promoCode, setPromoCode] = useState('');
+  // Validated as it is typed so the summary can show the discount before saving.
+  const { code: promoCode, setCode: setPromoCode, state: promoState, applied: promo } = usePromo();
+  const promoNote = promoHint(promoState);
   // Free-text guest preference, no cost — see Stay details in Step 2.
   // Standardized preferences (extra pillows, etc.) live on the guest's own
   // profile now instead of being re-entered per booking — see Guests.jsx.
@@ -329,10 +332,24 @@ export default function NewReservation() {
         (taxRates.vat + taxRates.serviceCharge + taxRates.localTax + taxRates.realPropertyTax)) /
         100
     );
-    const grandTotalCents = subtotalCents + addOnsCents + taxCents;
+    // `grossCents` is the undiscounted total and is what the server is sent: it
+    // applies the promo to it itself (POST /api/reservations), so sending the
+    // discounted figure would take the percentage off twice. The server
+    // discounts the whole estimate, add-ons and tax included, so this does too.
+    const grossCents = subtotalCents + addOnsCents + taxCents;
+    const grandTotalCents = promo ? afterPromoCents(grossCents, promo.percentOff) : grossCents;
+    const promoDiscountCents = grossCents - grandTotalCents;
     const suggestedDepositCents = Math.round(grandTotalCents * 0.5);
-    return { subtotalCents, addOnsCents, taxCents, grandTotalCents, suggestedDepositCents };
-  }, [picks, nights, taxRates, checkedAddOns]);
+    return {
+      subtotalCents,
+      addOnsCents,
+      taxCents,
+      grossCents,
+      promoDiscountCents,
+      grandTotalCents,
+      suggestedDepositCents,
+    };
+  }, [picks, nights, taxRates, checkedAddOns, promo]);
 
   const balanceDueCents = useMemo(() => {
     return Math.max(0, totals.grandTotalCents - pesosToCents(depositPesos));
@@ -397,6 +414,12 @@ export default function NewReservation() {
   }
 
   async function submit() {
+    if (promoState.status === 'invalid') {
+      return toast.error('The promo code is not valid. Correct or clear it before saving.');
+    }
+    if (promoState.status === 'checking') {
+      return toast.error('Still checking the promo code. Try again in a moment.');
+    }
     // Mandatory Downpayment Constraint: the server rejects a booking with no
     // recorded downpayment, but that check must not be the guest's first
     // clue — this catches it in the wizard, before a guest/room is created.
@@ -463,7 +486,7 @@ export default function NewReservation() {
         adults: Number(adults) || 1,
         children: Number(children) || 0,
         source,
-        totalEstimateCents: totals.grandTotalCents,
+        totalEstimateCents: totals.grossCents,
         // Priced from the catalog at submit time, in the shape the server's
         // computeAddOns() already expects.
         addOns: checkedAddOns.map((o) => ({ description: o.label, costCents: o.priceCents })),
@@ -498,7 +521,7 @@ export default function NewReservation() {
         // Special Requests note and nothing more, so the guest was quoted a
         // discount and charged full price. It also used to OVERWRITE whatever
         // the guest had typed into Special Requests; the server now appends.
-        ...(promoCode ? { promoCode: promoCode.trim().toUpperCase() } : {}),
+        ...(promo ? { promoCode: promo.code } : {}),
         ...(specialRequests.trim() ? { specialRequests: specialRequests.trim() } : {}),
       };
       const { data: r } = await api.post('/api/reservations', payload);
@@ -551,6 +574,9 @@ export default function NewReservation() {
               <div>
                 <label>Promo code</label>
                 <input value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
+                {promoNote && (
+                  <div style={{ fontSize: 12, marginTop: 4, color: promoNote.color }}>{promoNote.text}</div>
+                )}
               </div>
               {/* `ed-check` gives this the same small box and inline label as
                   every other field-row checkbox (e.g. Amenities.jsx's
@@ -1110,6 +1136,16 @@ export default function NewReservation() {
                 <td>Taxes &amp; fees</td>
                 <td className="t-n">{formatPeso(totals.taxCents)}</td>
               </tr>
+              {promo && (
+                <tr>
+                  <td style={{ color: 'var(--text-success)' }}>
+                    Promo {promo.code} (−{promo.percentOff}%)
+                  </td>
+                  <td className="t-n" style={{ color: 'var(--text-success)' }}>
+                    −{formatPeso(totals.promoDiscountCents)}
+                  </td>
+                </tr>
+              )}
               <tr>
                 <td>
                   <strong>Grand total</strong>
@@ -1349,6 +1385,14 @@ export default function NewReservation() {
             <div className="label">Taxes</div>
             <div className="value">{formatPeso(totals.taxCents)}</div>
           </div>
+          {promo && (
+            <div className="wizard-total">
+              <div className="label">Promo {promo.code} (−{promo.percentOff}%)</div>
+              <div className="value" style={{ color: 'var(--text-success)' }}>
+                −{formatPeso(totals.promoDiscountCents)}
+              </div>
+            </div>
+          )}
           <div className="wizard-total">
             <div className="label">Grand Total</div>
             <div className="value">{formatPeso(totals.grandTotalCents)}</div>

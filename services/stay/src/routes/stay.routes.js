@@ -592,6 +592,24 @@ function computeWalkInAddOns(rawAddOns) {
     });
 }
 
+// Validate a promo code against inventory: {code, percentOff}, `false` for a code
+// that is definitively not valid, `null` when the lookup could not be completed.
+// Same three outcomes as validatePromo() in reservation.routes.js, for the same
+// reason: a bad code the agent already quoted must not silently fall back to
+// rack rate, but an unreachable inventory service must not stop a check-in.
+async function validatePromo(code) {
+  try {
+    const r = await fetch(`${INVENTORY_URL}/api/public/promo/${encodeURIComponent(code)}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return null;
+    const p = await r.json();
+    return p && p.valid ? { code: p.code, percentOff: p.percentOff } : false;
+  } catch {
+    return null;
+  }
+}
+
 // POST /api/walk-in
 router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
   try {
@@ -605,6 +623,7 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
       children,
       nightlyRateCents: requestedRateCents,
       specialRequests,
+      promoCode,
       addOns: rawAddOns,
       paymentType,
       cardMasked,
@@ -682,10 +701,30 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
     // (fresh, made just above) differs from the guess. The room this route
     // just assigned is always the authority in that case.
     const baseRateCents = roomCheck.room?.roomType?.baseRate;
-    const nightlyRateCents =
+    let nightlyRateCents =
       assignedRoomId && Number(requestedRateCents) > 0
         ? Math.round(Number(requestedRateCents))
         : Number(baseRateCents) || 0;
+
+    // Promo code. The client sends a code, never a price; the discount is taken
+    // off the nightly rate HERE, so it lands on every room charge the folio
+    // posts at check-in AND on the nights the night audit charges later (both
+    // read the stay's rate). Applied to the resolved rate, so it also applies
+    // correctly to an auto-assigned room whose rate the client could only guess.
+    let appliedPromo = null;
+    if (promoCode) {
+      const promo = await validatePromo(promoCode);
+      if (promo === false) {
+        return res.status(400).json({ error: `Promo code ${String(promoCode).toUpperCase()} is not valid.` });
+      }
+      if (promo) {
+        nightlyRateCents = Math.round(nightlyRateCents * (1 - promo.percentOff / 100));
+        appliedPromo = `${promo.code} (-${promo.percentOff}%)`;
+      }
+    }
+    const specialRequestsWithPromo =
+      [specialRequests, appliedPromo ? `Promo applied: ${appliedPromo}` : null].filter(Boolean).join(' · ') ||
+      undefined;
     const checkInAt = new Date();
     const checkOutAt = expectedCheckOut ? new Date(expectedCheckOut) : null;
     const nights =
@@ -708,7 +747,7 @@ router.post('/walk-in', requireRole(...STAFF), async (req, res) => {
         nightlyRateCents,
         adults: Number(adults) > 0 ? Math.round(Number(adults)) : 1,
         children: Number(children) >= 0 ? Math.round(Number(children)) : 0,
-        specialRequests: specialRequests || undefined,
+        specialRequests: specialRequestsWithPromo,
         addOns: enrichedAddOns,
         paymentType: paymentType || undefined,
         // Only the sub-fields relevant to the chosen method are ever

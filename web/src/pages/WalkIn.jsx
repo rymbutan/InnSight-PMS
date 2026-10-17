@@ -4,7 +4,8 @@ import api from '../api';
 import { SkeletonTableBlock } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { pesosToCents, centsToPesos, formatPeso } from '../lib/money';
+import { pesosToCents, centsToPesos, formatPeso, afterPromoCents } from '../lib/money';
+import { usePromo, promoHint } from '../lib/promo';
 import Autocomplete from '../components/Autocomplete';
 import Icon from '../components/Icon';
 import { paymentMethodGroups } from '../lib/paymentMethods';
@@ -122,6 +123,8 @@ export default function WalkIn() {
   const [children, setChildren] = useState(0);
 
   const [specialRequests, setSpecialRequests] = useState('');
+  const { code: promoCode, setCode: setPromoCode, state: promoState, applied: promo } = usePromo();
+  const promoNote = promoHint(promoState);
   const [otherSpecialRequest, setOtherSpecialRequest] = useState('');
 
   const [companyName, setCompanyName] = useState('');
@@ -287,7 +290,14 @@ export default function WalkIn() {
 
   const totals = useMemo(() => {
     const n = Math.max(1, Number(nights) || 1);
-    const subtotalCents = pesosToCents(nightlyRate) * n;
+    const rateCents = pesosToCents(nightlyRate);
+    // The server takes the promo off the NIGHTLY RATE (POST /api/walk-in), since
+    // the folio is charged per night from that rate and taxed on it. Mirrored
+    // here per night, rounded the same way, so the preview equals the folio.
+    const discountedRateCents = promo ? afterPromoCents(rateCents, promo.percentOff) : rateCents;
+    const roomGrossCents = rateCents * n;
+    const subtotalCents = discountedRateCents * n;
+    const promoDiscountCents = roomGrossCents - subtotalCents;
     const addOnsCents = checkedAddOns.reduce((s, o) => s + (o.priceCents || 0), 0);
     const taxCents = Math.round(
       (subtotalCents *
@@ -296,8 +306,16 @@ export default function WalkIn() {
     );
     const grandTotalCents = subtotalCents + addOnsCents + taxCents;
     const suggestedDepositCents = Math.round(grandTotalCents * 0.5);
-    return { subtotalCents, addOnsCents, taxCents, grandTotalCents, suggestedDepositCents };
-  }, [nightlyRate, nights, taxRates, checkedAddOns]);
+    return {
+      subtotalCents,
+      roomGrossCents,
+      promoDiscountCents,
+      addOnsCents,
+      taxCents,
+      grandTotalCents,
+      suggestedDepositCents,
+    };
+  }, [nightlyRate, nights, taxRates, checkedAddOns, promo]);
 
   const balanceDueCents = useMemo(
     () => Math.max(0, totals.grandTotalCents - pesosToCents(depositPesos)),
@@ -330,6 +348,12 @@ export default function WalkIn() {
   }
 
   async function submit() {
+    if (promoState.status === 'invalid') {
+      return toast.error('The promo code is not valid. Correct or clear it before checking in.');
+    }
+    if (promoState.status === 'checking') {
+      return toast.error('Still checking the promo code. Try again in a moment.');
+    }
     if (!(pesosToCents(depositPesos) > 0)) {
       return toast.error('A deposit is required before a walk-in guest can check in.');
     }
@@ -411,6 +435,8 @@ export default function WalkIn() {
           transferredAt: new Date(depositDetail.transferredAt || nowForDateTimeLocal()).toISOString(),
         }),
         ...(specialRequests.trim() ? { specialRequests: specialRequests.trim() } : {}),
+        // The code, never a price: the server re-validates and discounts the rate.
+        ...(promo ? { promoCode: promo.code } : {}),
       };
       const { data } = await api.post('/api/walk-in', payload);
       submittedRef.current = true; // disable beforeunload guard
@@ -529,6 +555,13 @@ export default function WalkIn() {
                 value={nights}
                 onChange={(e) => setNights(e.target.value)}
               />
+            </div>
+            <div>
+              <label>Promo code</label>
+              <input value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
+              {promoNote && (
+                <div style={{ fontSize: 12, marginTop: 4, color: promoNote.color }}>{promoNote.text}</div>
+              )}
             </div>
           </div>
 
@@ -878,8 +911,18 @@ export default function WalkIn() {
                 <td>
                   Room charges ({nights} night{Number(nights) === 1 ? '' : 's'})
                 </td>
-                <td className="t-n">{formatPeso(totals.subtotalCents)}</td>
+                <td className="t-n">{formatPeso(totals.roomGrossCents)}</td>
               </tr>
+              {promo && (
+                <tr>
+                  <td style={{ color: 'var(--text-success)' }}>
+                    Promo {promo.code} (−{promo.percentOff}%)
+                  </td>
+                  <td className="t-n" style={{ color: 'var(--text-success)' }}>
+                    −{formatPeso(totals.promoDiscountCents)}
+                  </td>
+                </tr>
+              )}
               {checkedAddOns.map((o) => (
                 <tr key={o.code}>
                   <td>{o.label}</td>
@@ -1094,8 +1137,16 @@ export default function WalkIn() {
         <div className="wizard-totals" data-tour="g-walk-in-totals">
           <div className="wizard-total">
             <div className="label">Subtotal</div>
-            <div className="value">{formatPeso(totals.subtotalCents)}</div>
+            <div className="value">{formatPeso(totals.roomGrossCents)}</div>
           </div>
+          {promo && (
+            <div className="wizard-total">
+              <div className="label">Promo {promo.code} (−{promo.percentOff}%)</div>
+              <div className="value" style={{ color: 'var(--text-success)' }}>
+                −{formatPeso(totals.promoDiscountCents)}
+              </div>
+            </div>
+          )}
           {totals.addOnsCents > 0 && (
             <div className="wizard-total">
               <div className="label">Add-ons</div>
