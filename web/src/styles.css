@@ -12225,3 +12225,32 @@ html[data-theme='dark'] .chat-launcher-pop {
     padding: 0 12px;
   }
 }
+
+/* iOS/iPadOS draws date and time fields with its own control: it ignores the
+   shared field height, centres the value and sits a few pixels off the selects
+   and inputs beside it (the Check-In / Check-Out row). Dropping the native
+   appearance on touch devices lets the normal field sizing apply, and the value
+   is left-aligned like every other field. */
+@media (pointer: coarse) {
+  input[type='date'],
+  input[type='datetime-local'],
+  input[type='time'],
+  input[type='month'] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    margin: 0;
+    min-height: var(--control-h);
+    line-height: normal;
+    text-align: left;
+    padding: 8px 10px;
+  }
+  input[type='date']::-webkit-date-and-time-value,
+  input[type='datetime-local']::-webkit-date-and-time-value,
+  input[type='time']::-webkit-date-and-time-value,
+  input[type='month']::-webkit-date-and-time-value {
+    text-align: left;
+    min-height: 1.2em;
+    margin: 0;
+  }
+}
