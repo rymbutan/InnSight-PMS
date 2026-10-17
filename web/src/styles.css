@@ -12180,9 +12180,17 @@ html[data-theme='dark'] .chat-launcher-pop {
   .ed-rail {
     width: 44px;
   }
-  .ed-panel .tool-btn,
+  /* Square icon buttons only. Labelled ones (Wall / Station) and text ones size
+     to their words: this rule used to set width: 40px on every .tool-btn, which
+     boxed "Wall" and "Station" into 40px squares and let the words spill over
+     each other. They still get the taller 40px hit area. */
+  .ed-panel .tool-btn:not(.has-label):not(.tool-btn--text),
   .ed-rail .tool-btn {
     width: 40px;
+    height: 40px;
+  }
+  .ed-panel .tool-btn.has-label,
+  .ed-panel .tool-btn--text {
     height: 40px;
   }
   .ed-panel .tool-btn--text {
