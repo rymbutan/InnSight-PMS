@@ -11510,46 +11510,11 @@ html[data-theme='dark'] .chat-launcher-pop {
    ========================================================================== */
 
 /* ── The awkward middle: iPad landscape ──────────────────────────────────────
-   The rail switches to a drawer below 1024px, so a 768px iPad in portrait was
-   already handled. Landscape is exactly 1024 - one pixel outside that - so it
-   got the full 264px rail AND the page, leaving about 740px of content on a
-   screen with no mouse. Between 1024 and 1180 the rail starts collapsed to its
-   icon strip instead: everything stays reachable, the content gets its width
-   back, and the toggle still expands it for anyone who wants labels. */
-@media (min-width: 1024px) and (max-width: 1180px) {
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) {
-    width: 76px;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link-label,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-text,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-out {
-    display: none;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link {
-    justify-content: center;
-    gap: 0;
-    padding: 0;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-nav {
-    padding-left: 8px;
-    padding-right: 8px;
-    scrollbar-gutter: stable both-edges;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-head,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user {
-    justify-content: center;
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-group-label {
-    height: 1px;
-    margin: 0 7px 8px;
-    padding: 0;
-    background: var(--border);
-    color: transparent;
-    overflow: hidden;
-  }
-}
+   The rail switches to a drawer below 1024px; landscape is exactly 1024, one
+   pixel outside that. The rail starts as its icon strip at these widths — but
+   that default is set in Layout.jsx (tabletRailDefault), NOT here. A CSS rule
+   that forced the strip whenever the rail was not `.side-collapsed` overrode the
+   toggle, so tapping it changed nothing and the rail could not be expanded. */
 
 /* ── Tablet layout, portrait and landscape ────────────────────────────────── */
 @media (min-width: 700px) and (max-width: 1180px) {
