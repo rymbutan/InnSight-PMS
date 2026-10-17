@@ -8511,6 +8511,8 @@ html[data-theme='dark'] .hk-tooltip {
 }
 
 .pal-card-thumb {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8750,6 +8752,10 @@ html[data-theme='dark'] .hk-tooltip {
 /* Thumbnails fill their tile without distorting: `contain` keeps the model's
    own proportions, which is the whole reason the tile is a fixed square. */
 .pal-card-thumb img {
+  /* Out of flow, so the picture can never size its tile: an image with a
+     non-square shape used to stretch the aspect-ratio box into a tall strip. */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;

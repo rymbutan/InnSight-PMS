@@ -1099,6 +1099,32 @@ router.get('/promo-codes', requireRole(...ROLE_GROUPS.MGMT), async (req, res) =>
   }
 });
 
+// GET /api/promo-codes/active — the codes a desk agent may pick from right now
+// (active and inside their date window). Front desk books reservations and
+// walk-ins but may not manage promotions, so this is the narrow read the booking
+// forms' dropdown needs; the full list above stays manager-only. Only the
+// fields a picker shows are returned.
+router.get('/promo-codes/active', requireRole(...BOOKING), async (req, res) => {
+  try {
+    const now = new Date();
+    const rows = await prisma.promoCode.findMany({
+      where: {
+        active: true,
+        AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+          { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+        ],
+      },
+      orderBy: { code: 'asc' },
+      select: { code: true, percentOff: true, description: true },
+    });
+    res.json(rows);
+  } catch (err) {
+    console.error('[Inventory] List active promo error:', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // POST /api/promo-codes  (ADMIN, MANAGER)
 // Promotions are a commercial decision, not a system one: a manager running a
 // shoulder-season rate should not need an administrator to type it in. MGMT

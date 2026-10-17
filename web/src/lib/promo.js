@@ -51,6 +51,24 @@ export function usePromo() {
   return { code, setCode, state, applied };
 }
 
+/** The codes the desk can pick from right now (active and in their date window). */
+export function usePromoOptions() {
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get('/api/promo-codes/active')
+      .then(({ data }) => {
+        if (!cancelled && Array.isArray(data)) setOptions(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return options;
+}
+
 /** One line of feedback under the promo input: {text, color} or null. */
 export function promoHint(state) {
   switch (state.status) {

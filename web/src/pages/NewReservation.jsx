@@ -5,7 +5,8 @@ import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso, pesosToCents, afterPromoCents } from '../lib/money';
-import { usePromo, promoHint } from '../lib/promo';
+import { usePromo } from '../lib/promo';
+import PromoPicker from '../components/PromoPicker';
 import Icon from '../components/Icon';
 import Autocomplete from '../components/Autocomplete';
 
@@ -31,7 +32,6 @@ export default function NewReservation() {
   const [checkOut, setCheckOut] = useState('');
   // Validated as it is typed so the summary can show the discount before saving.
   const { code: promoCode, setCode: setPromoCode, state: promoState, applied: promo } = usePromo();
-  const promoNote = promoHint(promoState);
   // Free-text guest preference, no cost — see Stay details in Step 2.
   // Standardized preferences (extra pillows, etc.) live on the guest's own
   // profile now instead of being re-entered per booking — see Guests.jsx.
@@ -573,10 +573,7 @@ export default function NewReservation() {
               </div>
               <div>
                 <label>Promo code</label>
-                <input value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
-                {promoNote && (
-                  <div style={{ fontSize: 12, marginTop: 4, color: promoNote.color }}>{promoNote.text}</div>
-                )}
+                <PromoPicker code={promoCode} setCode={setPromoCode} state={promoState} />
               </div>
               {/* `ed-check` gives this the same small box and inline label as
                   every other field-row checkbox (e.g. Amenities.jsx's
@@ -640,7 +637,7 @@ export default function NewReservation() {
                         <select
                           value={p.assignedRoomId || ''}
                           onChange={(e) => setRoom(i, e.target.value)}
-                          style={{ width: 140 }}
+                          style={{ width: 'clamp(140px, 26%, 280px)' }}
                         >
                           <option value="">Auto-assign (first free room)</option>
                           {/* Only rooms actually free for [checkIn, checkOut) —

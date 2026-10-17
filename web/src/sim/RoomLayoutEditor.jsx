@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, ContactShadows, RoundedBox, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
@@ -1933,6 +1934,7 @@ function useThumb(key) {
 // Counts frames, then grabs the pixels. The delay matters: `Bounds fit` needs a
 // few frames to frame the object, and a .glb may still be downloading — a
 // capture taken too early is a transparent square.
+const THUMB_PX = 128;
 function ThumbCapture({ itemKey, onCapture }) {
   const { gl } = useThree();
   const frames = useRef(0);
@@ -1947,7 +1949,20 @@ function ThumbCapture({ itemKey, onCapture }) {
     frames.current = 0;
     let url = null;
     try {
-      url = gl.domElement.toDataURL('image/png');
+      // Re-drawn into a fixed square, so a thumbnail is a square whatever shape
+      // the hidden canvas measured as. On iPad Safari that canvas came out tall
+      // and thin (nested CSS zoom), and the raw capture stretched each card into
+      // a strip. `contain` keeps the model's own proportions inside the square.
+      const src = gl.domElement;
+      const out = document.createElement('canvas');
+      out.width = THUMB_PX;
+      out.height = THUMB_PX;
+      const ctx = out.getContext('2d');
+      const scale = Math.min(THUMB_PX / src.width, THUMB_PX / src.height);
+      const w = src.width * scale;
+      const h = src.height * scale;
+      ctx.drawImage(src, (THUMB_PX - w) / 2, (THUMB_PX - h) / 2, w, h);
+      url = out.toDataURL('image/png');
     } catch {
       // Tainted or context-lost — give up on this one rather than retry forever.
       onCapture(itemKey, null);
@@ -1983,7 +1998,11 @@ function ThumbForge({ keys }) {
   const item = kind === 'model' ? { model: name } : { type: name };
   // Changes on every retry, so a failed capture rebuilds its scene.
   const sceneKey = `${next}#${thumbFails.get(next) || 0}`;
-  return (
+  // Portalled to <body>, outside the editor panel. The panel carries its own
+  // CSS zoom on tablets, and nesting that inside the page zoom made the canvas
+  // measure at the wrong aspect on iPad Safari. Out here only the page-level
+  // zoom applies, the same as the editor's main viewport, which renders fine.
+  return createPortal(
     // Inside the viewport but invisible, NOT parked at left:-9999. iOS/iPadOS
     // Safari does not draw a canvas that lies wholly off-screen, so every
     // capture came back blank on a tablet and the cards never left their glyph.
@@ -2026,7 +2045,8 @@ function ThumbForge({ keys }) {
           <ThumbCapture key={sceneKey} itemKey={next} onCapture={publishThumb} />
         </Canvas>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

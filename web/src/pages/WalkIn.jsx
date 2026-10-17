@@ -5,7 +5,8 @@ import { SkeletonTableBlock } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { pesosToCents, centsToPesos, formatPeso, afterPromoCents } from '../lib/money';
-import { usePromo, promoHint } from '../lib/promo';
+import { usePromo } from '../lib/promo';
+import PromoPicker from '../components/PromoPicker';
 import Autocomplete from '../components/Autocomplete';
 import Icon from '../components/Icon';
 import { paymentMethodGroups } from '../lib/paymentMethods';
@@ -124,7 +125,6 @@ export default function WalkIn() {
 
   const [specialRequests, setSpecialRequests] = useState('');
   const { code: promoCode, setCode: setPromoCode, state: promoState, applied: promo } = usePromo();
-  const promoNote = promoHint(promoState);
   const [otherSpecialRequest, setOtherSpecialRequest] = useState('');
 
   const [companyName, setCompanyName] = useState('');
@@ -558,10 +558,7 @@ export default function WalkIn() {
             </div>
             <div>
               <label>Promo code</label>
-              <input value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
-              {promoNote && (
-                <div style={{ fontSize: 12, marginTop: 4, color: promoNote.color }}>{promoNote.text}</div>
-              )}
+              <PromoPicker code={promoCode} setCode={setPromoCode} state={promoState} />
             </div>
           </div>
 
