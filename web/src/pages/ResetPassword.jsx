@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
 import AuthShell from '../components/AuthShell';
@@ -23,28 +23,31 @@ export default function ResetPassword() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
-  // null while we haven't asked yet, then true/false. A used or expired link
-  // otherwise re-showed this exact form on every visit — nothing checked the
-  // token until SUBMIT — so clicking an old email link looked like it might
-  // still work right up until you typed a password and got told no.
+  // null while we haven't asked yet, then true/false. Opening the link SPENDS it:
+  // the server swaps the emailed token for a one-time secret that lives only in
+  // this component's memory, so a refresh, a second tab or a forwarded copy of
+  // the URL all come back "expired". That is deliberate — see /reset-password/open.
   const [linkValid, setLinkValid] = useState(token ? null : false);
+  const [session, setSession] = useState('');
+  // Effects run twice under StrictMode in dev, and a second open would find the
+  // link already spent and throw away the secret the first one returned. The ref
+  // makes this a strictly once-per-page-load call, and nothing here is cancelled
+  // on cleanup for the same reason: the first response is the only one we get.
+  const opened = useRef(false);
 
   useEffect(() => {
-    if (!token) return undefined;
-    let cancelled = false;
+    if (!token || opened.current) return undefined;
+    opened.current = true;
     api
-      .get('/api/auth/reset-password/status', { params: { token } })
+      .post('/api/auth/reset-password/open', { token })
       .then((res) => {
-        if (!cancelled) setLinkValid(Boolean(res.data?.valid));
+        setSession(res.data?.session || '');
+        setLinkValid(Boolean(res.data?.valid));
       })
-      .catch(() => {
-        // A network hiccup here should not block someone from trying to
-        // submit — SUBMIT still re-checks server-side either way.
-        if (!cancelled) setLinkValid(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+      // The link may or may not have been spent if this failed, and there is no
+      // secret to submit with either way, so it is a dead end: say so.
+      .catch(() => setLinkValid(false));
+    return undefined;
   }, [token]);
 
   async function onSubmit(e) {
@@ -56,7 +59,7 @@ export default function ResetPassword() {
     if (pw !== confirm) return setError('The two passwords do not match.');
     setLoading(true);
     try {
-      await api.post('/api/auth/reset-password', { token, newPassword: pw });
+      await api.post('/api/auth/reset-password', { token: session, newPassword: pw });
       setDone(true);
       // Straight to sign-in rather than logging them in from here: the reset
       // deliberately mints no session, so the new password is proved once by
@@ -77,7 +80,7 @@ export default function ResetPassword() {
     return (
       <AuthShell title="Link incomplete" lede="This reset link is missing its token, so it cannot be used.">
         <p className="login-alt">
-          Links expire after 30 minutes and work once. <Link to="/forgot-password">Request a new one</Link>.
+          Links expire after 5 minutes and stop working as soon as they are opened. <Link to="/forgot-password">Request a new one</Link>.
         </p>
         <p className="login-alt">
           <Link to="/login">Back to sign in</Link>
@@ -109,7 +112,7 @@ export default function ResetPassword() {
     return (
       <AuthShell title="Link expired" lede="This reset link has already been used or has expired.">
         <p className="login-alt">
-          Links expire after 30 minutes and work once. <Link to="/forgot-password">Request a new one</Link>.
+          Links expire after 5 minutes and stop working as soon as they are opened. <Link to="/forgot-password">Request a new one</Link>.
         </p>
         <p className="login-alt">
           <Link to="/login">Back to sign in</Link>
@@ -121,7 +124,7 @@ export default function ResetPassword() {
   return (
     <AuthShell
       title="Choose a new password"
-      lede="At least 8 characters. This link works once and expires 30 minutes after it was sent."
+      lede="At least 8 characters. This link was used up when you opened it and expires 5 minutes after it was sent, so finish now."
       onSubmit={onSubmit}
     >
       <label className="login-label" htmlFor="rp-pw">
