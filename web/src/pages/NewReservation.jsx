@@ -683,6 +683,28 @@ export default function NewReservation() {
                         </button>
                       </div>
                     ))}
+                    {promo && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          paddingTop: 8,
+                          borderTop: '1px solid var(--border)',
+                          color: 'var(--text-success)',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <span style={{ flex: 1 }}>
+                            Promo {promo.code} (−{promo.percentOff}%)
+                          </span>
+                          <span>−{formatPeso(totals.promoDiscountCents)}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, color: 'var(--text)' }}>
+                          <span style={{ flex: 1 }}>Estimated total after promo (incl. taxes)</span>
+                          <span>{formatPeso(totals.grandTotalCents)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <table>
