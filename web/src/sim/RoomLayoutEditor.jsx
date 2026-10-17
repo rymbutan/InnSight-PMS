@@ -1100,11 +1100,21 @@ export default function RoomLayoutEditor({
             background: 'var(--panel)',
             display: leftOpen ? 'flex' : 'none',
             flexDirection: 'column',
+            // The palette plus the Room fields are taller than an iPad panel, so
+            // the panel itself scrolls (it used to clip everything below the
+            // palette). The title bar stays pinned so Close/Hide are always reachable.
+            overflowY: 'auto',
+            minHeight: 0,
           }}
         >
           <div
             data-tour="g-layout-editor-title"
             style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 2,
+              flex: 'none',
+              background: 'var(--panel)',
               padding: '10px 12px',
               fontWeight: 700,
               borderBottom: '1px solid var(--border)',
@@ -1140,7 +1150,7 @@ export default function RoomLayoutEditor({
               </button>
             </span>
           </div>
-          <div style={{ padding: 8, borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: 8, borderBottom: '1px solid var(--border)', flex: 'none' }}>
             {/* The catalogue as a browsable grid rather than a dropdown. Same
               `addKey` values (`model:x` / `type:x`), same `setAddKey`, same
               `addAsset` — a card just writes the value the <select> used to. */}
@@ -1223,7 +1233,7 @@ export default function RoomLayoutEditor({
             field sits flush against the panel's bottom edge, which reads as
             content that has been cut off rather than content that has ended. */}
           <div
-            style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)' }}
+            style={{ padding: '8px 8px 20px', borderTop: '1px solid var(--border)', flex: 'none' }}
             data-tour="g-layout-editor-room"
             onBlur={endEdit}
           >

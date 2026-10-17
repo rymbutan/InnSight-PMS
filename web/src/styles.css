@@ -11510,46 +11510,11 @@ html[data-theme='dark'] .chat-launcher-pop {
    ========================================================================== */
 
 /* ── The awkward middle: iPad landscape ──────────────────────────────────────
-   The rail switches to a drawer below 1024px, so a 768px iPad in portrait was
-   already handled. Landscape is exactly 1024 - one pixel outside that - so it
-   got the full 264px rail AND the page, leaving about 740px of content on a
-   screen with no mouse. Between 1024 and 1180 the rail starts collapsed to its
-   icon strip instead: everything stays reachable, the content gets its width
-   back, and the toggle still expands it for anyone who wants labels. */
-@media (min-width: 1024px) and (max-width: 1180px) {
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) {
-    width: 76px;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link-label,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-text,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user-out {
-    display: none;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-link {
-    justify-content: center;
-    gap: 0;
-    padding: 0;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-nav {
-    padding-left: 8px;
-    padding-right: 8px;
-    scrollbar-gutter: stable both-edges;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-head,
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-user {
-    justify-content: center;
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-  .cb-sidebar:not(.cb-sidebar-drawer):not(.side-collapsed) .side-group-label {
-    height: 1px;
-    margin: 0 7px 8px;
-    padding: 0;
-    background: var(--border);
-    color: transparent;
-    overflow: hidden;
-  }
-}
+   The rail switches to a drawer below 1024px; landscape is exactly 1024, one
+   pixel outside that. The rail starts as its icon strip at these widths — but
+   that default is set in Layout.jsx (tabletRailDefault), NOT here. A CSS rule
+   that forced the strip whenever the rail was not `.side-collapsed` overrode the
+   toggle, so tapping it changed nothing and the rail could not be expanded. */
 
 /* ── Tablet layout, portrait and landscape ────────────────────────────────── */
 @media (min-width: 700px) and (max-width: 1180px) {
@@ -12223,5 +12188,93 @@ html[data-theme='dark'] .chat-launcher-pop {
   .ed-panel .tool-btn--text {
     width: auto;
     padding: 0 12px;
+  }
+}
+
+/* iOS/iPadOS draws date and time fields with its own control: it ignores the
+   shared field height, centres the value and sits a few pixels off the selects
+   and inputs beside it (the Check-In / Check-Out row). Dropping the native
+   appearance on touch devices lets the normal field sizing apply, and the value
+   is left-aligned like every other field. */
+@media (pointer: coarse) {
+  input[type='date'],
+  input[type='datetime-local'],
+  input[type='time'],
+  input[type='month'] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    margin: 0;
+    min-height: var(--control-h);
+    line-height: normal;
+    text-align: left;
+    padding: 8px 10px;
+  }
+  input[type='date']::-webkit-date-and-time-value,
+  input[type='datetime-local']::-webkit-date-and-time-value,
+  input[type='time']::-webkit-date-and-time-value,
+  input[type='month']::-webkit-date-and-time-value {
+    text-align: left;
+    min-height: 1.2em;
+    margin: 0;
+  }
+}
+
+/* iPad / touch hardening.
+   - Safari inflates text in landscape unless told not to.
+   - Safari zooms the WHOLE page when a field with a computed font-size under
+     16px is focused, and does not zoom back out: tapping Search, a date or any
+     form field left the app magnified and shifted. Fields are 13px by default,
+     so touch devices get 16px.
+   - Double-tap on empty space zooms the page; `manipulation` keeps pinch zoom
+     but drops double-tap zoom and the click delay.
+   - The grey tap flash on every button is browser chrome, not app styling. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (pointer: coarse) {
+  html {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Narrow iPad windows (split view, Slide Over, a resized Safari/Chrome window).
+   Found by rendering every page at iPad widths: clean at 744px and wider, but
+   at ~640px the touch rule above makes seven topbar icons 44px each, which
+   leaves the search field a sliver that runs UNDER the "+" button.
+   - Search keeps a floor width, and the bar gives the room back by trimming the
+     icon buttons to 40px, closing their gaps and dropping "Back" to its arrow.
+   - From 641px the topbar has the room, so nothing changes there. */
+@media (pointer: coarse) and (max-width: 760px) {
+  .cb-search-wrap {
+    min-width: 120px;
+  }
+  .cb-icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .cb-actions,
+  .cb-util-group,
+  .cb-comms {
+    gap: 0;
+  }
+  .cb-back {
+    font-size: 0;
+    gap: 0;
+  }
+}
+/* The mobile tab bar (z-index 130, pinned to the bottom edge) covers the chat
+   launcher (z-index 90, also at bottom: 0): the two overlapped and the Chat
+   button was unreachable. Below the tab bar's breakpoint the dock sits above it. */
+@media (max-width: 640px) {
+  .chat-dock {
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 }

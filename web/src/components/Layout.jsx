@@ -39,6 +39,19 @@ import CATALOGUE from '../lib/navSections.json';
 const NAV_SECTIONS = CATALOGUE.sections;
 
 const COLLAPSE_KEY = 'innsight_sidebar_collapsed';
+// The rail's remembered state, written ONLY when someone toggles it. The old key
+// above was rewritten on every page load, so it recorded "expanded" for every
+// iPad whose rail merely LOOKED collapsed (see tabletRailDefault) and could not
+// tell a choice from a default. It is still read, but only for a saved "1".
+const COLLAPSE_KEY_V2 = 'innsight_sidebar_collapsed_v2';
+// iPad landscape (1024-1180px) is wide enough for the rail but leaves the page
+// cramped beside the full 264px one, so with no saved choice the rail starts as
+// the icon strip at these widths. This used to be done in CSS, which forced the
+// strip even AFTER the toggle was tapped: the toggle flipped state and nothing
+// changed on screen, so on an iPad the rail could not be expanded at all.
+function tabletRailDefault() {
+  return typeof window !== 'undefined' && window.innerWidth <= 1180;
+}
 
 // The record categories the search popover fans out to, beyond the
 // already-loaded `pages` match — kept as one object so a fresh keystroke can
@@ -166,21 +179,30 @@ export default function Layout() {
   // narrow on the first paint.
   const [collapsed, setCollapsed] = useState(() => {
     try {
-      return localStorage.getItem(COLLAPSE_KEY) === '1';
+      const saved = localStorage.getItem(COLLAPSE_KEY_V2);
+      if (saved !== null) return saved === '1';
+      return localStorage.getItem(COLLAPSE_KEY) === '1' || tabletRailDefault();
     } catch {
-      return false;
+      return tabletRailDefault();
     }
   });
+  // True once a person has toggled the rail, so only a real choice is persisted.
+  const railTouched = useRef(false);
+  function toggleRail() {
+    railTouched.current = true;
+    setCollapsed((c) => !c);
+  }
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   // Clicking the rail's own background toggles it; clicking the page collapses
   // an expanded rail but never re-expands it — reopening stays a deliberate act
   // on the toggle or on the rail itself.
   const railToggle = useBackgroundClick(() => {
     if (drawerOpen) return;
-    setCollapsed((c) => !c);
+    toggleRail();
   });
   const contentToggle = useBackgroundClick(() => {
     if (drawerOpen || collapsed) return;
+    railTouched.current = true;
     setCollapsed(true);
   });
 
@@ -319,8 +341,9 @@ export default function Layout() {
   }
 
   useEffect(() => {
+    if (!railTouched.current) return;
     try {
-      localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+      localStorage.setItem(COLLAPSE_KEY_V2, collapsed ? '1' : '0');
     } catch {
       /* private mode — the rail just forgets between sessions */
     }
@@ -619,7 +642,7 @@ export default function Layout() {
           className="side-collapse"
           onClick={() => {
             if (drawerOpen) setDrawerOpen(false);
-            else setCollapsed((c) => !c);
+            else toggleRail();
           }}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
