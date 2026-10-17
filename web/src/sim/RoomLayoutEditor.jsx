@@ -1091,6 +1091,7 @@ export default function RoomLayoutEditor({
           </div>
         )}
         <div
+          className="ed-panel"
           style={{
             width: 280,
             flex: 'none',
@@ -1455,6 +1456,7 @@ export default function RoomLayoutEditor({
 
         {/* ── RIGHT: inspector + scene lists ── */}
         <div
+          className="ed-panel"
           data-tour="g-layout-editor-inspector"
           style={{
             width: 232,
@@ -1900,7 +1902,20 @@ function EditorHelp({ onClose }) {
 // module-level, so reopening the editor is instant.
 const thumbCache = new Map(); // addKey -> data URL, or null when it cannot be drawn
 const thumbSubs = new Set();
+// A blank or failed capture is retried before it is cached as "cannot be
+// drawn": on iOS/iPadOS the first frames of a fresh WebGL context are often
+// empty, and a single permanent null left the card on its glyph for good.
+const thumbFails = new Map(); // addKey -> failed attempts so far
+const THUMB_MAX_ATTEMPTS = 3;
 function publishThumb(key, url) {
+  if (url == null) {
+    const n = (thumbFails.get(key) || 0) + 1;
+    thumbFails.set(key, n);
+    if (n < THUMB_MAX_ATTEMPTS) {
+      thumbSubs.forEach((fn) => fn()); // re-render the forge; it remounts this key's scene
+      return;
+    }
+  }
   thumbCache.set(key, url);
   thumbSubs.forEach((fn) => fn());
 }
@@ -1966,13 +1981,31 @@ function ThumbForge({ keys }) {
 
   const [kind, name] = next.split(':');
   const item = kind === 'model' ? { model: name } : { type: name };
+  // Changes on every retry, so a failed capture rebuilds its scene.
+  const sceneKey = `${next}#${thumbFails.get(next) || 0}`;
   return (
-    // Off-screen rather than `display: none` — a hidden canvas is never
-    // composited and WebGL will not render into it.
-    <div aria-hidden="true" style={{ position: 'fixed', left: -9999, top: 0, width: 96, height: 96 }}>
+    // Inside the viewport but invisible, NOT parked at left:-9999. iOS/iPadOS
+    // Safari does not draw a canvas that lies wholly off-screen, so every
+    // capture came back blank on a tablet and the cards never left their glyph.
+    // opacity ~0 + pointer-events none keeps it unseen and untouchable.
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'fixed',
+        left: 0,
+        top: 0,
+        width: 96,
+        height: 96,
+        opacity: 0.01,
+        pointerEvents: 'none',
+        zIndex: -1,
+      }}
+    >
       <div className="cv-unzoom">
+        {/* ONE Canvas for the whole queue — only the scene inside is keyed.
+            A Canvas per asset meant a new WebGL context per asset, which iOS
+            evicts almost immediately, blanking the capture. */}
         <Canvas
-          key={next}
           camera={{ position: [1.9, 1.5, 2.3], fov: 45 }}
           dpr={1}
           // Required for toDataURL: without it the drawing buffer is cleared
@@ -1983,14 +2016,14 @@ function ThumbForge({ keys }) {
           <ambientLight intensity={1.05} />
           <directionalLight position={[3, 5, 3]} intensity={1.15} />
           <hemisphereLight args={['#ffffff', '#444a55', 0.55]} />
-          <Suspense fallback={null}>
-            <GLBoundary key={next} fallback={null}>
+          <Suspense fallback={null} key={sceneKey}>
+            <GLBoundary key={sceneKey} fallback={null}>
               <Bounds fit clip margin={1.25}>
                 <FixtureBody item={item} />
               </Bounds>
             </GLBoundary>
           </Suspense>
-          <ThumbCapture itemKey={next} onCapture={publishThumb} />
+          <ThumbCapture key={sceneKey} itemKey={next} onCapture={publishThumb} />
         </Canvas>
       </div>
     </div>
