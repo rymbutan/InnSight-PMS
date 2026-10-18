@@ -265,6 +265,7 @@ router.get('/reservations/available-rooms', requireRole(...STAFF), async (req, r
     const ids = await freeRoomIds({
       inventory,
       prisma,
+      stayClient,
       roomTypeCode,
       checkIn: ci,
       checkOut: co,
@@ -376,7 +377,7 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
     // it wasn't auto-assign, it was the explicit-pick path skipping validation
     // entirely, most reachable through the wizard's per-pick dropdown while its
     // own availability fetch was still in flight.
-    if (requestedRoomId && !(await isRoomFree({ inventory, prisma, roomTypeCode, checkIn: ci, checkOut: co, roomId: requestedRoomId }))) {
+    if (requestedRoomId && !(await isRoomFree({ inventory, prisma, stayClient, roomTypeCode, checkIn: ci, checkOut: co, roomId: requestedRoomId }))) {
       return res.status(409).json({ error: 'That room is no longer available for the selected dates.' });
     }
 
@@ -468,6 +469,7 @@ router.post('/reservations', requireRole(...STAFF), async (req, res) => {
           (await pickAssignableRoom({
             inventory,
             prisma,
+            stayClient,
             roomTypeCode,
             checkIn: ci,
             checkOut: co,
@@ -765,6 +767,7 @@ router.patch('/reservations/:id', requireRole(...STAFF), async (req, res) => {
         const free = await isRoomFree({
           inventory,
           prisma,
+          stayClient,
           roomTypeCode: before.roomTypeCode,
           checkIn: data.checkIn || before.checkIn,
           checkOut: data.checkOut || before.checkOut,
