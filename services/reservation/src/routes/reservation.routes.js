@@ -1350,7 +1350,7 @@ router.post(
       const updated = await prisma.reservation.update({
         where: { id: r.id },
         data: {
-          depositRefundedCents: BigInt(refundedCents + refundCents),
+          depositRefundedCents: BigInt(Number(r.depositRefundedCents || 0) + refundCents),
           depositRefundedAt: new Date(),
           depositRefundedBy: req.user?.sub,
           depositRefundReason: reason || null,
