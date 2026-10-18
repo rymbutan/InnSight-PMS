@@ -32,7 +32,14 @@ function makeStayClient({ name, baseUrl = STAY_URL }) {
     return call(`${baseUrl}/api/stays?guestId=${encodeURIComponent(guestId)}&status=IN_HOUSE`);
   }
 
-  return { inHouseStaysForGuest };
+  // Every stay currently in a room, whoever the guest is. A walk-in has no
+  // Reservation row, so this is the only way for room assignment to learn that
+  // a physical room is occupied right now (see lib/roomAssignment.js).
+  async function inHouseStays() {
+    return call(`${baseUrl}/api/stays?status=IN_HOUSE`);
+  }
+
+  return { inHouseStaysForGuest, inHouseStays };
 }
 
 module.exports = { makeStayClient };

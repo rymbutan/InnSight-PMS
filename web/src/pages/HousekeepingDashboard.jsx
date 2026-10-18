@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
-import { Skeleton, SkeletonRows } from '../components/Skeleton';
+import { SkeletonRows } from '../components/Skeleton';
 import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useLiveRefresh, channels } from '../lib/useLiveEvents';
