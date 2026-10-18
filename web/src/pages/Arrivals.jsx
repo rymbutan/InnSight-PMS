@@ -13,6 +13,7 @@ import { downloadAuthed } from '../lib/download';
 import Avatar from '../components/Avatar';
 import EmptyState from '../components/EmptyState';
 import StatusPill from '../components/StatusPill';
+import { overdueStays, overdueMs, overdueLabel } from '../lib/overstay';
 
 export default function Arrivals() {
   const navigate = useNavigate();
@@ -33,6 +34,14 @@ export default function Arrivals() {
   // never does date arithmetic on UTC-midnight reservation values.
   const [range, setRange] = useState('today');
   const [degraded, setDegraded] = useState(false);
+  // Ticks once a minute so a guest crosses into "overdue" while the page is open,
+  // without waiting for the next reload.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const overdue = overdueStays(inHouse, now);
 
   // `live` marks an SSE-triggered reload. Refresh in place rather than showing
   // the skeleton, so the list does not blank on every event from any module.
@@ -217,6 +226,35 @@ export default function Arrivals() {
         </div>
       </div>
 
+      {overdue.length > 0 && (
+        <div
+          className="panel"
+          role="alert"
+          data-testid="overdue-departures"
+          style={{
+            borderLeft: '4px solid var(--danger)',
+            background: 'var(--danger-soft)',
+            color: 'var(--text)',
+          }}
+        >
+          <h3 style={{ marginTop: 0, color: 'var(--danger-hover)' }}>
+            {overdue.length} guest{overdue.length === 1 ? ' is' : 's are'} past check-out time
+          </h3>
+          <p style={{ margin: '0 0 8px' }}>
+            These rooms are still occupied, so they cannot be given to the next arrival until the guest is
+            checked out or their stay is extended.
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {overdue.map(({ stay, label, overstay }) => (
+              <li key={stay.id}>
+                <strong>Room {stay.assignedRoomId}</strong> — {stay.guestName || 'Guest'} ·{' '}
+                <span style={{ fontWeight: overstay ? 700 : 400 }}>{label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="panel" data-tour="tour-process-arrivals">
         <div className="panel-head">
           <h3>Expected arrivals {loading && <span className="spinner" style={{ marginLeft: 8 }} />}</h3>
@@ -396,7 +434,15 @@ export default function Arrivals() {
                       <span className="muted">—</span>
                     )}
                   </td>
-                  <td>{s.expectedCheckOut ? new Date(s.expectedCheckOut).toLocaleDateString() : '—'}</td>
+                  <td>
+                    {s.expectedCheckOut ? new Date(s.expectedCheckOut).toLocaleDateString() : '—'}
+                    {overdueMs(s, now) !== null && (
+                      <>
+                        {' '}
+                        <span className="badge cancelled">{overdueLabel(overdueMs(s, now))}</span>
+                      </>
+                    )}
+                  </td>
                   <td className="t-actions">
                     <button className="small" onClick={() => checkOut(s.id, s.guestName)}>
                       Check-out
