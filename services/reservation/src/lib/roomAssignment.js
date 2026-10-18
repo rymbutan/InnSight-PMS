@@ -40,6 +40,49 @@
 
 const { overlappingRoomsWhere } = require('./listQuery');
 
+// A stay with no known departure (a walk-in that never gave one, or a guest who
+// has overstayed their expected check-out) is assumed to still be in the room
+// for this long. Long enough to keep today's and tomorrow's arrivals out of a
+// room somebody is standing in; short enough that one forgotten check-out does
+// not hide the room from bookings weeks away.
+const OPEN_ENDED_STAY_MS = 24 * 3600000;
+
+/**
+ * Which of `roomIds` is physically occupied by an in-house STAY during
+ * [checkIn, checkOut).
+ *
+ * Room.status cannot answer this (it is deliberately ignored — see the header)
+ * and the Reservation table cannot either: a walk-in has no reservation row, so
+ * nothing there records that the room is taken. The Stay does.
+ *
+ * A stay backed by a reservation and carrying no expected check-out is skipped:
+ * its booking already holds the room for exactly the nights it is paid for, and
+ * counting it again here would block the room for the next arrival on the day
+ * the guest is due to leave.
+ *
+ * @param {object[]} stays   IN_HOUSE stays (assignedRoomId, actualCheckInAt, expectedCheckOut, reservationId)
+ * @param {string[]} roomIds rooms under consideration
+ * @param {string|Date} checkIn
+ * @param {string|Date} checkOut
+ * @param {number} [now]
+ * @returns {Set<string>} room ids that are occupied over the window
+ */
+function roomsBlockedByStays(stays, roomIds, checkIn, checkOut, now = Date.now()) {
+  const ci = new Date(checkIn).getTime();
+  const co = new Date(checkOut).getTime();
+  const wanted = new Set(roomIds);
+  const blocked = new Set();
+  for (const s of stays || []) {
+    if (!s || !wanted.has(s.assignedRoomId)) continue;
+    const expected = s.expectedCheckOut ? new Date(s.expectedCheckOut).getTime() : null;
+    if (expected === null && s.reservationId) continue;
+    const start = s.actualCheckInAt ? new Date(s.actualCheckInAt).getTime() : 0;
+    const end = expected !== null && expected > now ? expected : now + OPEN_ENDED_STAY_MS;
+    if (start < co && end > ci) blocked.add(s.assignedRoomId);
+  }
+  return blocked;
+}
+
 // How many times a create may re-pick a room after losing the exclusion
 // constraint race to a concurrent booking. Two other bookings taking our first
 // two choices in the same instant is already implausible; a third means
@@ -71,6 +114,10 @@ const MAX_ASSIGN_ATTEMPTS = 3;
  * @param {string|Date} args.checkOut
  * @param {string} [args.excludeReservationId] ignore this booking's own row (moves)
  * @param {string[]} [args.excludeRoomIds]     rooms to leave out regardless
+ * @param {object} [args.stayClient]           stay client (needs inHouseStays); when given,
+ *   rooms a guest is physically occupying over the window are left out too. A
+ *   stay-service outage is logged and skipped — the booking path must not be
+ *   refused for it, and check-in re-verifies the room against the Stay table.
  * @returns {Promise<string[]>} room ids, inventory's preference order — empty
  *   (not thrown) if inventory could not be reached, so a caller populating a
  *   picker shows "none available" rather than crashing the page.
@@ -83,6 +130,7 @@ async function freeRoomIds({
   checkOut,
   excludeReservationId,
   excludeRoomIds = [],
+  stayClient,
 }) {
   let candidates;
   try {
@@ -103,6 +151,18 @@ async function freeRoomIds({
     select: { assignedRoomId: true },
   });
   const busy = new Set(taken.map((r) => r.assignedRoomId));
+
+  // Rooms a guest is standing in right now. The overlap query above only sees
+  // reservations, so a walk-in — or an overstay — was invisible to it, and the
+  // room was handed to a booking whose check-in then failed.
+  if (stayClient) {
+    try {
+      const stays = await stayClient.inHouseStays();
+      for (const id of roomsBlockedByStays(stays, ids, checkIn, checkOut)) busy.add(id);
+    } catch (err) {
+      console.error(`[Reservation] Could not check in-house stays for room assignment: ${err.message}`);
+    }
+  }
   return ids.filter((id) => !busy.has(id));
 }
 
@@ -159,4 +219,11 @@ function normaliseRoomId(value) {
   return trimmed === '' ? null : trimmed;
 }
 
-module.exports = { pickAssignableRoom, freeRoomIds, isRoomFree, normaliseRoomId, MAX_ASSIGN_ATTEMPTS };
+module.exports = {
+  pickAssignableRoom,
+  freeRoomIds,
+  isRoomFree,
+  normaliseRoomId,
+  roomsBlockedByStays,
+  MAX_ASSIGN_ATTEMPTS,
+};

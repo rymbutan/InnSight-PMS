@@ -102,7 +102,10 @@ async function validateRoomAssignment(assignedRoomId, excludeStayId) {
     return {
       ok: false,
       status: 409,
-      error: `Room ${room.number} is ${String(room.status).toLowerCase().replace(/_/g, ' ')} and cannot be occupied.`,
+      error:
+        room.status === 'OCCUPIED'
+          ? `Room ${room.number} is currently occupied. Check the current guest out or choose another room.`
+          : `Room ${room.number} is ${String(room.status).toLowerCase().replace(/_/g, ' ')} and cannot be occupied.`,
     };
   }
 
