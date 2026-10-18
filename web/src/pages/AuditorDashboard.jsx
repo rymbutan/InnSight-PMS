@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
-import { Skeleton, SkeletonRows } from '../components/Skeleton';
+import { SkeletonRows } from '../components/Skeleton';
 import { useToast, errMsg } from '../components/Toast';
 import { formatPeso } from '../lib/money';
 import { labelize } from '../lib/labels';

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
-import { useAuth } from '../auth';
 import { useToast, errMsg } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { formatPeso, pesosToCents, afterPromoCents } from '../lib/money';
@@ -22,8 +21,6 @@ export default function NewReservation() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
-  const { hasRole } = useAuth();
-  const isAdmin = hasRole('ADMIN', 'MANAGER');
   const [step, setStep] = useState(1);
 
   // Step 1

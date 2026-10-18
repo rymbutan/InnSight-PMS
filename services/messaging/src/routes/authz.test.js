@@ -51,6 +51,7 @@ const settingsRouter = require('./settings.routes');
 // Deliberately open to any authenticated caller, per the reasoning above.
 const OPEN = [
   'GET /messages/contacts', // your own contact list; excludes you, reads req.user.sub
+  'GET /messages/search', // only rows where req.user.sub is sender or recipient
   'GET /messages/unread-count', // counts only messages addressed to req.user.sub
   'GET /messages/with/:userId', // one side of the pair is always req.user.sub
   'POST /messages', // senderId is req.user.sub, never client-supplied
