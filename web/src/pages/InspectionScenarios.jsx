@@ -82,7 +82,7 @@ export default function InspectionScenarios({ showTitle = true }) {
         </div>
       )}
 
-      <div className="panel" data-tour="g-inspection-scenarios-list">
+      <div className="panel se-list-panel" data-tour="g-inspection-scenarios-list">
         <div className="panel-head">
           <h3 data-tour="g-inspection-scenarios-title">Your scenarios</h3>
           {/* This was "Open scenario editor". Opening the editor with nothing

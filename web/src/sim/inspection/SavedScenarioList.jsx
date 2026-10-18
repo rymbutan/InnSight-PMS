@@ -31,7 +31,7 @@ function ScenarioGrid({ scenarios, loaded, editingId, onEdit, onActivate, onDisa
     );
   }
   return (
-    <div className="tr-launch-grid">
+    <div className="tr-launch-grid se-card-grid">
       {scenarios.map((s) => {
         const open = editingId === s.id;
         const active = s.status === STATUS.ACTIVE;
