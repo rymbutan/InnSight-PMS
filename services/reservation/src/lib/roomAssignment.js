@@ -188,8 +188,8 @@ async function pickAssignableRoom(args) {
  * into the database with no server-side check at all beyond the exclusion
  * constraint, which only rejects a room already held by another RESERVATION.
  * It has no idea a walk-in (no reservation row at all) is sitting in that room
- * right now — inventory's OCCUPIED status is what carries that fact, and
- * `freeRoomIds` already reads it. Reusing it here, rather than trusting the
+ * right now — Room.status is deliberately not filtered on (see the header), so
+ * `freeRoomIds` asks the stay service for in-house stays instead. Reusing it here, rather than trusting the
  * client, is what makes an explicit pick and an auto-assign agree on what
  * "free" means.
  *
