@@ -500,7 +500,9 @@ button.danger {
   background: var(--surface);
   border: 1px solid transparent;
   border-radius: 0 0 var(--card-radius) var(--card-radius);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 16px rgba(15, 23, 42, 0.05);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 6px 16px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   gap: 16px;
@@ -6133,6 +6135,31 @@ html[data-theme='dark'] .skel {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* Four actions (Activate, Disable, Edit, Delete) have to share one row. The
+   shared .tr-launch-grid floors a card at 280px, which fits three of them and
+   drops the trash button onto a second line by itself. This list gets a wider
+   floor; the training launch cards that share the class keep theirs. Compound
+   selectors, because .tr-launch-grid and .tr-launch-foot are declared later in
+   the file and would win a tie. Wrapping stays on as the fallback for a
+   container narrower than the floor. */
+.tr-launch-grid.se-card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+}
+.tr-launch-foot.se-card-foot {
+  gap: 6px;
+}
+.se-card-foot button {
+  white-space: nowrap;
+}
+
+/* The last row of cards ended 20px from the panel's edge, the same as the title
+   sits from the top, so the grid read as pressed against the bottom. Extra
+   room below only; compound selector because .panel is declared earlier at the
+   same weight. */
+.panel.se-list-panel {
+  padding-bottom: 40px;
 }
 
 /* One line for the whole add-layout form: name/type takes what is left, the two
